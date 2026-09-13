@@ -224,7 +224,7 @@ const qqGroup = computed(() => store.settings?.qqGroupNumber?.trim() || QQ_GROUP
 /** 更新下载任务进度（从下载中心任务列表取，含速度） */
 const updateTask = computed(() => store.tasks.find((t) => t.id === updateModal.taskId))
 const updatePercent = computed(() => updateTask.value?.progress ?? 0)
-const updateSpeedText = computed(() => (updateTask.value?.speed ? formatSpeed(updateTask.value.speed) + '/s' : ''))
+const updateSpeedText = computed(() => (updateTask.value?.speed ? formatSpeed(updateTask.value.speed) : ''))
 
 function openUpdateModal(release: ReleaseInfo, rollback = false) {
   updateModal.release = release
@@ -1453,7 +1453,7 @@ onUnmounted(() => {
                 <div data-ui="App:a1b294f53a4e" class="dl-sub muted">
                   <template v-if="t.status === 'running'">
                     {{ taskSubText(t) }} · {{ t.indeterminate ? '正在计算总量' : '总进度 ' + taskProgressPercent(t) + '%' }}{{ taskEtaText(t.etaSeconds) }}
-                    <span v-if="t.speed && t.speed > 0"> · {{ formatSpeed(t.speed) }}/s</span>
+                    <span v-if="t.speed && t.speed > 0"> · {{ formatSpeed(t.speed) }}</span>
                   </template>
                   <template v-else-if="t.status === 'paused'">已暂停 · {{ t.indeterminate ? '总量未知' : taskProgressPercent(t) + '%' }}</template>
                   <template v-else-if="t.status === 'cancelling'">正在停止网络与后台任务…</template>
