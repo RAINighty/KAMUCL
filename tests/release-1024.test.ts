@@ -60,7 +60,8 @@ test('fix-6: missing folder deadlock resolved — prompt card + remove works eve
 
 test('fix-7: builtin CurseForge API key wired as default (CF 下载)', () => {
   const c = read('src/main/core/community.ts')
-  assert.match(c, /CF_BUILTIN_KEY = '\$2a\$10\$m36VLjTaHEqxr/)
+  assert.match(c, /import \{ CF_BUILTIN_KEY \} from '\.\/curseforgeKey'/)
+  assert.match(read('src/main/core/curseforgeKey.ts'), /export const CF_BUILTIN_KEY = /)
   assert.match(c, /curseforgeApiKey\?\.trim\(\) \|\| CF_BUILTIN_KEY/)
   assert.match(c, /'x-api-key': ch\.key/)
 })

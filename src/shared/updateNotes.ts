@@ -8,6 +8,8 @@ export interface UpdateNote {
 
 /** 按版本倒序；latest 为当前版本 */
 export const updateNotes: UpdateNote[] = [
+  {"version":"1.0.75","date":"2026-09-13 19:06","changes":["优化：Forge / NeoForge 安装器按下载源设置使用国内镜像，取得 Maven 校验信息后使用独立连接分段下载，并显示稳定速度与预计时间","优化：整合包多文件下载限制单文件占用连接数，瞬时连接失败仅重试对应分片，切换来源及重试复用校验文件与断点","修复：CurseForge 直链下载补齐应用认证且不向镜像转发密钥；CDN 拒绝分段请求时回退普通下载并严格校验，避免把可用文件误判为 404","修复：CurseForge 整合包解析保留文件大小和 SHA1，恢复分段下载、准确进度及跨次导入缓存复用"]},
+
   { version: '1.0.74', date: '2026-09-13 14:27', changes: [
     '精简：Windows 便携 EXE 移除当前界面未使用的 WebGPU/DXC 编译组件，进一步降低下载及展开后的体积',
     '兼容：精简运行环境关闭依赖 DXC 的 WebGPU 和实验性 Graphite 渲染路径，继续使用现有 WebGL 皮肤与 GPU 合成；Mac 和完整开发运行环境保持原行为',
