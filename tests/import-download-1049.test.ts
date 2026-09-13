@@ -30,11 +30,13 @@ test('两版本并行安装共享库；取消一个不影响另一个，切换�
   api.saveSettings({gameDir:folder,activeFolder:folder,folders:[{path:folder,name:'game',isDefault:false},{path:shared,name:'shared',isDefault:true}],mirror:'official'})
   for(const id of ['a','b']){const dir=path.join(folder,'versions',id);fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,id+'.json'),JSON.stringify({id,libraries:[{name:'example:shared:1',downloads:{artifact:{path:'example/shared.jar',url:url+'/lib',sha1:sha(lib),size:lib.length}}}],downloads:{client:{url:url+'/'+id,sha1:sha(client),size:client.length}}}))}
   const ctrl=new AbortController(),events:string[]=[]
-  const first=api.installVersion('a',{},(e:any)=>{if(e.stage==='client')events.push('a')},ctrl.signal);const rejected=assert.rejects(first)
-  const second=api.installVersion('b',{},(e:any)=>{if(e.stage==='client')events.push('b')})
+  const first=api.installVersion('a',{},(e:any)=>{if(e.stage==='client'||e.parallelStages?.some((s:any)=>s.id==='client'&&s.state==='running'))events.push('a')},ctrl.signal);const rejected=assert.rejects(first)
+  const second=api.installVersion('b',{},(e:any)=>{if(e.stage==='client'||e.parallelStages?.some((s:any)=>s.id==='client'&&s.state==='running'))events.push('b')})
   api.saveSettings({activeFolder:other,folders:[{path:other,name:'other',isDefault:true}]})
   for(let n=0;n<100&&!['a','b'].every(x=>events.includes(x));n++)await wait(10)
   assert(events.includes('a')&&events.includes('b'),'两个客户端应同时开始下载')
+  // Client transfers now start before the shared library finishes; wait for its reusable commit.
+  for(let n=0;n<100&&!fs.existsSync(path.join(shared,'libraries/example/shared.jar'));n++)await wait(10)
   ctrl.abort();await rejected;await second
   assert.equal(libraryRequests,1);assert(fs.readFileSync(path.join(folder,'versions/b/b.jar')).equals(client));assert(fs.existsSync(path.join(shared,'libraries/example/shared.jar')));assert(!fs.existsSync(path.join(other,'libraries')));assert(!fs.existsSync(path.join(folder,'versions/b/.installing')))
  }finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));fs.rmSync(root,{recursive:true,force:true})}
