@@ -1453,6 +1453,7 @@ onUnmounted(() => {
                 <div data-ui="App:a1b294f53a4e" class="dl-sub muted">
                   <template v-if="t.status === 'running'">
                     {{ taskSubText(t) }} · {{ t.indeterminate ? '正在计算总量' : '总进度 ' + taskProgressPercent(t) + '%' }}{{ taskEtaText(t.etaSeconds) }}
+                    <span v-if="t.speed && t.speed > 0"> · {{ formatSpeed(t.speed) }}/s</span>
                   </template>
                   <template v-else-if="t.status === 'paused'">已暂停 · {{ t.indeterminate ? '总量未知' : taskProgressPercent(t) + '%' }}</template>
                   <template v-else-if="t.status === 'cancelling'">正在停止网络与后台任务…</template>
@@ -1464,6 +1465,16 @@ onUnmounted(() => {
                 </div>
                 <div data-ui="App:c299fc9739a0" v-if="t.status === 'running' || t.status === 'paused' || t.status === 'cancelling'" class="dl-bar" :class="{ 'is-indeterminate': t.indeterminate && t.status === 'running' }">
                   <div data-ui="App:21050ee2a501" class="dl-bar-fill" :style="{ width: t.indeterminate ? '35%' : taskProgressPercent(t) + '%' }"></div>
+                </div>
+                <div data-ui="download.parallel-stages" v-if="t.parallelStages?.length && (t.status === 'running' || t.status === 'paused')" class="dl-stages">
+                  <div v-for="lane in t.parallelStages" :key="lane.id" :data-ui="'download.stage.' + lane.id" class="dl-stage" :class="{ 'is-done': lane.state === 'done' }">
+                    <div class="dl-stage-heading">
+                      <span>{{ lane.label }}</span>
+                      <span class="muted">{{ lane.state === 'done' ? '已就绪' : lane.state === 'waiting' ? '准备中' : taskProgressPercent({ status: 'running', progress: lane.progress }) + '%' }}</span>
+                    </div>
+                    <div class="dl-stage-detail muted" :title="lane.text">{{ lane.text }}</div>
+                    <div class="dl-bar"><div class="dl-bar-fill" :style="{ width: taskProgressPercent({ status: lane.state === 'done' ? 'done' : 'running', progress: lane.progress }) + '%' }"></div></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2249,6 +2260,12 @@ onUnmounted(() => {
   background: linear-gradient(90deg, var(--accent-2), var(--accent));
   transition: width 0.3s ease;
 }
+.dl-stages { display: grid; gap: 10px; margin-top: 14px; }
+.dl-stage { min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--card-2); }
+.dl-stage-heading { display: flex; justify-content: space-between; gap: 8px; font-size: var(--text-xs); font-weight: 600; }
+.dl-stage-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); margin-top: 3px; }
+.dl-stage .dl-bar { height: 3px; margin-top: 6px; }
+.dl-stage.is-done .dl-stage-heading { color: var(--accent); }
 .dl-bar.is-indeterminate .dl-bar-fill {
   animation: dl-indeterminate 1.25s ease-in-out infinite;
 }

@@ -606,7 +606,17 @@ export interface SkinHistoryItem {
 export interface SkinHistoryEntry extends SkinHistoryItem {
   dataUrl: string
 }
+export interface ParallelStage {
+  id: string
+  label: string
+  text: string
+  progress: number
+  state: 'waiting' | 'running' | 'done'
+  speed?: number
+}
 export interface ProgressEvent {
+  /** Concurrent preparation lanes; absent once the task enters its final commit stage. */
+  parallelStages?: ParallelStage[]
   /** 版本安装任务的原始 Minecraft 版本；列表按任务独立展示进度。 */
   versionId?: string
   /** 当前阶段，如 'version-json' | 'client' | 'libraries' | 'assets' | 'java' | 'loader' */
