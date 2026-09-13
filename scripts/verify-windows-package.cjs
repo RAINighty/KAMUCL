@@ -45,10 +45,17 @@ const unpackedFiles = unpackedZip.getEntries().filter(e => !e.isDirectory)
 assert.equal(unpackedFiles.length, files.length, 'Unpacked fallback file count')
 for (const entry of unpackedFiles) assert.equal(hash(entry.getData()), files.find(f => f.path === entry.entryName)?.sha256, entry.entryName)
 assert.equal(JSON.parse(asar.extractFile(archive, 'package.json').toString()).version, version)
-// Compare all Electron/GPU/media/locale resources with the shipped 1.0.72 build.
-const previous = new Zip('release/KAMUCL-1.0.72-windows-x64.zip')
+// Only the two reviewed DXC DLLs may disappear; preserve every other runtime resource.
+const { OPTIONAL_DXC } = require('./prune-windows-runtime.cjs')
+const previous = new Zip('release/KAMUCL-1.0.73-windows-x64-unpacked.zip')
+for (const [name, expected] of Object.entries(OPTIONAL_DXC)) {
+  assert.equal(hash(previous.readFile(name)), expected, 'Unexpected baseline compiler: ' + name)
+  assert(!files.some(f => f.path === name), 'Optional compiler still shipped: ' + name)
+  for (const root of roots) assert(!fs.existsSync(path.join(root, name)), name)
+}
 for (const entry of previous.getEntries().filter(e => !e.isDirectory)) {
   if (entry.entryName.endsWith('.asar') || entry.entryName.endsWith('.exe')) continue
+  if (Object.hasOwn(OPTIONAL_DXC, entry.entryName)) continue
   assert.equal(hash(entry.getData()), files.find(f => f.path === entry.entryName)?.sha256, entry.entryName)
 }
 const names = asar.listPackage(archive).map(n => n.replaceAll('\\', '/').replace(/^\//, ''))
@@ -64,8 +71,8 @@ for (const required of ['out/main/modScanWorker.cjs', 'node_modules/koffi/src/ko
   'node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node',
   'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/LGPL-3.0.txt', 'licenses/koffi.txt']) assert(names.includes(required), required)
 const report = { version, portable, zipped, zipRoot, files, asarSHA256: hash(fs.readFileSync(archive)),
-  sizes: { previousExe: fs.statSync('release/KAMUCL-1.0.72.exe').size, exe: fs.statSync(packageFile).size,
-    previousZip: fs.statSync('release/KAMUCL-1.0.72-windows-x64.zip').size, zip: fs.statSync(zipFile).size,
+  sizes: { previousExe: fs.statSync('release/KAMUCL-1.0.73.exe').size, exe: fs.statSync(packageFile).size,
+    previousZip: fs.statSync('release/KAMUCL-1.0.73-windows-x64.zip').size, zip: fs.statSync(zipFile).size,
     unpackedZip: fs.statSync(unpackedFile).size }, complete: true }
 fs.writeFileSync(`out/windows-package-${version}.json`, JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report, null, 2))

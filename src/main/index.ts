@@ -1,5 +1,5 @@
 import { app, BrowserWindow, crashReporter, shell, ipcMain, net, protocol } from 'electron'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createStartupSplash } from './startupSplash'
 import { prepareStartupFrames } from './startupRendering'
@@ -26,6 +26,9 @@ import { startMemoryTrim } from './core/memTrim'
 import type { MemoryTrimController } from './core/memTrim'
 import { getRunningGamePids } from './core/launch'
 import { exitHistory, rememberExit } from './core/exitHistory'
+import { configureRuntimeGraphics } from './runtimeGraphics'
+
+configureRuntimeGraphics(app.commandLine, process.platform, dirname(process.execPath))
 
 const launcherExitRecord = rememberExit(() => {
   exitHistory().reconcile()

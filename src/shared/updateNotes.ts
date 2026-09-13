@@ -8,6 +8,11 @@ export interface UpdateNote {
 
 /** 按版本倒序；latest 为当前版本 */
 export const updateNotes: UpdateNote[] = [
+  { version: '1.0.74', date: '2026-09-13 14:27', changes: [
+    '精简：Windows 便携 EXE 移除当前界面未使用的 WebGPU/DXC 编译组件，进一步降低下载及展开后的体积',
+    '兼容：精简运行环境关闭依赖 DXC 的 WebGPU 和实验性 Graphite 渲染路径，继续使用现有 WebGL 皮肤与 GPU 合成；Mac 和完整开发运行环境保持原行为',
+    '保留：Electron 44.3.0 原生毛玻璃、窗口动效、3D 皮肤、视频音频、软件图形回退与离线运行组件'
+  ] },
   { version: '1.0.73', date: '2026-09-13 13:54', changes: [
     '精简：Windows 包排除运行时不使用的依赖开发文档、编译源码和头文件，保留原生模块与离线许可',
     '优化：便携 EXE 提高无损压缩的匹配长度，保持原有解码格式与解压内存上限',
