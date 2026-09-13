@@ -15,6 +15,9 @@ function verifyWindowsRuntime(appOutDir) {
   console.log(`Verified Windows ASAR: ${fs.statSync(archive).size} bytes, ${names.length} entries`)
 }
 module.exports = context => {
-  if (context.electronPlatformName === 'win32') verifyWindowsRuntime(context.appOutDir)
+  if (context.electronPlatformName === 'win32') {
+    verifyWindowsRuntime(context.appOutDir)
+    require('./prune-windows-runtime.cjs').pruneWindowsRuntime(context)
+  }
 }
 module.exports.verifyWindowsRuntime = verifyWindowsRuntime
