@@ -85,6 +85,7 @@ import * as appearance from './core/appearanceAssets'
 import { applyNativeAppearance } from './nativeAppearance'
 import { carouselImages, MAX_CAROUSEL_IMAGES } from '../shared/appearancePolicy'
 import { pathIdentity } from './core/folderPaths'
+import { resolveContainedPath } from './core/security'
 import * as direct from './core/directConnect'
 import type { DirectHostRequest } from '../shared/directConnect'
 import { registerVoxlinkIpc } from './core/voxlink'
@@ -1040,9 +1041,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
     if (isVersionPath && parts.length === 3 && ['mods', 'resourcepacks', 'shaderpacks'].includes(parts[2])) {
       return resolveResourceDirectory(base, parts[1], parts[2])
     }
-    const dir = parts.length ? path.join(base, ...parts) : base
-    if (!path.resolve(dir).startsWith(path.resolve(base))) throw new Error('非法目录')
-    return dir
+    return resolveContainedPath(base, parts.length ? path.join(...parts) : '.')
   }
   const listDir = async (rel: string, folder?: string): Promise<FsEntry[]> => listResourceEntries(await safeDir(rel, folder))
   ipcMain.on('fs:drag', (event, rel: string, names: unknown, folder: string) => {
