@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * GitHub Release 发版脚本：
- * 1. 计算 release/KAMUCL-<v>.exe 与 zip 的 SHA256，生成 SHA256SUMS.txt
+ * 1. 计算 EXE、紧凑/兼容 ZIP 与源码包的 SHA256，生成 SHA256SUMS.txt
  * 2. 创建 tag + Release（body 取内置更新日志对应版本条目）
- * 3. 上传 3 个 Asset（exe / zip / SHA256SUMS.txt）
+ * 3. 上传并验证全部附件后公开 Release
  *
  * 认证优先级：GITHUB_TOKEN 环境变量 → gh CLI → git 凭据管理器（推送用的凭据）。
  * 用法：node scripts/release-github.cjs [--dry-run]
@@ -85,13 +85,15 @@ async function main() {
   const exe = path.join(root, 'release', `KAMUCL-${version}.exe`)
   const zip = path.join(root, 'release', `KAMUCL-${version}-windows-x64.zip`)
   const source = path.join(root, 'release', `KAMUCL-${version}-source.zip`)
-  for (const f of [exe, zip, source]) {
+  const unpacked = path.join(root, 'release', `KAMUCL-${version}-windows-x64-unpacked.zip`)
+  const packages = [exe, zip, unpacked, source]
+  for (const f of packages) {
     if (!fs.existsSync(f)) {
       console.error(`缺少构建产物：${f}（先运行打包）`)
       process.exit(1)
     }
   }
-  const sums = [`${sha256(exe)}  ${path.basename(exe)}`, `${sha256(zip)}  ${path.basename(zip)}`, `${sha256(source)}  ${path.basename(source)}`].join('\n') + '\n'
+  const sums = packages.map(file => `${sha256(file)}  ${path.basename(file)}`).join('\n') + '\n'
   const sumsFile = path.join(root, 'release', 'SHA256SUMS.txt')
   fs.writeFileSync(sumsFile, sums, 'utf-8')
   console.log('SHA256SUMS.txt:\n' + sums)
@@ -120,7 +122,7 @@ async function main() {
       tag_name: tag,
       name: `KAMUCL ${tag}`,
       body,
-      draft: false,
+      draft: true,
       prerelease: false
     })
     if (!res.ok) {
@@ -131,7 +133,7 @@ async function main() {
     console.log(`Release ${tag} 创建完成（id=${release.id}）`)
   }
 
-  for (const file of [exe, zip, source, sumsFile]) {
+  for (const file of [...packages, sumsFile]) {
     const name = path.basename(file)
     // 重传前先删同名人资产（幂等覆盖）
     const assets = await (await api('GET', `https://api.github.com/repos/${REPO}/releases/${release.id}/assets`, token)).json()
@@ -148,7 +150,20 @@ async function main() {
     }
     console.log(`  ✓ ${name}`)
   }
-  console.log(`\n发布完成：https://github.com/${REPO}/releases/tag/${tag}`)
+  const verified = await api('GET', `https://api.github.com/repos/${REPO}/releases/${release.id}/assets`, token)
+  if (!verified.ok) throw new Error(`无法核对远端附件：HTTP ${verified.status}`)
+  const assets = await verified.json()
+  for (const file of [...packages, sumsFile]) {
+    const asset = assets.find(a => a.name === path.basename(file))
+    if (!asset || asset.size !== fs.statSync(file).size || asset.digest !== `sha256:${sha256(file)}`) {
+      throw new Error('远端附件大小或 SHA256 不匹配：' + path.basename(file))
+    }
+  }
+  if (release.draft) {
+    const published = await api('PATCH', `https://api.github.com/repos/${REPO}/releases/${release.id}`, token, { draft: false })
+    if (!published.ok) throw new Error(`公开 Release 失败：HTTP ${published.status}`)
+  }
+  console.log(`\n全部附件大小与 SHA256 已核对，发布完成：https://github.com/${REPO}/releases/tag/${tag}`)
 }
 
 main().catch((e) => {
