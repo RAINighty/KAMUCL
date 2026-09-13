@@ -183,7 +183,7 @@ function mapMrVersions(arr: MrVersion[], projectId?: string): CommunityFile[] {
 const CF_OFFICIAL = 'https://api.curseforge.com/v1'
 const CF_MIRROR = 'https://mod.mcimirror.top/curseforge/v1'
 /** 内置默认 Key（卡慕注册的 KAMUCL 官方应用 Key，开箱即用；用户可在设置页换成自己的） */
-const CF_BUILTIN_KEY = '$2a$10$m36VLjTaHEqxr/hO3kMDE.XCDEG90rSu3iGKkoPsj0KdCPWXOASXG'
+import { CF_BUILTIN_KEY } from './curseforgeKey'
 
 /** 当前生效的 CurseForge 通道：有 key（用户设置 > 内置默认）走官方；仅内置失效时才落镜像 */
 export function cfChannel(): { base: string; official: boolean; key: string } {

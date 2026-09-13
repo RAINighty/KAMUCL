@@ -16,8 +16,9 @@ import type {
   ModpackInstallRequest,
   ProgressEvent
 } from '../../shared/types'
-import { fetchSignal, type DownloadTask } from './download'
+import type { DownloadTask } from './download'
 import { downloadModpackFiles } from './modpackDownloads'
+import { resolveCurseForgeDownload } from './curseforgeDownload'
 import { getSettings } from './settings'
 import { registerVersionFolder, versionDir, versionJsonPath, versionsDir } from './paths'
 import { gameDir, withGameFolder } from './paths'
@@ -657,28 +658,13 @@ async function installFullpack(
 
 const MCIM_CF = 'https://mod.mcimirror.top/curseforge/v1'
 
-/** 先取文件信息（fileName + downloadUrl）；失败退回直接下载端点（302 到文件） */
-async function resolveCfFile(
-  projectID: number,
-  fileID: number,
-  signal?: AbortSignal
-): Promise<{ url: string; fileName: string }> {
-  const fallbackUrl = `${MCIM_CF}/mods/${projectID}/files/${fileID}/download`
-  try {
-    const res = await fetch(`${MCIM_CF}/mods/${projectID}/files/${fileID}`, {
-      signal: fetchSignal(signal)
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const json = (await res.json()) as {
-      data?: { fileName?: string; downloadUrl?: string | null }
-    }
-    const fileName = json.data?.fileName
-    if (!fileName) throw new Error('镜像返回缺少 fileName')
-    return { url: json.data?.downloadUrl || fallbackUrl, fileName }
-  } catch {
-    if (signal?.aborted) throw new Error('已取消')
-    return { url: fallbackUrl, fileName: `${projectID}-${fileID}.jar` }
-  }
+async function resolveCfFile(projectID: number, fileID: number, signal?: AbortSignal) {
+  const { cfChannel } = await import('./community')
+  const channel = cfChannel()
+  const official = { base: channel.base, headers: channel.official ? { 'x-api-key': channel.key } : undefined }
+  const mirror = { base: MCIM_CF }
+  const sources = channel.official ? (getSettings().mirror === 'bmclapi' ? [mirror, official] : [official, mirror]) : [mirror]
+  return resolveCurseForgeDownload(projectID, fileID, sources, signal)
 }
 
 /** 简单并发池（保序写入结果数组） */
@@ -1024,7 +1010,7 @@ async function installModpackInFolder(filePath: string, emit: ProgressEmit, opts
         },
         opts?.signal
       )
-      pending = infos.map((info) => ({ rel: `mods/${info.fileName}`, url: info.url, size: 0 }))
+      pending = infos.map((info) => ({ rel: `mods/${info.fileName}`, url: info.url, size: info.size, sha1: info.sha1 }))
     }
 
     const tasks: DownloadTask[] = []

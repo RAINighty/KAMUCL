@@ -12,6 +12,8 @@ import { fmlArgument, missingNeoRuntime, reuseExternalRuntimeLibraries } from '.
 import type { FabricApiVersion, LoaderName, ProgressEvent } from '../../shared/types'
 import { BMCL_MAVEN_ROOT, downloadAll, downloadFile, fetchSignal } from './download'
 import { isCancelError } from './tasks'
+import { downloadLoaderInstaller } from './installerDownload'
+import { SmoothedSpeedEstimator } from './downloadProgress'
 import { logScope } from './launcherLog'
 
 const loaderLog = logScope('loader')
@@ -394,10 +396,6 @@ async function installLoaderInternal(
     loader === 'forge'
       ? `https://maven.minecraftforge.net/net/minecraftforge/forge/${mcVersion}-${loaderVersion}/${fileBase}`
       : `https://maven.neoforged.net/releases/net/neoforged/neoforge/${loaderVersion}/${fileBase}`
-  const mirrorUrlB =
-    loader === 'forge'
-      ? `https://bmclapi2.bangbang93.com/maven/net/minecraftforge/forge/${mcVersion}-${loaderVersion}/${fileBase}`
-      : `https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/${loaderVersion}/${fileBase}`
 
   const jarPath = path.join(os.tmpdir(), `kamucl-${loader}-installer-${Date.now()}.jar`)
   try {
@@ -410,26 +408,15 @@ async function installLoaderInternal(
       registerVersionFolder(id, gameDir())
     } else {
     emit({ stage: 'loader', progress: 0.2, text: `下载 ${loader} 安装器` })
-    try {
-      await downloadFile(officialUrl, jarPath, (d, t) =>
-        emit({
-          stage: 'loader',
-          progress: 0.2 + (t ? (d / t) * 0.4 : 0),
-          text: `下载安装器 ${(d / 1024 / 1024).toFixed(1)}MB`
-        }), undefined, undefined, signal
-      )
-    } catch {
-      // 官方源失败回退 BMCLAPI（取消除外）
-      if (signal?.aborted) throw new Error('已取消')
-      loaderLog.warn(`${loader} 安装器官方源下载失败，回退 BMCLAPI 镜像`)
-      await downloadFile(mirrorUrlB, jarPath, (d, t) =>
-        emit({
-          stage: 'loader',
-          progress: 0.2 + (t ? (d / t) * 0.4 : 0),
-          text: `下载安装器(镜像) ${(d / 1024 / 1024).toFixed(1)}MB`
-        }), undefined, undefined, signal
-      )
-    }
+    const estimator = new SmoothedSpeedEstimator()
+    let networkBytes = 0
+    await downloadLoaderInstaller(officialUrl, jarPath, getSettings().mirror, (d, t, wire = 0) => {
+      networkBytes += wire
+      const rate = estimator.sample(networkBytes, t ? Math.max(0, t - d) : null, performance.now())
+      emit({ stage: 'loader', progress: 0.2 + (t ? (d / t) * 0.4 : 0),
+        text: '下载安装器 ' + (d / 1024 / 1024).toFixed(1) + 'MB',
+        speed: rate.speedBps, etaSeconds: rate.etaSeconds ?? undefined, bytesDone: d, bytesTotal: t || undefined })
+    }, signal)
 
     const javaPath = await pickJavaForInstaller(mcVersion, emit)
     // Forge/NeoForge 安装器要求目标目录存在 launcher_profiles.json，否则报错退出

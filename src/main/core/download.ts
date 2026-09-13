@@ -8,7 +8,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { downloadLimiter } from './downloadLimits'
 import { withFileJob } from './fileJobs'
-import { httpFetch } from './httpClient'
+import { downloadFetch } from './downloadFetch'
 import { abortableDelay, inheritTaskControl, isTaskPaused, waitIfTaskPaused } from './tasks'
 import { DownloadProgressTracker, SmoothedSpeedEstimator, type DownloadProgressSnapshot } from './downloadProgress'
 
@@ -35,7 +35,18 @@ export function mirrorUrl(input: string, mirror: MirrorPref): string {
   return input
 }
 export function downloadCandidates(urls: string[], mirror: MirrorPref): string[] {
-  return [...new Set(urls.flatMap(url => [mirrorUrl(url, mirror), url]))]
+  return [...new Set(urls.flatMap(url => {
+    const variants = [url]
+    try {
+      const u = new URL(url)
+      if (u.protocol === 'https:' && ['edge.forgecdn.net', 'mediafilez.forgecdn.net'].includes(u.hostname) && /^\/files\/\d+\/\d+\//.test(u.pathname)) {
+        // Same immutable CDN object, independent of the edge redirect cache.
+        u.hostname = 'mediafilez.forgecdn.net'; variants.unshift(u.href)
+        u.hostname = 'edge.forgecdn.net'; variants.push(u.href)
+      }
+    } catch { /* Keep URL validation in the transfer. */ }
+    return [...(mirror === 'official' ? [] : [mirrorUrl(url, mirror)]), ...variants]
+  }))]
 }
 export type HttpFailureKind = 'unavailable' | 'transient' | 'fatal'
 export function classifyHttpStatus(status: number): HttpFailureKind {
@@ -48,7 +59,7 @@ export class DownloadHttpError extends Error {
 class InvalidContent extends Error {}
 class NetworkIdle extends Error {}
 export const transferTimeouts = { inactivityMs: 15_000 }
-export const slowSpeedThresholds = { largeFileBytes: 8*1024*1024, largeWindowMs: 8000, largeMinBps: 256*1024, windowMs: 15000, minWindowBytes: 16*1024, warmupBytes: 1024*1024, warmupMs: 15000 }
+export const slowSpeedThresholds = { largeFileBytes: 1024*1024, largeWindowMs: 8000, largeMinBps: 256*1024, windowMs: 15000, minWindowBytes: 16*1024, warmupBytes: 1024*1024, warmupMs: 15000 }
 const failures = new Map<string, { count: number; until: number }>()
 const origin = (url: string) => { try { return new URL(url).origin } catch { return url } }
 export function noteHostFailure(url: string): void {
@@ -140,7 +151,7 @@ async function receive(url: string, temporary: string, expected: Integrity, sign
       }
     }, Math.max(10, Math.min(100, transferTimeouts.inactivityMs / 4)))
     waiting = true
-    response = await httpFetch(url, { signal: controller.signal, headers, bodyTimeoutMs: 120_000, systemProxy: expected.systemProxy })
+    response = await downloadFetch(url, { signal: controller.signal, headers, bodyTimeoutMs: 120_000, separateConnection: !!range, systemProxy: expected.systemProxy })
     waiting = false; sinceData = 0
     if (!response.ok) throw new DownloadHttpError(response.status, url)
     if (!response.body) throw new InvalidContent('下载响应没有内容')
@@ -197,7 +208,7 @@ async function receive(url: string, temporary: string, expected: Integrity, sign
 }
 
 /** Adaptive independent bounded ranges; cancellation keeps private resumable fragments. */
-async function segmented(url: string, dest: string, expected: Integrity, signal: AbortSignal | undefined, progress: ProgressFn | undefined, fallback: boolean): Promise<number> {
+async function segmented(url: string, dest: string, expected: Integrity, signal: AbortSignal | undefined, progress: ProgressFn | undefined, fallback: boolean, maxSegments = 8): Promise<number> {
   const cache = path.resolve(dest + '.segments-cache'), size = expected.size!, count = Math.min(8, downloadLimiter.maxConcurrent, Math.max(2, Math.ceil(size / (2*1024*1024)))), step = Math.ceil(size / count)
   const clear = async () => { if (path.dirname(cache) !== path.dirname(path.resolve(dest))) throw new Error('缓存路径越界'); await fs.promises.rm(cache, { recursive: true, force: true }) }
   const identity = JSON.stringify({ version: 1, size, sha1: expected.sha1, sha512: expected.sha512, sha256: expected.sha256, step })
@@ -209,14 +220,29 @@ async function segmented(url: string, dest: string, expected: Integrity, signal:
   signal?.addEventListener('abort', cancel, { once: true }); if (signal?.aborted) cancel()
   const received = Array<number>(count).fill(0); let failure: unknown
   try {
-    await Promise.all(Array.from({length:count}, async (_, index) => {
+    let cursor = 0
+    await Promise.all(Array.from({length:Math.min(count, maxSegments)}, async () => {
+      while (!controller.signal.aborted && cursor < count) {
+      const index = cursor++
       const start = index * step, end = Math.min(size, start + step) - 1, file = path.join(cache, index + '.part')
       try {
         let saved = 0; try { const st = await fs.promises.lstat(file); if (!st.isFile() || st.isSymbolicLink()) throw new Error('下载分片不是普通文件'); saved = st.size } catch(error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
         if (saved > end-start+1) { await fs.promises.rm(file); saved=0 }
         received[index]=saved
-        if (saved < end-start+1) await receive(url,file,expected,controller.signal,(done,_total,wire)=>{received[index]=done;progress?.(received.reduce((a,b)=>a+b,0),size,wire)},fallback,{start,end})
+        if (saved < end-start+1) {
+          for (let attempt = 0; ; attempt++) {
+            try {
+              await receive(url,file,expected,controller.signal,(done,_total,wire)=>{received[index]=done;progress?.(received.reduce((a,b)=>a+b,0),size,wire)},fallback,{start,end})
+              break
+            } catch (error) {
+              controller.signal.throwIfAborted()
+              if (attempt || error instanceof InvalidContent || error instanceof NetworkIdle || (error instanceof DownloadHttpError && classifyHttpStatus(error.status) !== 'transient')) throw error
+              await abortableDelay(200, controller.signal)
+            }
+          }
+        }
       } catch(error) { if (!failure) failure=error; controller.abort(error) }
+      }
     }))
     signal?.throwIfAborted()
     if (failure) throw failure
@@ -227,13 +253,16 @@ async function segmented(url: string, dest: string, expected: Integrity, signal:
     await clear();return size
   } catch(error) {
     signal?.throwIfAborted()
-    await clear()
-    if(error instanceof InvalidContent) { await fs.promises.rm(dest+'.part',{force:true}); return receive(url,dest+'.part',expected,signal,progress,fallback) }
+    // Some CDN redirect nodes reject Range with 403/404 even when a plain GET exists.
+    if(error instanceof InvalidContent || (error instanceof DownloadHttpError && [403,404,416].includes(error.status))) {
+      await clear(); await fs.promises.rm(dest+'.part',{force:true})
+      return receive(url,dest+'.part',expected,signal,progress,fallback)
+    }
     throw error
   } finally { signal?.removeEventListener('abort',cancel);controller.abort() }
 }
 
-export async function downloadFile(url: string, dest: string, progress?: ProgressFn, sha1?: string, mirror: MirrorPref = 'official', signal?: AbortSignal, alternatives: string[] = [], integrity: { sha512?: string; sha256?: string; size?: number; reuseDirs?: string[]; systemProxy?: boolean; maxAttempts?: number } = {}): Promise<void> {
+export async function downloadFile(url: string, dest: string, progress?: ProgressFn, sha1?: string, mirror: MirrorPref = 'official', signal?: AbortSignal, alternatives: string[] = [], integrity: { sha512?: string; sha256?: string; size?: number; reuseDirs?: string[]; systemProxy?: boolean; maxAttempts?: number; maxSegments?: number | (() => number) } = {}): Promise<void> {
   return withFileJob(dest, signal, async () => {
     const expected = { sha1, sha512: integrity.sha512, sha256: integrity.sha256, size: integrity.size, systemProxy: integrity.systemProxy }, temporary = dest + '.part'
     const attempts = Math.max(1, Math.min(4, integrity.maxAttempts ?? 4))
@@ -253,7 +282,7 @@ export async function downloadFile(url: string, dest: string, progress?: Progres
         for (let attempt = 0; attempt < attempts; attempt++) {
           try {
             const bytes = (expected.size ?? 0) >= 1024 * 1024 && downloadLimiter.maxConcurrent >= 2 && (sha1 || integrity.sha512 || integrity.sha256)
-              ? await segmented(source, dest, expected, signal, progress, fallback)
+              ? await segmented(source, dest, expected, signal, progress, fallback, typeof integrity.maxSegments === 'function' ? integrity.maxSegments() : integrity.maxSegments)
               : await receive(source, temporary, expected, signal, progress, fallback)
             const invalid = await verifyFile(temporary, expected, signal)
             if (invalid) throw new InvalidContent(invalid)
@@ -266,7 +295,8 @@ export async function downloadFile(url: string, dest: string, progress?: Progres
             if (error instanceof InvalidContent) { await fs.promises.rm(temporary, { force: true }); break }
             if (error instanceof DownloadHttpError && classifyHttpStatus(error.status) !== 'transient') break
             noteHostFailure(source)
-            if (error instanceof NetworkIdle && fallback) break
+            // Try a healthy alternative before repeating a failing connection.
+            if (fallback) break
             if (attempt + 1 < attempts) await abortableDelay(100 * 2 ** attempt, signal)
           }
         }
@@ -298,7 +328,7 @@ export async function downloadAll(tasks: DownloadTask[], progress?: AllProgressF
       while (!controller.signal.aborted && cursor < tasks.length) {
         const index = cursor++, task = tasks[index]; active.set(index, task.label ?? path.basename(task.dest))
         try {
-          await downloadFile(task.url, task.dest, (done,total,wire = 0) => { networkBytes += wire; tracker.record(index,done,total) }, task.sha1, mirror, controller.signal, task.urls, { sha512: task.sha512, sha256: task.sha256, size: task.size, reuseDirs: task.reuseDirs })
+          await downloadFile(task.url, task.dest, (done,total,wire = 0) => { networkBytes += wire; tracker.record(index,done,total) }, task.sha1, mirror, controller.signal, task.urls, { sha512: task.sha512, sha256: task.sha256, size: task.size, reuseDirs: task.reuseDirs, maxSegments: () => Math.max(2, Math.floor(downloadLimiter.maxConcurrent / Math.max(1, active.size))) })
           tracker.recordComplete(index, (await fs.promises.stat(task.dest)).size); active.delete(index)
         } catch (error) { firstError ??= error; controller.abort(error); return }
       }
