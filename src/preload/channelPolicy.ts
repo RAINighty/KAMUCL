@@ -17,7 +17,12 @@ const INVOKE_EXTRA = new Set([
   'mods:versionApply',
   'tc:install',
   'tc:cancel-install',
-  'voxlink:useTurnRelay'
+  'voxlink:useTurnRelay',
+  'recordings:list',
+  'recordings:open',
+  'recordings:operate',
+  'recordings:import',
+  'recordings:modVersions'
 ])
 
 const SEND_CHANNELS = new Set([
@@ -25,7 +30,9 @@ const SEND_CHANNELS = new Set([
   'window:maximize',
   'window:close',
   'boot:stage',
-  'boot:renderer-ready'
+  'boot:renderer-ready',
+  'recordings:drag',
+  'fs:drag'
 ])
 
 const LISTENER_EXTRA = new Set([
