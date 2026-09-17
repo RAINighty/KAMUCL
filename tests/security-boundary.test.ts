@@ -58,16 +58,17 @@ test('removeVersion refuses unsafe IDs and only removes an existing versions chi
     })
 
     for (const id of ['', '.', '..', '../outside', 'nested/name', 'bad\0name']) {
-      assert.throws(() => runtime.removeVersion(id), /无效|非法|版本|ID/i, id)
+      await assert.rejects(runtime.removeVersion(id), /无效|非法|版本|ID/i, id)
     }
     assert.equal(fs.readFileSync(path.join(folder, 'keep.txt'), 'utf8'), 'keep')
     assert.equal(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8'), 'keep')
     assert.equal(fs.existsSync(versions), true)
 
     fs.mkdirSync(path.join(versions, 'valid'))
-    runtime.removeVersion('valid')
+    await runtime.removeVersion('valid')
     assert.equal(fs.existsSync(path.join(versions, 'valid')), false)
-    assert.throws(() => runtime.removeVersion('missing'), /不存在|目录/i)
+    await runtime.removeVersion('missing')
+    assert.equal(fs.existsSync(path.join(versions, 'missing')), false)
   } finally {
     await runtime.closeHttpClient()
     fs.rmSync(root, { recursive: true, force: true })
@@ -105,8 +106,8 @@ test('IPC security handlers revalidate child names, registered folders, and comm
   const toggleStart = source.indexOf('ipcMain.handle(IPC.fsToggleDisable')
   const removeBlock = source.slice(removeStart, toggleStart)
   assert.notEqual(removeStart, -1)
-  assert.match(removeBlock, /isSafeChildName/)
-  assert.match(removeBlock, /isPathContained\(dir, target, false\)/)
+  assert.match(removeBlock, /await recycleFile\(dir, name\)/)
+  assert.match(removeBlock, /await safeDir\(String\(rel \?\? ''\), folder\)/)
   assert.doesNotMatch(removeBlock, /path\.basename\(/)
   assert.match(source, /registeredGameFolder/)
   for (const channel of ['versionsSetJava', 'gameRestart', 'launchExportLogs', 'serversBind', 'serversSyncFromDat', 'serversPrepareLaunch', 'modsDuplicates', 'modsCrossDuplicates', 'modsIcons', 'modsCheckUpdates', 'modsApplyUpdates']) {
