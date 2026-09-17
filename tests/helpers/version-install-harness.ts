@@ -23,10 +23,20 @@ export async function versionInstallHarness(root: string, metadataFetch: typeof 
   const require = createRequire(path.resolve('package.json'))
   const exported = { exports: {} as any }
   fs.mkdirSync(path.join(root, 'userData'), { recursive: true })
-  const electron = { app: {
-    getPath: (name: string) => path.join(root, name),
-    getVersion: () => 'test', getName: () => 'KAMUCL-test', isPackaged: false
-  } }
+  const electron = {
+    app: {
+      getPath: (name: string) => path.join(root, name),
+      getVersion: () => 'test', getName: () => 'KAMUCL-test', isPackaged: false
+    },
+    shell: {
+      trashItem: async (target: string) => {
+        const relative = path.relative(root, target)
+        if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Trash target outside test root')
+        const trash = await fs.promises.mkdtemp(path.join(root, 'trash-'))
+        await fs.promises.rename(target, path.join(trash, path.basename(target)))
+      }
+    }
+  }
   new Function('require', 'module', 'exports', 'fetch', await bundle)(
     (name: string) => name === 'electron' ? electron : name === 'undici'
       ? { ...require(name), fetch: (url: string, init: unknown) => require(name).fetch(downloadUrl(String(url)), init) }
