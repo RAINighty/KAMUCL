@@ -24,3 +24,11 @@ test('preload separates event subscriptions from renderer sends', () => {
   assert.equal(isAllowedSendChannel('boot:renderer-ready'), true)
   assert.equal(isAllowedSendChannel('event:progress'), false)
 })
+
+test('preload allows recording and native drag channels', () => {
+  assert.equal(isAllowedInvokeChannel('recordings:list'), true)
+  assert.equal(isAllowedInvokeChannel('recordings:operate'), true)
+  assert.equal(isAllowedInvokeChannel('recordings:modVersions'), true)
+  assert.equal(isAllowedSendChannel('recordings:drag'), true)
+  assert.equal(isAllowedSendChannel('fs:drag'), true)
+})
