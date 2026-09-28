@@ -9,6 +9,9 @@ const proof = path.resolve(`release/mac-game-proof-${arch}`)
 fs.mkdirSync(proof, { recursive: true })
 const log = fs.openSync(path.join(proof, 'launcher.log'), 'w'), env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE
+// Hosted Intel Macs expose a paravirtual GPU whose Metal argument encoder
+// aborts inside MoltenVK. This documented driver setting is CI-only.
+if (arch === 'x64') env.MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS = '0'
 const child = spawn(path.join(app, 'Contents/MacOS/KAMUCL'), ['--remote-debugging-port=9230', '--inspect=9231'], { env, stdio: ['ignore', log, log] })
 const wait = ms => new Promise(r => setTimeout(r, ms))
 let ws, mainWs, evaluate, gamePid, gameFolder, debuggerProcess, events = []
@@ -85,9 +88,6 @@ async function main() {
   metadata.arguments ??= {}; metadata.arguments.game ??= []
   metadata.arguments.jvm ??=[];metadata.arguments.jvm.push('-Dkamucl.nativeProofTrigger='+trigger)
   metadata.arguments.game.push('--demo'); fs.writeFileSync(idPath, JSON.stringify(metadata))
-  // Intel hosted Macs expose only a 64MB paravirtual Metal device; request the
-  // game's own Vulkan backend in this disposable fixture, leaving player defaults intact.
-  if(arch==='x64')fs.appendFileSync(path.join(path.dirname(idPath),'options.txt'),'\npreferredGraphicsBackend:"vulkan"\n')
   await evaluate(`window.kamucl.invoke('game:launch',${JSON.stringify(installed.installedId)},null,${JSON.stringify(folder)})`)
   let nativeWindow, lastState
   const fixture = path.resolve(`release/mac-proof-${arch}/material-fixture`)
@@ -104,7 +104,7 @@ async function main() {
         try { const info = JSON.parse(fs.readFileSync(path.join(home, 'running-game.json'), 'utf8')); if (info.versionId === installed.installedId) gamePid = info.pid } catch {}
       }
     }
-    if (gamePid && arch === 'x64' && process.env.MAC_GAME_NATIVE_DEBUG !== '0' && !debuggerProcess) {
+    if (gamePid && arch === 'x64' && process.env.MAC_GAME_NATIVE_DEBUG === '1' && !debuggerProcess) {
       const output = fs.openSync(path.join(proof, 'native-backtrace.txt'), 'w')
       debuggerProcess = spawn('/usr/bin/sudo', ['/usr/bin/lldb', '--batch',
         '-O', 'settings set platform.plugin.darwin.ignored-exceptions EXC_BAD_ACCESS|EXC_BAD_INSTRUCTION|EXC_ARITHMETIC', '-p', String(gamePid),
@@ -164,9 +164,11 @@ async function main() {
   assert(events.some(e=>e.name==='launchLog'&&/Stopping!|Stopping the|Saving|正常退出|退出.*0/.test(e.value)),'game did not report a normal shutdown')
   const saveDir=path.join(path.dirname(idPath),'saves','Demo_World')
   assert(fs.statSync(path.join(saveDir,'level.dat')).size>0,'demo world metadata was not saved')
-  assert(fs.readdirSync(path.join(saveDir,'region')).some(f=>f.endsWith('.mca')),'demo world chunks were not saved')
+  const regionDir=path.join(saveDir,'dimensions','minecraft','overworld','region')
+  const regionFiles=fs.readdirSync(regionDir).filter(f=>f.endsWith('.mca')&&fs.statSync(path.join(regionDir,f)).size>0)
+  assert(regionFiles.length>0,'demo world chunks were not saved')
   assert(!fs.readFileSync(path.join(proof,'launcher.log'),'utf8').includes('Object has been destroyed'),'closed window broke background callbacks')
-  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, worldStarted,savedWorld:true,nativeFocus:true, gracefulClose:true,closeAndDockReopen:true }, null, 2))
+  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, worldStarted,savedWorld:true,regionFiles,nativeFocus:true, gracefulClose:true,closeAndDockReopen:true,ciMetalArgumentBuffers:env.MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS??null }, null, 2))
   gamePid=null
   console.log('PASS actual Minecraft window', arch, version)
 }
