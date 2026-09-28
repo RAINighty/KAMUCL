@@ -15,6 +15,9 @@ const run = promisify(execFile)
 const data = () => app.getPath('userData')
 const marker = () => path.join(data(), 'mac-update.json')
 const claim = () => marker() + '.applying'
+function recordFailure(error: unknown): void {
+  try { fs.appendFileSync(path.join(data(), 'mac-updater.log'), `${new Date().toISOString()} ${String(error)}\n`) } catch { /* preserve startup on read-only storage */ }
+}
 export const macUpdateDir = () => path.join(data(), 'mac-updates')
 export function macAppTarget(): string | null {
   if (process.platform !== 'darwin' || !app.isPackaged) return null
@@ -126,6 +129,7 @@ export async function applyMacUpdateOnStartup(): Promise<boolean> {
     fs.renameSync(claim(), claim() + '.failed')
   }
   } catch (error) {
+    recordFailure(error)
     // A damaged/interrupted transaction must never prevent the launcher from opening.
     try { fs.renameSync(claim(), claim() + '.failed'); fs.writeFileSync(path.join(data(), 'update-failed.flag'), String(error)) } catch { /* read-only state */ }
     return false
@@ -149,6 +153,7 @@ export async function applyMacUpdateOnStartup(): Promise<boolean> {
     atomicUpdateJson(claim(), { ...t, installedHash, helperPid: helper.pid })
     helper.unref(); app.exit(0); return true
   } catch (error) {
+    recordFailure(error)
     try {
     atomicUpdateJson(claim() + '.failed', t); clearMacUpdate()
     fs.rmSync(claim(), { force: true }); fs.writeFileSync(path.join(data(), 'update-failed.flag'), String(error))

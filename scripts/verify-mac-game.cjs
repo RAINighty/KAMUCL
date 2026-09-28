@@ -94,7 +94,7 @@ async function main() {
         try { const info = JSON.parse(fs.readFileSync(path.join(home, 'running-game.json'), 'utf8')); if (info.versionId === installed.installedId) gamePid = info.pid } catch {}
       }
     }
-    if (gamePid && arch === 'x64' && process.env.MAC_GAME_NATIVE_DEBUG === '1' && !debuggerProcess) {
+    if (gamePid && arch === 'x64' && process.env.MAC_GAME_NATIVE_DEBUG !== '0' && !debuggerProcess) {
       const output = fs.openSync(path.join(proof, 'native-backtrace.txt'), 'w')
       debuggerProcess = spawn('/usr/bin/sudo', ['/usr/bin/lldb', '--batch', '-p', String(gamePid),
         '-o', 'process handle SIGSEGV -s false -n false -p true',

@@ -92,5 +92,6 @@ app.whenReady().then(async () => {
     assert(main.isVisible()); assert(overlay.isDestroyed(), 'overlay must clean up after reveal')
     const report = { complete:true,root,pointerDisplacement:Math.hypot(moved.pose.x-original.x,moved.pose.y-original.y),lateAssembly:true,readinessGate:true,cleanup:true }
     fs.writeFileSync(path.join(root,'result.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2))
-  } finally { clearInterval(paintTimer); screen.getCursorScreenPoint=realCursor; main.destroy(); if(overlay&&!overlay.isDestroyed())overlay.destroy(); clearTimeout(deadline);app.quit() }
+  } finally { clearInterval(paintTimer); screen.getCursorScreenPoint=realCursor; main.destroy(); if(overlay&&!overlay.isDestroyed())overlay.destroy(); clearTimeout(deadline) }
+  app.exit(0)
 }).catch(error => { console.error(error);clearTimeout(deadline);app.exit(1) })

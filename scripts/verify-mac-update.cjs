@@ -19,11 +19,12 @@ module.exports=async function(source,arch,proof){
   const stop=async child=>{const ended=new Promise(r=>child.once('exit',r));child.kill('SIGTERM');await ended;await wait(1000)}
   function read(file){try{return JSON.parse(fs.readFileSync(file,'utf8'))}catch{return null}}
   async function waitReceipt(){
-    for(let i=0;i<100;i++){const t=read(claim+'.completed'),state=read(path.join(data,'update-state.json'));if(t&&state?.result==='ok'&&state.to===version)return {t,state};await wait(1000)}
+    for(let i=0;i<100;i++){const t=read(claim+'.completed'),state=read(path.join(data,'update-state.json'));if(t&&state?.result==='ok'&&state.to===version)return {t,state};if(!fs.existsSync(marker)&&read(claim+'.failed')?.id===expectedTransaction)break;await wait(1000)}
     throw Error('update receipt missing: '+(fs.existsSync(path.join(data,'mac-updater.log'))?fs.readFileSync(path.join(data,'mac-updater.log'),'utf8'):'no helper log'))
   }
   // open(1) relaunch has no debug switches. Find and stop only the executable at our private target.
   function ownPid(){const rows=execFileSync('/bin/ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');const row=rows.find(x=>x.trim().split(/\s+/,1)[0]!==String(process.pid)&&x.includes(path.join(target,'Contents/MacOS/KAMUCL'))&&!x.includes('Helper'));return row?Number(row.trim().split(/\s+/)[0]):null}
+  let expectedTransaction
   try {
     let child=start(),c=await connect()
     const main=(await(await fetch('http://127.0.0.1:9239/json')).json())[0],debug=new WebSocket(main.webSocketDebuggerUrl)
@@ -38,12 +39,12 @@ module.exports=async function(source,arch,proof){
     assert(fs.existsSync(claim+'.failed'),'tampered update was not rejected')
     execFileSync('codesign',['--verify','--deep','--strict',target])
     await c.evaluate(`window.kamucl.invoke('update:applyLocal',{filePath:${JSON.stringify(zip)}})`)
-    assert.equal(read(marker)?.release.assetName,path.basename(zip));c.ws.close();await stop(child)
+    assert.equal(read(marker)?.release.assetName,path.basename(zip));expectedTransaction=read(marker).id;c.ws.close();await stop(child)
     start();const installed=await waitReceipt();assert(fs.existsSync(installed.state.backupPath));execFileSync('codesign',['--verify','--deep','--strict',target])
     relaunchedPid=ownPid();assert(relaunchedPid);process.kill(relaunchedPid,'SIGTERM');relaunchedPid=null;await wait(2000)
     // Explicit rollback uses the retained signed backup and the same startup transaction.
     child=start();c=await connect();await c.evaluate(`window.kamucl.invoke('update:restoreBackup')`)
-    assert.equal(read(marker)?.mode,'rollback');c.ws.close();await stop(child)
+    assert.equal(read(marker)?.mode,'rollback');expectedTransaction=read(marker).id;c.ws.close();await stop(child)
     fs.renameSync(claim+'.completed',claim+'.upgrade-proof')
     start();const rollback=await waitReceipt();assert.equal(rollback.t.mode,'rollback');execFileSync('codesign',['--verify','--deep','--strict',target])
     relaunchedPid=ownPid();assert(relaunchedPid)
@@ -53,5 +54,6 @@ module.exports=async function(source,arch,proof){
     sockets.forEach(ws=>ws.close());for(const child of children)if(child.exitCode===null)child.kill('SIGTERM')
     if(relaunchedPid)try{process.kill(relaunchedPid,'SIGTERM')}catch{}
     if(data&&fs.existsSync(path.join(data,'mac-updater.log')))fs.copyFileSync(path.join(data,'mac-updater.log'),path.join(proof,'updater-log.txt'))
+    if(data)for(const name of ['mac-update.json','mac-update.json.applying','mac-update.json.applying.failed','update-state.json','update-failed.flag'])if(fs.existsSync(path.join(data,name)))fs.copyFileSync(path.join(data,name),path.join(proof,name))
   }
 }
