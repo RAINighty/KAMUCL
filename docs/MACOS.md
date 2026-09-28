@@ -27,3 +27,5 @@ Terracotta 0.4.2 和 SakuraFRP 0.51.0-sakura-14 使用官方 Mac 客户端，按
 双架构构建使用仓库的 **macOS packages** GitHub Actions 工作流。在对应架构的 Mac 上也可运行 `npm ci`、`npm run dist:mac`；需要 Node.js、Java 17 与 Xcode Command Line Tools。构建会包含桥接 MOD、运行依赖和原生窗口辅助程序，不复用旧版本 ASAR 缓存。
 
 验收脚本包括原生应用启动、皮肤实际像素、黑橙半透明主题的桌面毛玻璃、玻璃碎片鼠标排斥与头像重组、减少动态效果、官方联机工具下载启动、真实应用更新与回退，以及通过启动器安装并运行 Minecraft 的验证。具体结果以该发布附带的验证报告为准。
+
+完整验收结果与限制见 [macOS 1.1.5 验收报告](MACOS_VERIFICATION_1.1.5.md)。
