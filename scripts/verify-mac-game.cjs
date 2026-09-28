@@ -97,7 +97,7 @@ async function main() {
         try { const info = JSON.parse(fs.readFileSync(path.join(home, 'running-game.json'), 'utf8')); if (info.versionId === installed.installedId) gamePid = info.pid } catch {}
       }
     }
-    if (gamePid && arch === 'x64' && process.env.MAC_GAME_NATIVE_DEBUG !== '0' && !debuggerProcess) {
+    if (gamePid && arch === 'x64' && process.env.MAC_GAME_NATIVE_DEBUG === '1' && !debuggerProcess) {
       const output = fs.openSync(path.join(proof, 'native-backtrace.txt'), 'w')
       debuggerProcess = spawn('/usr/bin/sudo', ['/usr/bin/lldb', '--batch', '-p', String(gamePid),
         '-o', 'process handle SIGSEGV -s false -n false -p true',
@@ -129,6 +129,8 @@ async function main() {
   assert((await evaluate('document.body.innerText')).includes('游戏运行中'),'Dock reopen forgot the live game')
   await evaluate(`window.__gameTestEvents=[];for(const name of ['launchLog','launchState'])window.kamucl.on('event:'+name,value=>window.__gameTestEvents.push({name,value}));`)
   const helper=path.join(app,'Contents/Resources/app.asar.unpacked/out/main/MacGameWindow')
+  execFileSync('/usr/bin/open',['-a',app]);await wait(1500)
+  assert.equal(Number(execFileSync(fixture,['--front-pid'],{encoding:'utf8'}).trim()),child.pid,'launcher must own focus before game focus test')
   execFileSync(helper,['focus',String(gamePid),'15000'],{timeout:17000})
   // The actual demo title screen has been captured above. Its first button is
   // centered 264px below the top of this fixed 854x480 client window.

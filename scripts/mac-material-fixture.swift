@@ -2,6 +2,11 @@
 import AppKit
 import Quartz
 
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--front-pid" {
+    print(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1)
+    exit(0)
+}
+
 // Targeted input for the disposable integration-test game, never the user's desktop.
 if CommandLine.arguments.count == 5 && CommandLine.arguments[1] == "--click" {
     guard ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true",

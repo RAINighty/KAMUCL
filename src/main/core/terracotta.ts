@@ -207,12 +207,15 @@ async function startProcess(): Promise<number> {
   // isolated daemon directly; do not install/stop the player's global HMCL service.
   const mac = process.platform === 'darwin'
   const env = mac ? { ...process.env, HOME: tcDir() } : process.env
-  proc = spawn(exe, mac ? ['--daemon'] : [process.platform === 'win32' ? '--hmcl2' : '--hmcl', portFile], { windowsHide: true, env })
+  proc = spawn(exe, mac ? ['--daemon'] : [process.platform === 'win32' ? '--hmcl2' : '--hmcl', portFile], { windowsHide: true, env, detached: mac })
   const child = proc
   child.on('error', e => { if (proc === child) { proc = null; setState({phase: 'idle', error: e.message}); emit('error', e.message) } })
   proc.stdout?.on('data', (d: Buffer) => emit('log', { level: 'info', msg: d.toString().trim() }))
   proc.stderr?.on('data', (d: Buffer) => emit('log', { level: 'warn', msg: d.toString().trim() }))
   proc.on('exit', (code) => {
+    if (mac && child.pid) {
+      try { process.kill(-child.pid, 'SIGTERM') } catch { /* private daemon group already empty */ }
+    }
     emit('log', { level: 'info', msg: `陶瓦进程退出（${code ?? '信号'}）` })
     if (proc !== child) return
     proc = null
@@ -304,6 +307,10 @@ async function killTree(): Promise<void> {
       execFileAsync('taskkill', ['/T', '/F', '/PID', String(p.pid)]).catch(() => {})
       setTimeout(resolve, 800)
     })
+  } else if (process.platform === 'darwin' && p.pid) {
+    // The Mac daemon and its EasyTier children share the private process group
+    // created above. Never target a global service or the game's process group.
+    try { process.kill(-p.pid, 'SIGTERM') } catch { /* already stopped */ }
   } else {
     p.kill('SIGKILL')
   }
