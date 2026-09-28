@@ -12,7 +12,7 @@ import { promisify } from 'node:util'
  *
  * IPC：invoke 'tc:start'|'tc:stop'|'tc:status'；push 'tc:event' {type:'log'|'ready'|'error'|'stopped', data}
  */
-import { spawn, ChildProcess } from 'node:child_process'
+import { spawn, execFile, ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import https from 'node:https'
@@ -203,9 +203,11 @@ async function startProcess(): Promise<number> {
   portFile = path.join(dir, 'http')
   fs.rmSync(portFile, { force: true })
   disposedByUser = false
-  // v0.4.2 Windows --hmcl only spawns a detached --hmcl2 child and exits 0.
-  // Own the actual server process so its lifetime and cancellation are reliable.
-  proc = spawn(exe, [process.platform === 'win32' ? '--hmcl2' : '--hmcl', portFile], { windowsHide: true })
+  // macOS --hmcl is a short-lived client of the daemon, not the server. Own an
+  // isolated daemon directly; do not install/stop the player's global HMCL service.
+  const mac = process.platform === 'darwin'
+  const env = mac ? { ...process.env, HOME: tcDir() } : process.env
+  proc = spawn(exe, mac ? ['--daemon'] : [process.platform === 'win32' ? '--hmcl2' : '--hmcl', portFile], { windowsHide: true, env })
   const child = proc
   child.on('error', e => { if (proc === child) { proc = null; setState({phase: 'idle', error: e.message}); emit('error', e.message) } })
   proc.stdout?.on('data', (d: Buffer) => emit('log', { level: 'info', msg: d.toString().trim() }))
@@ -223,6 +225,9 @@ async function startProcess(): Promise<number> {
   const t0 = Date.now()
   while (Date.now() - t0 < START_TOTAL_TIMEOUT_MS) {
     if (!proc || proc.exitCode !== null) throw new Error('陶瓦进程在启动期间退出，请查看日志')
+    if (mac) {
+      await new Promise<void>(resolve => execFile(exe, ['--hmcl', portFile], { env, timeout: 5000 }, () => resolve()))
+    }
     try {
       const content = fs.readFileSync(portFile, 'utf8').trim()
       const m = /"port"\s*:\s*(\d+)/.exec(content)

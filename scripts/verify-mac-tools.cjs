@@ -14,8 +14,9 @@ app.whenReady().then(async()=>{
   terracotta.registerTerracottaIpc({handle:(name,fn)=>handlers[name]=fn})
   await handlers['tc:install']();const status=await handlers['tc:status']();assert(status.binaryReady)
   const portFile=path.join(root,'port.json'),log=fs.openSync(path.join(proof,'terracotta-output.txt'),'w')
-  tc=spawn(status.binaryPath,['--hmcl',portFile],{stdio:['ignore',log,log]});fs.closeSync(log)
-  let port;for(let n=0;n<120;n++){assert.equal(tc.exitCode,null,'Terracotta exited early');try{port=JSON.parse(fs.readFileSync(portFile,'utf8')).port;if(port)break}catch{}await wait(500)}
+  const env={...process.env,HOME:path.join(root,'terracotta')}
+  tc=spawn(status.binaryPath,['--daemon'],{env,stdio:['ignore',log,log]});fs.closeSync(log)
+  let port;for(let n=0;n<120;n++){assert.equal(tc.exitCode,null,'Terracotta exited early');await wait(500);try{execFileSync(status.binaryPath,['--hmcl',portFile],{env,timeout:5000});port=JSON.parse(fs.readFileSync(portFile,'utf8')).port;if(port)break}catch{}}
   assert(port,'Terracotta did not initialize its HTTP API');const state=await get(port,'/state');assert.doesNotThrow(()=>JSON.parse(state))
   await get(port,'/panic?peaceful=true')
   fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({arch:process.arch,frpVersion,terracotta:status,apiState:JSON.parse(state)},null,2))
