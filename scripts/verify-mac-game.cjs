@@ -146,7 +146,8 @@ async function main() {
   fs.writeFileSync(trigger,'play-demo')
   let worldStarted=false
   for(let i=0;i<150;i++){
-    events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
+    const batch=await evaluate('window.__gameTestEvents.splice(0)');events.push(...batch)
+    for(const e of batch.filter(e=>e.name==='launchLog'))console.log(e.value)
     if(events.some(e=>e.name==='launchLog'&&/logged in with entity id|joined the game/.test(e.value))){worldStarted=true;break}
     process.kill(gamePid,0);await wait(1000)
   }
