@@ -78,6 +78,9 @@ async function main() {
   const metadata = JSON.parse(fs.readFileSync(idPath, 'utf8'))
   metadata.arguments ??= {}; metadata.arguments.game ??= []
   metadata.arguments.game.push('--demo'); fs.writeFileSync(idPath, JSON.stringify(metadata))
+  // Intel hosted Macs expose only a 64MB paravirtual Metal device; request the
+  // game's own Vulkan backend in this disposable fixture, leaving player defaults intact.
+  if(arch==='x64')fs.appendFileSync(path.join(path.dirname(idPath),'options.txt'),'\npreferredGraphicsBackend:"vulkan"\n')
   await evaluate(`window.kamucl.invoke('game:launch',${JSON.stringify(installed.installedId)},null,${JSON.stringify(folder)})`)
   let nativeWindow, lastState
   const fixture = path.resolve(`release/mac-proof-${arch}/material-fixture`)
@@ -127,6 +130,18 @@ async function main() {
   await evaluate(`window.__gameTestEvents=[];for(const name of ['launchLog','launchState'])window.kamucl.on('event:'+name,value=>window.__gameTestEvents.push({name,value}));`)
   const helper=path.join(app,'Contents/Resources/app.asar.unpacked/out/main/MacGameWindow')
   execFileSync(helper,['focus',String(gamePid),'15000'],{timeout:17000})
+  // The actual demo title screen has been captured above. Its first button is
+  // centered 264px below the top of this fixed 854x480 client window.
+  const bounds=nativeWindow.bounds
+  execFileSync(fixture,['--click',String(gamePid),String(bounds.X+bounds.Width/2),String(bounds.Y+264)])
+  let worldStarted=false
+  for(let i=0;i<150;i++){
+    events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
+    if(events.some(e=>e.name==='launchLog'&&/logged in with entity id|joined the game/.test(e.value))){worldStarted=true;break}
+    process.kill(gamePid,0);await wait(1000)
+  }
+  assert(worldStarted,'demo world did not start')
+  execFileSync('/usr/sbin/screencapture',['-x','-D','1',path.join(proof,'minecraft-world.png')])
   execFileSync(helper,['close',String(gamePid),'6000'],{timeout:8000})
   let exited=false
   for(let i=0;i<90;i++){
@@ -136,8 +151,11 @@ async function main() {
   }
   assert(exited,'normal Cocoa close did not exit Minecraft')
   assert(events.some(e=>e.name==='launchLog'&&/Stopping!|Stopping the|Saving|正常退出|退出.*0/.test(e.value)),'game did not report a normal shutdown')
+  const saveDir=path.join(path.dirname(idPath),'saves','Demo_World')
+  assert(fs.statSync(path.join(saveDir,'level.dat')).size>0,'demo world metadata was not saved')
+  assert(fs.readdirSync(path.join(saveDir,'region')).some(f=>f.endsWith('.mca')),'demo world chunks were not saved')
   assert(!fs.readFileSync(path.join(proof,'launcher.log'),'utf8').includes('Object has been destroyed'),'closed window broke background callbacks')
-  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, nativeFocus:true, gracefulClose:true,closeAndDockReopen:true }, null, 2))
+  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, worldStarted,savedWorld:true,nativeFocus:true, gracefulClose:true,closeAndDockReopen:true }, null, 2))
   gamePid=null
   console.log('PASS actual Minecraft window', arch, version)
 }

@@ -79,10 +79,16 @@ async function verifyBundle(bundle: string, version: string): Promise<void> {
   const plist = path.join(bundle, 'Contents/Info.plist')
   const value = async (key: string) => (await run('/usr/libexec/PlistBuddy', ['-c', `Print :${key}`, plist])).stdout.trim()
   if (await value('CFBundleIdentifier') !== 'com.kamucl.launcher' || await value('CFBundleShortVersionString') !== version || await value('CFBundleExecutable') !== 'KAMUCL') throw new Error('Mac 更新包身份或版本不匹配')
-  await run('/usr/bin/lipo', ['-verify_arch', process.arch === 'arm64' ? 'arm64' : 'x86_64', path.join(bundle, 'Contents/MacOS/KAMUCL')])
+  await run('/usr/bin/lipo', [path.join(bundle, 'Contents/MacOS/KAMUCL'), '-verify_arch', process.arch === 'arm64' ? 'arm64' : 'x86_64'])
   await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle])
 }
 const asar = (bundle: string) => path.join(bundle, 'Contents/Resources/app.asar')
+// Hash the archive bytes outside Electron's virtual ASAR filesystem.
+async function asarHash(bundle: string): Promise<string> {
+  const hash = (await run('/usr/bin/shasum', ['-a', '256', asar(bundle)])).stdout.slice(0, 64)
+  if (!/^[a-f\d]{64}$/.test(hash)) throw new Error('无法校验 Mac 应用归档')
+  return hash
+}
 const q = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'"
 export function macUpdaterScript(t: UpdateTransaction, stage: string, oldHash: string, newHash: string, pid: number, stateDir: string): string {
   const backup = path.join(path.dirname(t.target), `.KAMUCL-backup-${t.id}.app`)
@@ -122,7 +128,7 @@ export async function applyMacUpdateOnStartup(): Promise<boolean> {
   try {
   const previous = readMacUpdate(claim()) as (UpdateTransaction & { installedHash?: string }) | null
   if (previous) {
-    if (previous.release.version === currentVersion() && previous.installedHash === await sha256File(asar(previous.target))) {
+    if (previous.release.version === currentVersion() && previous.installedHash === await asarHash(previous.target)) {
       await verifyBundle(previous.target, currentVersion()); acknowledged = previous; return false
     }
     try { if (previous.helperPid) { process.kill(previous.helperPid, 0); return false } } catch { /* interrupted */ }
@@ -143,7 +149,7 @@ export async function applyMacUpdateOnStartup(): Promise<boolean> {
     await run('/usr/bin/ditto', ['-x', '-k', t.file, stagingDir])
     const stagedApp = path.join(stagingDir, 'KAMUCL.app')
     await verifyBundle(stagedApp, t.release.version)
-    const oldHash = await sha256File(asar(t.target)), installedHash = await sha256File(asar(stagedApp))
+    const oldHash = await asarHash(t.target), installedHash = await asarHash(stagedApp)
     const script = path.join(macUpdateDir(), `apply-${t.id}.sh`)
     fs.writeFileSync(script, macUpdaterScript(t, stagedApp, oldHash, installedHash, process.pid, data()), { mode: 0o700 })
     fs.renameSync(marker(), claim())
