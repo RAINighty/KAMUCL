@@ -7,19 +7,6 @@ if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--front-pid"
     exit(0)
 }
 
-// Targeted input for the disposable integration-test game, never the user's desktop.
-if CommandLine.arguments.count == 5 && CommandLine.arguments[1] == "--click" {
-    guard ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true",
-          let pid = Int32(CommandLine.arguments[2]),
-          let x = Double(CommandLine.arguments[3]), let y = Double(CommandLine.arguments[4]) else { exit(2) }
-    for kind in [CGEventType.leftMouseDown, CGEventType.leftMouseUp] {
-        let event = CGEvent(mouseEventSource: nil, mouseType: kind, mouseCursorPosition: CGPoint(x: x, y: y), mouseButton: .left)!
-        event.postToPid(pid)
-        Thread.sleep(forTimeInterval: 0.1)
-    }
-    exit(0)
-}
-
 if CommandLine.arguments.count > 2 && CommandLine.arguments[1] == "--window-id" {
     let pid = Int32(CommandLine.arguments[2])!
     let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []

@@ -76,7 +76,14 @@ async function main() {
   // Run the official demo, without requiring or exporting player credentials.
   const idPath = path.join(folder, 'versions', installed.installedId, `${installed.installedId}.json`)
   const metadata = JSON.parse(fs.readFileSync(idPath, 'utf8'))
+  const trigger=path.join(path.dirname(idPath),'native-demo.trigger'),classes=path.resolve(`out/mac-demo-probe-${arch}`)
+  fs.mkdirSync(classes,{recursive:true});fs.mkdirSync(path.join(path.dirname(idPath),'mods'),{recursive:true})
+  const loader=path.join(folder,'libraries/net/fabricmc/fabric-loader/0.19.5/fabric-loader-0.19.5.jar')
+  execFileSync(path.join(process.env.JAVA_HOME,'bin/javac'),['--release','17','-cp',loader,'-d',classes,'scripts/fixtures/MacDemoProbe.java'])
+  fs.writeFileSync(path.join(classes,'fabric.mod.json'),JSON.stringify({schemaVersion:1,id:'kamucl_native_demo_probe',version:'1',environment:'client',entrypoints:{client:['kamucltest.MacDemoProbe']}}))
+  execFileSync(path.join(process.env.JAVA_HOME,'bin/jar'),['cf',path.join(path.dirname(idPath),'mods/native-demo-test-only.jar'),'-C',classes,'.'])
   metadata.arguments ??= {}; metadata.arguments.game ??= []
+  metadata.arguments.jvm ??=[];metadata.arguments.jvm.push('-Dkamucl.nativeProofTrigger='+trigger)
   metadata.arguments.game.push('--demo'); fs.writeFileSync(idPath, JSON.stringify(metadata))
   // Intel hosted Macs expose only a 64MB paravirtual Metal device; request the
   // game's own Vulkan backend in this disposable fixture, leaving player defaults intact.
@@ -132,10 +139,9 @@ async function main() {
   execFileSync('/usr/bin/open',['-a',app]);await wait(1500)
   assert.equal(Number(execFileSync(fixture,['--front-pid'],{encoding:'utf8'}).trim()),child.pid,'launcher must own focus before game focus test')
   execFileSync(helper,['focus',String(gamePid),'15000'],{timeout:17000})
-  // The actual demo title screen has been captured above. Its first button is
-  // centered 264px below the top of this fixed 854x480 client window.
-  const bounds=nativeWindow.bounds
-  execFileSync(fixture,['--click',String(gamePid),String(bounds.X+bounds.Width/2),String(bounds.Y+264)])
+  // Drive the real client button through a test-only Fabric mod. Hosted Mac TCC
+  // intentionally blocks synthetic mouse input; no accessibility bypass is needed.
+  fs.writeFileSync(trigger,'play-demo')
   let worldStarted=false
   for(let i=0;i<150;i++){
     events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
