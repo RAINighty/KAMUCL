@@ -10,13 +10,14 @@ module.exports=async function(appPath,arch){
   const runtimeDir=fs.mkdtempSync(path.join(os.tmpdir(),'kamucl-runtime-'))
   execFileSync('/usr/bin/ditto',['-x','-k',runtime,runtimeDir])
   const electron=path.join(runtimeDir,'Electron.app/Contents/MacOS/Electron')
-  for(const args of [['scripts/verify-glass-startup.cjs'],['scripts/verify-glass-startup.cjs','--reduced'],['scripts/verify-mac-tools.cjs']]){
+  try { for(const args of [['scripts/verify-glass-startup.cjs'],['scripts/verify-glass-startup.cjs','--reduced'],['scripts/verify-mac-tools.cjs']]){
     const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
     const child=spawn(electron,args,{stdio:'inherit',env})
     const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve)})
     assert.equal(code,0,`native verification failed: ${args.join(' ')}`)
-  }
+  } } finally {
   for(const name of fs.readdirSync('out').filter(x=>x.startsWith('glass-startup-'))) fs.cpSync(path.join('out',name),path.join(proof,name),{recursive:true})
-  fs.cpSync(`release/mac-tools-proof-${arch}`,path.join(proof,'network-tools'),{recursive:true})
+  if(fs.existsSync(`release/mac-tools-proof-${arch}`))fs.cpSync(`release/mac-tools-proof-${arch}`,path.join(proof,'network-tools'),{recursive:true})
+  }
   await require('./verify-mac-update.cjs')(appPath,arch,proof)
 }

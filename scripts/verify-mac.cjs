@@ -84,7 +84,4 @@ async function main(){
 main().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{
  const ended=new Promise(resolve=>{if(child.exitCode!==null)resolve();else child.once('exit',resolve)})
  child.kill('SIGTERM');fixture.kill('SIGTERM');await ended;fs.closeSync(log)
- if(!process.exitCode&&process.env.GITHUB_ACTIONS==='true'&&appPath.startsWith(path.resolve('release')+path.sep)){
-   try{await require('./verify-mac-extra.cjs')(appPath,arch)}catch(e){console.error(e);process.exitCode=1}
- }
 })

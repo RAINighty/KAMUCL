@@ -12,7 +12,7 @@ delete env.ELECTRON_RUN_AS_NODE
 const child = spawn(path.join(app, 'Contents/MacOS/KAMUCL'), ['--remote-debugging-port=9230', '--inspect=9231'], { env, stdio: ['ignore', log, log] })
 const wait = ms => new Promise(r => setTimeout(r, ms))
 let ws, mainWs, evaluate, gamePid, gameFolder, debuggerProcess, events = []
-async function main() {
+async function connectRenderer() {
   let page
   for (let i = 0; i < 60; i++) {
     try { page = (await (await fetch('http://127.0.0.1:9230/json')).json()).find(p => p.url.includes('/renderer/index.html')) } catch {}
@@ -30,6 +30,18 @@ async function main() {
     ws.send(JSON.stringify({ id: n, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }))
   })
   await wait(3000)
+}
+let mainCommandId=10
+async function evaluateMain(expression){
+  const id=++mainCommandId
+  return new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>{mainWs.removeEventListener('message',receive);reject(Error('main inspector timeout'))},15000)
+    const receive=e=>{const m=JSON.parse(e.data);if(m.id!==id)return;clearTimeout(timeout);mainWs.removeEventListener('message',receive);m.result?.exceptionDetails?reject(Error(JSON.stringify(m.result.exceptionDetails))):resolve(m.result?.result?.value)}
+    mainWs.addEventListener('message',receive);mainWs.send(JSON.stringify({id,method:'Runtime.evaluate',params:{expression,returnByValue:true,awaitPromise:true}}))
+  })
+}
+async function main() {
+  await connectRenderer()
   const folder = await evaluate(`(async()=>{
     window.__gameTestEvents=[];
     for(const name of ['launchLog','launchState','installDone','progress']) window.kamucl.on('event:'+name,value=>{window.__gameTestEvents.push({name,value});});
@@ -105,6 +117,13 @@ async function main() {
   events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
   assert(!events.some(e => e.name === 'launchState' && ['error', 'exited'].includes(e.value.status)), 'game exited during initialization')
   execFileSync('/usr/sbin/screencapture', ['-x', '-D', '1', path.join(proof, 'minecraft.png')])
+  await evaluateMain(`process.mainModule.require('electron').BrowserWindow.getAllWindows().forEach(w=>w.close())`)
+  await wait(1500);process.kill(gamePid,0)
+  assert.equal(await evaluateMain(`process.mainModule.require('electron').BrowserWindow.getAllWindows().length`),0)
+  await evaluateMain(`process.mainModule.require('electron').app.emit('activate')`)
+  await connectRenderer()
+  assert((await evaluate('document.body.innerText')).includes('游戏运行中'),'Dock reopen forgot the live game')
+  await evaluate(`window.__gameTestEvents=[];for(const name of ['launchLog','launchState'])window.kamucl.on('event:'+name,value=>window.__gameTestEvents.push({name,value}));`)
   const helper=path.join(app,'Contents/Resources/app.asar.unpacked/out/main/MacGameWindow')
   execFileSync(helper,['focus',String(gamePid),'15000'],{timeout:17000})
   execFileSync(helper,['close',String(gamePid),'6000'],{timeout:8000})
@@ -116,7 +135,8 @@ async function main() {
   }
   assert(exited,'normal Cocoa close did not exit Minecraft')
   assert(events.some(e=>e.name==='launchLog'&&/Stopping!|Stopping the|Saving|正常退出|退出.*0/.test(e.value)),'game did not report a normal shutdown')
-  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, nativeFocus:true, gracefulClose:true }, null, 2))
+  assert(!fs.readFileSync(path.join(proof,'launcher.log'),'utf8').includes('Object has been destroyed'),'closed window broke background callbacks')
+  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, nativeFocus:true, gracefulClose:true,closeAndDockReopen:true }, null, 2))
   gamePid=null
   console.log('PASS actual Minecraft window', arch, version)
 }
@@ -147,5 +167,10 @@ main().catch(e => { console.error(e); process.exitCode = 1 }).finally(async () =
     try { walk(root, 0) } catch (e) { console.log('Crash evidence read', e.message) }
   }
   if (gamePid) try { process.kill(gamePid, 'SIGTERM') } catch {}
-  mainWs?.close(); ws?.close(); child.kill('SIGTERM'); fs.closeSync(log)
+  mainWs?.close(); ws?.close()
+  const ended=new Promise(resolve=>{if(child.exitCode!==null)resolve();else child.once('exit',resolve)})
+  child.kill('SIGTERM');await ended;fs.closeSync(log)
+  // Collect independent animation/tools/update evidence even if gameplay failed;
+  // any failure still fails this required workflow step.
+  try{await require('./verify-mac-extra.cjs')(app,arch)}catch(e){console.error(e);process.exitCode=1}
 })
