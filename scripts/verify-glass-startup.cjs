@@ -61,8 +61,17 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(root,'result.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2))
       return
     }
-    const original = await overlay.webContents.executeJavaScript('glassProof.poses[0]')
-    assert(original)
+    let original
+    for(let i=0;i<30;i++){
+      original=await overlay.webContents.executeJavaScript('glassProof.poses[0]')
+      if(original)break
+      await overlay.webContents.capturePage();await wait(100)
+    }
+    if(!original){
+      console.log('Glass diagnostics',overlay.isVisible(),overlay.getBounds(),await overlay.webContents.executeJavaScript(`({url:location.href,hidden:document.hidden,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,caption:document.body.innerText,poses:glassProof.poses})`))
+      fs.writeFileSync(path.join(root,'missing-frame.png'),(await overlay.webContents.capturePage()).toPNG())
+    }
+    assert(original,'floating glass must produce actual canvas draw calls')
     const bounds = overlay.getBounds()
     fakeCursor = { x: Math.round(bounds.x + original.x), y: Math.round(bounds.y + original.y) }
     await wait(1000)

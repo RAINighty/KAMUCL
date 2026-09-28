@@ -1,4 +1,5 @@
 import { registerRecordingsIpc } from './core/recordingsIpc'
+import { activeLaunchStates, rememberLaunchState } from './core/launchUiState'
 import { startNativeFileDrag } from './core/nativeFileDrag'
 import { dragResourceFilesSync } from './core/resourceDragPaths'
 import { centerTarget } from './core/instanceCenter'
@@ -129,11 +130,18 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   registerFrpIpc(ipcMain)
   installFrpEventBridge(getWin)
   const send = (channel: string, payload: unknown): void => {
-    getWin()?.webContents.send(channel, payload)
+    const window = getWin()
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, payload)
   }
   /** 统一进度回调 */
   const emit = (e: ProgressEvent): void => send(IPC_EVENT.progress, e)
-  const sendState = (s: LaunchState): void => send(IPC_EVENT.launchState, s)
+  const sendState = (s: LaunchState): void => { rememberLaunchState(s); send(IPC_EVENT.launchState, s) }
+  ipcMain.on('boot:renderer-ready', event => {
+    if (event.sender !== getWin()?.webContents) return
+    const states = activeLaunchStates()
+    for (const state of states) send(IPC_EVENT.launchState, state)
+    if (!states.length) launch.restoreRunningGame(state => send(IPC_EVENT.launchState, state))
+  })
   ipcMain.handle(IPC.appearanceResetTheme, () => resetVisualTheme())
   ipcMain.handle(IPC.appearanceExportTheme, (_e, preview) => exportVisualTheme(preview?appearanceDraft.appearanceOnly(preview):undefined))
   ipcMain.handle(IPC.appearanceImportTheme, (_e, code: string, preview?: boolean) => importVisualTheme(code,preview===true))

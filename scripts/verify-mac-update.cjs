@@ -31,6 +31,12 @@ module.exports=async function(source,arch,proof){
     data=await new Promise((r,j)=>{debug.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id===1)m.result?.exceptionDetails?j(Error(JSON.stringify(m.result.exceptionDetails))):r(m.result.result.value)});debug.send(JSON.stringify({id:1,method:'Runtime.evaluate',params:{expression:`process.mainModule.require('electron').app.getPath('userData')`,returnByValue:true}}))})
     debug.close();marker=path.join(data,'mac-update.json');claim=marker+'.applying'
     await c.evaluate(`window.kamucl.invoke('settings:set',{autoUpdate:false})`)
+    // A staged payload modified after approval must leave the original app usable.
+    await c.evaluate(`window.kamucl.invoke('update:applyLocal',{filePath:${JSON.stringify(zip)}})`)
+    fs.appendFileSync(read(marker).file,'corrupted-after-staging')
+    c.ws.close();await stop(child);child=start();c=await connect()
+    assert(fs.existsSync(claim+'.failed'),'tampered update was not rejected')
+    execFileSync('codesign',['--verify','--deep','--strict',target])
     await c.evaluate(`window.kamucl.invoke('update:applyLocal',{filePath:${JSON.stringify(zip)}})`)
     assert.equal(read(marker)?.release.assetName,path.basename(zip));c.ws.close();await stop(child)
     start();const installed=await waitReceipt();assert(fs.existsSync(installed.state.backupPath));execFileSync('codesign',['--verify','--deep','--strict',target])
@@ -41,7 +47,7 @@ module.exports=async function(source,arch,proof){
     fs.renameSync(claim+'.completed',claim+'.upgrade-proof')
     start();const rollback=await waitReceipt();assert.equal(rollback.t.mode,'rollback');execFileSync('codesign',['--verify','--deep','--strict',target])
     relaunchedPid=ownPid();assert(relaunchedPid)
-    fs.writeFileSync(path.join(proof,'update.json'),JSON.stringify({arch,version,upgrade:installed,rollback,pathWithSpacesAndApostrophe:true,signedBundles:true},null,2))
+    fs.writeFileSync(path.join(proof,'update.json'),JSON.stringify({arch,version,upgrade:installed,rollback,pathWithSpacesAndApostrophe:true,signedBundles:true,tamperRejectedWithoutBreakingStartup:true},null,2))
     console.log('PASS real Mac packaged update and rollback receipt')
   } finally {
     sockets.forEach(ws=>ws.close());for(const child of children)if(child.exitCode===null)child.kill('SIGTERM')

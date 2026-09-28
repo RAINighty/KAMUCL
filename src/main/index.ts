@@ -118,6 +118,7 @@ function createWindow(startup?: Awaited<ReturnType<typeof createStartupSplash>>)
   trackWindowState(win)
   win.once('show', () => { void acknowledgeUpdateStartup().catch(error => launcherLogWarn('update', '更新确认失败', error)) })
   const mainWindow = win
+  mainWindow.once('closed', () => { if (win === mainWindow) win = null })
   // 静默瘦身钩子：最小化/隐藏触发工作集整理 + 渲染层瘦身广播；恢复不做处理（自然回涨）
   mainWindow.on('minimize', () => memTrim?.noteHidden())
   mainWindow.on('hide', () => memTrim?.noteHidden())
@@ -185,7 +186,7 @@ app.whenReady().then(async () => {
   })
   const { registerPluginProtocol } = await import('./core/plugins')
   registerPluginProtocol()
-  registerIpc(() => win)
+  registerIpc(() => win && !win.isDestroyed() ? win : null)
   launcherLogInfo('main', 'IPC 通道与插件协议注册完成')
 
   // 存量实例自包含迁移（老式 inheritsFrom 继承 → 合并进实例，幂等）：基础版本改名/删除不再波及已装实例
@@ -203,12 +204,8 @@ app.whenReady().then(async () => {
   createWindow(startup)
   launcherLogInfo('main', '主窗口创建完成')
 
-  // 重开启动器时恢复运行中游戏：主窗口加载完成后推送 running 状态 + 日志尾部
+  // 自动更新计时器只注册一次；游戏状态由每个窗口的 renderer-ready 重放。
   win?.webContents.once('did-finish-load', () => {
-    void import('./core/launch').then(({ restoreRunningGame }) => {
-      const record = restoreRunningGame((s) => win?.webContents.send('event:launchState', s))
-      if (record) launcherLogInfo('main', `检测到运行中游戏已恢复：pid=${record.pid} 实例=${record.versionId}`)
-    })
     // 更新：启动自动检查（自动安装模式静默下载；弹窗模式才提示）；已有就绪更新则通知
     const runUpdateCheck = async () => {
       try {
