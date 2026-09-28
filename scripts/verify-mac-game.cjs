@@ -104,11 +104,13 @@ async function main() {
         try { const info = JSON.parse(fs.readFileSync(path.join(home, 'running-game.json'), 'utf8')); if (info.versionId === installed.installedId) gamePid = info.pid } catch {}
       }
     }
-    if (gamePid && arch === 'x64' && process.env.MAC_GAME_NATIVE_DEBUG === '1' && !debuggerProcess) {
+    if (gamePid && arch === 'x64' && process.env.MAC_GAME_NATIVE_DEBUG !== '0' && !debuggerProcess) {
       const output = fs.openSync(path.join(proof, 'native-backtrace.txt'), 'w')
-      debuggerProcess = spawn('/usr/bin/sudo', ['/usr/bin/lldb', '--batch', '-p', String(gamePid),
+      debuggerProcess = spawn('/usr/bin/sudo', ['/usr/bin/lldb', '--batch',
+        '-O', 'settings set platform.plugin.darwin.ignored-exceptions EXC_BAD_ACCESS|EXC_BAD_INSTRUCTION|EXC_ARITHMETIC', '-p', String(gamePid),
         '-o', 'process handle SIGSEGV -s false -n false -p true',
         '-o', 'process handle SIGBUS -s false -n false -p true',
+        '-o', 'process handle SIGILL -s false -n false -p true',
         '-o', 'continue', '-k', 'thread backtrace all', '-o', 'thread backtrace all', '-o', 'detach'], { stdio: ['ignore', output, output] })
       fs.closeSync(output)
     }
@@ -139,8 +141,8 @@ async function main() {
   execFileSync('/usr/bin/open',['-a',app]);await wait(1500)
   assert.equal(Number(execFileSync(fixture,['--front-pid'],{encoding:'utf8'}).trim()),child.pid,'launcher must own focus before game focus test')
   execFileSync(helper,['focus',String(gamePid),'15000'],{timeout:17000})
-  // Drive the real client button through a test-only Fabric mod. Hosted Mac TCC
-  // intentionally blocks synthetic mouse input; no accessibility bypass is needed.
+  // Drive the real client button through a test-only Fabric mod, without relying
+  // on permission to synthesize desktop mouse input in a hosted Mac session.
   fs.writeFileSync(trigger,'play-demo')
   let worldStarted=false
   for(let i=0;i<150;i++){
