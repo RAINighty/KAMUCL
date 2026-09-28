@@ -13,7 +13,9 @@ app.on('browser-window-created', (_event, window) => {
   if (!overlay) {
     overlay = window
     // Test rendering without covering or activating the user's desktop.
-    window.showInactive = () => {}; window.moveTop = () => {}
+    if (!(process.platform === 'darwin' && process.env.GITHUB_ACTIONS === 'true')) {
+      window.showInactive = () => {}; window.moveTop = () => {}
+    }
   }
 })
 const deadline = setTimeout(() => { console.error('Glass startup timed out', root); app.exit(2) }, 20000)
@@ -36,12 +38,12 @@ app.whenReady().then(async () => {
   try {
     await main.loadURL('data:text/html,<body>Private startup test</body>')
     while (overlay.webContents.isLoading()) await wait(30)
-    if (reduced) {
+    if (reduced || (process.platform === 'darwin' && process.env.GITHUB_ACTIONS === 'true')) {
       overlay.webContents.debugger.attach('1.3')
-      await overlay.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+      await overlay.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }] })
       overlay.webContents.reload()
       while (overlay.webContents.isLoading()) await wait(30)
-      assert(await overlay.webContents.executeJavaScript("matchMedia('(prefers-reduced-motion: reduce)').matches"))
+      assert.equal(await overlay.webContents.executeJavaScript("matchMedia('(prefers-reduced-motion: reduce)').matches"), reduced)
     }
     await wait(200)
     await overlay.webContents.executeJavaScript(`window.glassProof={pointer:null,poses:[]};window.kamuclSplash.onPointer(p=>glassProof.pointer=p);const c=document.querySelector('canvas').getContext('2d');const clear=c.clearRect.bind(c),translate=c.translate.bind(c);c.clearRect=(...a)=>{glassProof.poses=[];return clear(...a)};c.translate=(x,y)=>{glassProof.poses.push({x,y});return translate(x,y)};void 0`)
