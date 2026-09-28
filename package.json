@@ -75,6 +75,7 @@
       "artifactName": "KAMUCL-${version}.exe"
     },
     "mac": {
+      "minimumSystemVersion": "11.0.0",
       "target": [
         "zip"
       ],

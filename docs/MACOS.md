@@ -14,7 +14,7 @@
 
 红色关闭按钮只关闭窗口，联机房间继续运行；点击 Dock 图标可重新打开。退出应用会清理本启动器的联机服务，但不会强制结束正在运行的 Minecraft。
 
-启动器自动选择和下载适配架构的 Java。较旧 Minecraft 使用 Intel 原生库时，Apple Silicon 需要 Rosetta；现代版本可使用 ARM Java。GitHub 原生验证环境为 macOS 15，其他系统版本不等同于已实测。
+启动器自动选择和下载适配架构的 Java。较旧 Minecraft 使用 Intel 原生库时，Apple Silicon 需要 Rosetta；现代版本可使用 ARM Java。应用与原生辅助程序的最低部署版本统一为 macOS 11，GitHub 原生验证环境为 macOS 15，其他系统版本不等同于已实测。
 
 Terracotta 0.4.2 和 SakuraFRP 0.51.0-sakura-14 使用官方 Mac 客户端，按架构下载、校验并赋予执行权限。樱花穿透仍需用户自己的访问密钥和隧道；微软登录仍需用户自己的正版账户。
 
