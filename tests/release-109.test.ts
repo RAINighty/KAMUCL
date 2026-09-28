@@ -39,9 +39,9 @@ test('launch: game process survives launcher exit via CreateProcessW detach + ru
   assert.match(launch, /running-game\.json/)
   // 存活探测
   assert.match(launch, /process\.kill\(record\.pid, 0\)/)
-  const index = read('src/main/index.ts')
-  assert.match(index, /restoreRunningGame/)
-  assert.match(index, /did-finish-load/)
+  const ipc = read('src/main/ipc.ts')
+  assert.match(ipc, /boot:renderer-ready/)
+  assert.match(ipc, /restoreRunningGame/)
   const app = read('src/renderer/src/App.vue')
   // 关闭提示：游戏在跑时点关闭先 toast 再关
   assert.match(app, /closeHintShown/)

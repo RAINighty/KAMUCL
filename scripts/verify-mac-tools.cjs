@@ -18,7 +18,11 @@ app.whenReady().then(async()=>{
   tc=spawn(status.binaryPath,['--daemon'],{env,stdio:['ignore',log,log]});fs.closeSync(log)
   let port;for(let n=0;n<120;n++){assert.equal(tc.exitCode,null,'Terracotta exited early');await wait(500);try{execFileSync(status.binaryPath,['--hmcl',portFile],{env,timeout:5000});port=JSON.parse(fs.readFileSync(portFile,'utf8')).port;if(port)break}catch{}}
   assert(port,'Terracotta did not initialize its HTTP API');const state=await get(port,'/state');assert.doesNotThrow(()=>JSON.parse(state))
-  await get(port,'/panic?peaceful=true')
+  // The daemon closes its listener before this shutdown request always receives
+  // a response. Require the owned process to exit, not an HTTP response from it.
+  await get(port,'/panic?peaceful=true').catch(e=>{if(e.code!=='ECONNRESET')throw e})
+  for(let n=0;n<40&&tc.exitCode===null;n++)await wait(100)
+  assert.notEqual(tc.exitCode,null,'Terracotta did not stop after peaceful shutdown')
   fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({arch:process.arch,frpVersion,terracotta:status,apiState:JSON.parse(state)},null,2))
   console.log('PASS native Mac FRP and Terracotta download, hashes, permissions and execution')
 }).then(()=>{if(tc&&tc.exitCode===null)tc.kill();app.exit(0)}).catch(e=>{console.error(e);if(tc&&tc.exitCode===null)tc.kill();app.exit(1)})

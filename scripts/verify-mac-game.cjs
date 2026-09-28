@@ -108,10 +108,11 @@ async function main() {
       try { execFileSync('/usr/bin/sample', [String(gamePid), '3', '-file', path.join(proof, 'game-sample.txt')], { timeout: 15000, stdio: 'ignore' }) } catch {}
       try { execFileSync(path.join(process.env.JAVA_HOME,'bin/jcmd'), [String(gamePid),'Thread.print'], { timeout: 15000, stdio: ['ignore', fs.openSync(path.join(proof,'game-threads.txt'),'w'), 'ignore'] }) } catch {}
     }
-    if (nativeWindow && events.some(e => e.name === 'launchLog' && /OpenAL initialized|Created: .*textures|Reloading ResourceManager/.test(e.value))) break
+    if (nativeWindow && events.some(e => e.name === 'launchLog' && /Created: .*textures\/atlas\/gui/.test(e.value))) break
     await wait(1000)
   }
   assert(nativeWindow, 'Minecraft did not create a native window')
+  assert(events.some(e => e.name === 'launchLog' && /Created: .*textures\/atlas\/gui/.test(e.value)), 'Minecraft did not finish creating its GUI textures')
   assert(events.some(e => e.name === 'progress' && /Java 25 就绪 · Azul Zulu/.test(e.value.text)), 'Java fallback was not exercised')
   await wait(10000)
   events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
