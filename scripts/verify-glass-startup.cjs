@@ -8,7 +8,9 @@ delete process.env.KAMUCL_BOOT_SIGNAL
 const wait = ms => new Promise(r => setTimeout(r, ms))
 let overlay
 app.on('browser-window-created', (_event, window) => {
-  if (window.getTitle() === 'KAMUCL · 正在启动') {
+  // The first window belongs to createStartupSplash. On macOS Electron 33 the
+  // browser-window-created event precedes applying the constructor's title.
+  if (!overlay) {
     overlay = window
     // Test rendering without covering or activating the user's desktop.
     window.showInactive = () => {}; window.moveTop = () => {}
@@ -25,7 +27,7 @@ app.whenReady().then(async () => {
   const coordinator = await mod.exports.createStartupSplash()
   let painting = false
   const paintTimer = setInterval(async () => {
-    if (painting || overlay.isDestroyed()) return
+    if (painting || !overlay || overlay.isDestroyed()) return
     painting = true
     try { await overlay.webContents.capturePage() } catch { /* Overlay can disappear during an in-flight capture. */ } finally { painting = false }
   }, 25)

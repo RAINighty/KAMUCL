@@ -6,7 +6,7 @@ module.exports=async function(source,arch,proof){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"KAMUCL 更新 O'Neil ")),target=path.join(root,'KAMUCL.app')
   const version=require('../package.json').version,zip=path.join(root,`KAMUCL-${version}-mac-${arch}.zip`)
   execFileSync('/usr/bin/ditto',[source,target]);execFileSync('/usr/bin/ditto',['-c','-k','--sequesterRsrc','--keepParent',source,zip])
-  const data=path.join(os.homedir(),'Library/Application Support/kamucl'),marker=path.join(data,'mac-update.json'),claim=marker+'.applying'
+  let data,marker,claim
   const children=[],sockets=[];let relaunchedPid
   async function connect(){
     let page;for(let i=0;i<60;i++){try{page=(await(await fetch('http://127.0.0.1:9238/json')).json()).find(p=>p.url.includes('/renderer/index.html'));if(page)break}catch{}await wait(500)}assert(page,'update renderer unavailable')
@@ -15,7 +15,7 @@ module.exports=async function(source,arch,proof){
     const evaluate=expression=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>reject(Error('update IPC timeout')),90000);pending.set(n,m=>{clearTimeout(t);const r=m.result;m.error||r?.exceptionDetails?reject(Error(JSON.stringify(m.error||r.exceptionDetails))):resolve(r.result.value)});ws.send(JSON.stringify({id:n,method:'Runtime.evaluate',params:{expression,awaitPromise:true,returnByValue:true}}))})
     await wait(4500);return {evaluate,ws}
   }
-  const start=()=>{const child=spawn(path.join(target,'Contents/MacOS/KAMUCL'),['--remote-debugging-port=9238'],{stdio:'inherit'});children.push(child);return child}
+  const start=()=>{const child=spawn(path.join(target,'Contents/MacOS/KAMUCL'),['--remote-debugging-port=9238','--inspect=9239'],{stdio:'inherit'});children.push(child);return child}
   const stop=async child=>{const ended=new Promise(r=>child.once('exit',r));child.kill('SIGTERM');await ended;await wait(1000)}
   function read(file){try{return JSON.parse(fs.readFileSync(file,'utf8'))}catch{return null}}
   async function waitReceipt(){
@@ -26,6 +26,10 @@ module.exports=async function(source,arch,proof){
   function ownPid(){const rows=execFileSync('/bin/ps',['-axo','pid=,command='],{encoding:'utf8'}).split('\n');const row=rows.find(x=>x.trim().split(/\s+/,1)[0]!==String(process.pid)&&x.includes(path.join(target,'Contents/MacOS/KAMUCL'))&&!x.includes('Helper'));return row?Number(row.trim().split(/\s+/)[0]):null}
   try {
     let child=start(),c=await connect()
+    const main=(await(await fetch('http://127.0.0.1:9239/json')).json())[0],debug=new WebSocket(main.webSocketDebuggerUrl)
+    await new Promise((r,j)=>{debug.addEventListener('open',r,{once:true});debug.addEventListener('error',j,{once:true})})
+    data=await new Promise((r,j)=>{debug.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id===1)m.result?.exceptionDetails?j(Error(JSON.stringify(m.result.exceptionDetails))):r(m.result.result.value)});debug.send(JSON.stringify({id:1,method:'Runtime.evaluate',params:{expression:`process.mainModule.require('electron').app.getPath('userData')`,returnByValue:true}}))})
+    debug.close();marker=path.join(data,'mac-update.json');claim=marker+'.applying'
     await c.evaluate(`window.kamucl.invoke('settings:set',{autoUpdate:false})`)
     await c.evaluate(`window.kamucl.invoke('update:applyLocal',{filePath:${JSON.stringify(zip)}})`)
     assert.equal(read(marker)?.release.assetName,path.basename(zip));c.ws.close();await stop(child)
@@ -42,6 +46,6 @@ module.exports=async function(source,arch,proof){
   } finally {
     sockets.forEach(ws=>ws.close());for(const child of children)if(child.exitCode===null)child.kill('SIGTERM')
     if(relaunchedPid)try{process.kill(relaunchedPid,'SIGTERM')}catch{}
-    if(fs.existsSync(path.join(data,'mac-updater.log')))fs.copyFileSync(path.join(data,'mac-updater.log'),path.join(proof,'updater-log.txt'))
+    if(data&&fs.existsSync(path.join(data,'mac-updater.log')))fs.copyFileSync(path.join(data,'mac-updater.log'),path.join(proof,'updater-log.txt'))
   }
 }
