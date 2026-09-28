@@ -20,4 +20,4 @@ app.whenReady().then(async()=>{
   await get(port,'/panic?peaceful=true')
   fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({arch:process.arch,frpVersion,terracotta:status,apiState:JSON.parse(state)},null,2))
   console.log('PASS native Mac FRP and Terracotta download, hashes, permissions and execution')
-}).then(()=>app.exit(0)).catch(e=>{console.error(e);app.exit(1)}).finally(()=>{if(tc&&tc.exitCode===null)tc.kill()})
+}).then(()=>{if(tc&&tc.exitCode===null)tc.kill();app.exit(0)}).catch(e=>{console.error(e);if(tc&&tc.exitCode===null)tc.kill();app.exit(1)})

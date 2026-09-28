@@ -105,7 +105,19 @@ async function main() {
   events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
   assert(!events.some(e => e.name === 'launchState' && ['error', 'exited'].includes(e.value.status)), 'game exited during initialization')
   execFileSync('/usr/sbin/screencapture', ['-x', '-D', '1', path.join(proof, 'minecraft.png')])
-  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true }, null, 2))
+  const helper=path.join(app,'Contents/Resources/app.asar.unpacked/out/main/MacGameWindow')
+  execFileSync(helper,['focus',String(gamePid),'15000'],{timeout:17000})
+  execFileSync(helper,['close',String(gamePid),'6000'],{timeout:8000})
+  let exited=false
+  for(let i=0;i<90;i++){
+    events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
+    try{process.kill(gamePid,0)}catch{exited=true;break}
+    await wait(1000)
+  }
+  assert(exited,'normal Cocoa close did not exit Minecraft')
+  assert(events.some(e=>e.name==='launchLog'&&/Stopping!|Stopping the|Saving|正常退出|退出.*0/.test(e.value)),'game did not report a normal shutdown')
+  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, nativeFocus:true, gracefulClose:true }, null, 2))
+  gamePid=null
   console.log('PASS actual Minecraft window', arch, version)
 }
 main().catch(e => { console.error(e); process.exitCode = 1 }).finally(async () => {

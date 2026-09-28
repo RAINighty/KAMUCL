@@ -44,7 +44,11 @@ async function main(){
  assert(facePixels>20&&shirtPixels>20,'default skin texture not rendered')
  // The black-purple default intentionally uses a 96% solid surface. Test native
  // material using the existing translucent black-orange theme, without changing defaults.
- await call('Runtime.evaluate',{expression:`window.kamucl.invoke('settings:set',{theme:'black-orange'})`,awaitPromise:true});await wait(1000)
+ await call('Runtime.evaluate',{expression:`window.kamucl.invoke('settings:set',{theme:'black-orange'})`,awaitPromise:true})
+ // Settings IPC persists state; the normal settings view updates its Vue store.
+ // Reload to exercise the same saved-theme startup path without poking Vue internals.
+ await call('Page.reload');await wait(3000)
+ console.log('Material theme',await call('Runtime.evaluate',{expression:`({theme:document.documentElement.dataset.theme,surface:getComputedStyle(document.querySelector('.shell')).backgroundColor})`,returnByValue:true}))
  // Page.captureScreenshot excludes the OS blur. Capture the actual NSWindow over two backgrounds.
  let nativeMaterial
  try {
@@ -77,4 +81,10 @@ async function main(){
  fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,binary,mainUI:true,macUI,skin:{facePixels,shirtPixels},nativeMaterial,url:page.url},null,2));ws.close()
  console.log('PASS native macOS '+arch+' packaged app '+version)
 }
-main().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>{child.kill('SIGTERM');fixture.kill('SIGTERM');fs.closeSync(log)})
+main().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{
+ const ended=new Promise(resolve=>{if(child.exitCode!==null)resolve();else child.once('exit',resolve)})
+ child.kill('SIGTERM');fixture.kill('SIGTERM');await ended;fs.closeSync(log)
+ if(!process.exitCode&&process.env.GITHUB_ACTIONS==='true'&&appPath.startsWith(path.resolve('release')+path.sep)){
+   try{await require('./verify-mac-extra.cjs')(appPath,arch)}catch(e){console.error(e);process.exitCode=1}
+ }
+})
