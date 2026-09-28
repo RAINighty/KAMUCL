@@ -1,6 +1,10 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
+if (process.platform === 'darwin') {
+  fs.mkdirSync(path.resolve('out/main'), { recursive: true })
+  execFileSync('swiftc', ['-O', 'native/MacGameWindow.swift', '-o', 'out/main/MacGameWindow'], { stdio: 'inherit' })
+}
 if (process.platform === 'win32') {
   for (const name of ['WindowMaterial', 'GameWindowFocus']) {
   const output = path.resolve(`out/main/${name}.exe`)

@@ -10,7 +10,7 @@ import { build } from 'esbuild'
 test('FRP 实际控制器会话独立：日志分别归属、密钥打码、单条停止、安装期间取消',async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'frp-workers-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}))
   const processes:any[]=[];let release!:()=>void;let downloads=0
-  const result=await build({entryPoints:['src/main/core/frp.ts'],bundle:true,write:false,platform:'node',format:'cjs',packages:'external',plugins:[{name:'download',setup(b){b.onResolve({filter:/^\.\/download$/},()=>({path:'download',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export const downloadFile=(...args)=>globalThis.__frpWorkerDownload(...args)'}))}}]})
+  const result=await build({entryPoints:['src/main/core/frp.ts'],bundle:true,write:false,platform:'node',format:'cjs',packages:'external',plugins:[{name:'download',setup(b){b.onResolve({filter:/^\.\/download$/},()=>({path:'download',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export const downloadAll=(...args)=>globalThis.__frpWorkerDownload(...args)'}))}}]})
   const require=createRequire(path.resolve('package.json')),mod={exports:{} as any}
   ;(globalThis as any).__frpWorkerDownload=async()=>{downloads++;await new Promise<void>(r=>release=r)}
   t.after(()=>delete (globalThis as any).__frpWorkerDownload)

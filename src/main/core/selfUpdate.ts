@@ -15,7 +15,7 @@ import { compareSemver, isNewerVersion } from '../../shared/semver'
 import type { ReleaseInfo, UpdateCheckResult } from '../../shared/types'
 import { httpFetch } from './httpClient'
 import { logScope } from './launcherLog'
-import { isolatedUpdateTest, trustedUpdateRelease } from './updateTrust'
+import { isolatedUpdateTest, trustedUpdateRelease, updateAssetName } from './updateTrust'
 
 const updateLog = logScope('self-update')
 
@@ -81,15 +81,15 @@ interface GhRelease {
 }
 
 /** 从 Release JSON 提取便携 exe 资产（排除 zip 与 SHA256SUMS） */
-function pickPortableExe(assets: GhAsset[] | undefined): GhAsset | null {
+function pickPortableExe(assets: GhAsset[] | undefined, version: string): GhAsset | null {
   if (!Array.isArray(assets)) return null
-  return assets.find((a) => /^KAMUCL-[\d.]+\.exe$/i.test(a.name ?? '')) ?? null
+  return assets.find((a) => a.name === updateAssetName(version)) ?? null
 }
 
 function toReleaseInfo(j: GhRelease): ReleaseInfo | null {
   const version = String(j.tag_name ?? '').replace(/^v/i, '')
   if (!version) return null
-  const asset = pickPortableExe(j.assets)
+  const asset = pickPortableExe(j.assets, version)
   const release: ReleaseInfo = {
     version,
     publishedAt: String(j.published_at ?? ''),

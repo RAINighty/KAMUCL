@@ -12,7 +12,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import { downloadFile } from './download'
+import { downloadAll } from './download'
 import { parseFrpLine, frpLineReader } from './frpLog'
 
 /** 默认本地转发目标（MC 局域网开放端口） */
@@ -21,6 +21,14 @@ export const DEFAULT_LOCAL_HOST = '127.0.0.1'
 /** 官方 frpc 直链（amd64 Windows；用户可在管理面板自行替换为对应架构）。 */
 export const FRPC_OFFICIAL_URL_WIN_AMD64 =
   'https://nya.globalslb.net/natfrp/client/frpc/0.51.0-sakura-14/frpc_windows_amd64.exe'
+
+export function frpcAsset(platform = process.platform, arch = process.arch): { url: string; sha256?: string } {
+  if (platform === 'win32') return { url: FRPC_OFFICIAL_URL_WIN_AMD64 }
+  const sha256 = arch === 'arm64' ? '465db9daea0e14e3adaa89926640afa8b44737dadc1cf0b75f9b091850d2e331'
+    : arch === 'x64' ? '74ee362350314dd5ac8936fbe2299fc76671051e10beb46c8dd37c36a4503935' : undefined
+  if (platform !== 'darwin' || !sha256) throw new Error(`樱花穿透暂不支持 ${platform}/${arch}`)
+  return { url: `https://nya.globalslb.net/natfrp/client/frpc/0.51.0-sakura-14/frpc_darwin_${arch === 'x64' ? 'amd64' : 'arm64'}`, sha256 }
+}
 
 export interface FrpConfig {
   accessKey: string
@@ -142,23 +150,20 @@ let installingFrpc: Promise<string> | null = null
 export function ensureFrpcInstalled(onLog?: (line: string) => void): Promise<string> {
   if (installingFrpc) return installingFrpc
   const target = frpcPath()
-  if (fs.existsSync(target)) return Promise.resolve(target)
-  if (process.platform !== 'win32') {
-    return Promise.reject(
-      new Error('当前平台未提供自动下载 frpc，请前往 natfrp.com/frpc/usage.html 手动下载 frpc 可执行文件并放到 ' + frpcDir())
-    )
-  }
+  if (fs.existsSync(target) && process.platform === 'win32') return Promise.resolve(target)
+  const asset = frpcAsset()
   fs.mkdirSync(frpcDir(), { recursive: true })
-  onLog?.('未检测到 frpc.exe，开始从官方下载…')
-  installingFrpc = downloadFile(FRPC_OFFICIAL_URL_WIN_AMD64, target, undefined, undefined, 'official')
+  onLog?.('正在准备樱花穿透官方客户端…')
+  installingFrpc = downloadAll([{ ...asset, dest: target }], undefined, 1, 'official')
     .then(() => {
-      onLog?.('frpc.exe 下载完成')
+      if (process.platform !== 'win32') fs.chmodSync(target, 0o755)
+      onLog?.('frpc 下载完成')
       return target
     })
     .catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)
       throw new Error(
-        `frpc.exe 下载失败：${msg}。请前往 https://natfrp.com/ 手动下载 frpc_windows_amd64.exe 放到 ${frpcDir()} 后重试`
+        `frpc 下载失败：${msg}。请检查网络后重试，官方下载地址：${asset.url}`
       )
     }).finally(() => { installingFrpc = null })
   return installingFrpc

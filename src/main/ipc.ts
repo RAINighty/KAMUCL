@@ -958,7 +958,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
     const opts = {
       properties: ['openFile' as const],
       title: '选择 KAMUCL 安装包',
-      filters: [{ name: 'KAMUCL 安装包', extensions: ['exe'] }]
+      filters: [{ name: 'KAMUCL 安装包', extensions: [process.platform === 'darwin' ? 'zip' : 'exe'] }]
     }
     const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     if (result.canceled || !result.filePaths[0]) return null

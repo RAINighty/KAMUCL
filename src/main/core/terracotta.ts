@@ -36,6 +36,18 @@ const ASSETS: Record<string, { pkg: string; sha256: string; packageSha256: strin
     packageSha256: 'acfab0a87a02dedc6dab7c05303186c8907f56f815548b693fb3324358da7d14',
     sha256: '782c2fa911488d487447694acca6b17fa68304c87023fb6814b83a167fc2845f',
     exe: `terracotta-${TC_VERSION}-windows-arm64.exe`
+  },
+  'darwin-arm64': {
+    pkg: `terracotta-${TC_VERSION}-macos-arm64-pkg.tar.gz`,
+    packageSha256: '13de7f9ce8733971b23493fabbe7e16d480f1e0d16a6265b4861f5a01bbecb60',
+    sha256: '14a6cfa98e841c33b552f2291b0637461f37813c0bb3d29c6b56a59cb5e6714a',
+    exe: `terracotta-${TC_VERSION}-macos-arm64`
+  },
+  'darwin-x64': {
+    pkg: `terracotta-${TC_VERSION}-macos-x86_64-pkg.tar.gz`,
+    packageSha256: '16306157d89423ce79fa901cdb75a6386ec1a9b1bd43a5d47c2c47cf01a16b86',
+    sha256: '07899429515f7646fd6c271acb39a2d3a34d330547b1d2682c2e3311db07aa0a',
+    exe: `terracotta-${TC_VERSION}-macos-x86_64`
   }
 }
 const DOWNLOAD_BASES = [
@@ -102,7 +114,10 @@ async function ensureBinary(signal: AbortSignal): Promise<string> {
   const exe = binaryPath()
   fs.mkdirSync(tcDir(), { recursive: true })
   if (fs.existsSync(exe)) {
-    if (await verifySha256(exe, asset.sha256)) return exe
+    if (await verifySha256(exe, asset.sha256)) {
+      if (process.platform !== 'win32') await fs.promises.chmod(exe, 0o755)
+      return exe
+    }
     emit('log', { level: 'warn', msg: '本地陶瓦二进制校验失败，重新下载' })
     fs.rmSync(exe, { force: true })
   }
@@ -121,6 +136,7 @@ async function ensureBinary(signal: AbortSignal): Promise<string> {
         if (!fs.existsSync(exe)) throw new Error(`压缩包内未找到 ${asset.exe}`)
         if (!(await verifySha256(exe, asset.sha256))) { await fs.promises.rm(exe, {force:true}); throw new Error('陶瓦 EXE 校验失败') }
         fs.rmSync(pkgPath, { force: true })
+        if (process.platform !== 'win32') await fs.promises.chmod(exe, 0o755)
         emit('log', { level: 'info', msg: '陶瓦官方二进制就绪（已通过 SHA-256 校验）' })
         return exe
       } catch (e) {

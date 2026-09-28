@@ -11,8 +11,8 @@
     "start": "electron-vite preview",
     "dist": "npm run dist:win",
     "dist:win": "npm run build && electron-builder --win portable --x64 --publish never && node scripts/pack-windows-zip.cjs",
-    "dist:mac": "electron-vite build && electron-builder --mac zip --x64 --arm64 --config.electronVersion=33.4.11",
-    "dist:all": "npm run dist:win && electron-builder --mac zip --x64 --arm64 --config.electronVersion=33.4.11",
+    "dist:mac": "node scripts/pack-mac.mjs",
+    "dist:all": "node scripts/dist-platform.cjs",
     "license:check": "node scripts/check-licenses.cjs"
   },
   "build": {
@@ -41,6 +41,7 @@
     "asarUnpack": [
       "out/main/WindowMaterial.exe",
       "out/main/GameWindowFocus.exe",
+      "out/main/MacGameWindow",
       "out/main/kamucl-bridge.jar"
     ],
     "beforePack": "scripts/portable-build-hook.cjs",

@@ -32,6 +32,7 @@ async function main(){
  await wait(3000)
  const screenshot=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(proof,'main.png'),Buffer.from(screenshot.data,'base64'))
  // Inspect rendered default-skin pixels; a live WebGL context alone would miss the old faceless fallback.
+ await call('Runtime.evaluate',{expression:`document.querySelector('.viewer3d')?.scrollIntoView({block:'center'})`});await wait(1000)
  const skinBounds=await call('Runtime.evaluate',{expression:`(()=>{const c=document.querySelector('.viewer3d canvas');const r=c?.getBoundingClientRect();return r?{x:r.x,y:r.y,width:r.width,height:r.height}:null})()`,returnByValue:true})
  assert(skinBounds.result.value,'skin WebGL canvas missing')
  const sharp=require('sharp'),bounds=skinBounds.result.value
@@ -41,6 +42,9 @@ async function main(){
  let facePixels=0,shirtPixels=0
  for(let i=0;i<skinPixels.length;i+=3){const [r,g,b]=skinPixels.subarray(i,i+3);if(r>140&&r>g*1.12&&g>b*1.05)facePixels++;if(g>85&&g>r*1.25&&b>r*1.2)shirtPixels++}
  assert(facePixels>20&&shirtPixels>20,'default skin texture not rendered')
+ // The black-purple default intentionally uses a 96% solid surface. Test native
+ // material using the existing translucent black-orange theme, without changing defaults.
+ await call('Runtime.evaluate',{expression:`window.kamucl.invoke('settings:set',{theme:'black-orange'})`,awaitPromise:true});await wait(1000)
  // Page.captureScreenshot excludes the OS blur. Capture the actual NSWindow over two backgrounds.
  let nativeMaterial
  try {
@@ -55,7 +59,7 @@ async function main(){
      await sharp(screen).extract({left:Math.round(b.X*scale),top:Math.round(b.Y*scale),width:Math.round(b.Width*scale),height:Math.round(b.Height*scale)}).toFile(path.join(proof,`native-${color}.png`))
    }
    nativeMaterial={captured:true,reducedTransparency:nativeWindow.reducedTransparency}
- } catch(e) { nativeMaterial={captured:false,reason:String(e.message)};console.warn('Native screen capture unavailable:',e.message) }
+ } catch(e) { throw new Error('Native screen capture failed: '+e.message) }
  if(nativeMaterial.captured){
    assert.equal(nativeMaterial.reducedTransparency,false,'CI must enable transparency to verify native material')
    const samples=[]
@@ -69,6 +73,7 @@ async function main(){
    nativeMaterial.samples=samples;nativeMaterial.difference=Math.max(...samples[0].map((v,i)=>Math.abs(v-samples[1][i])))
    assert(nativeMaterial.difference>2,'native macOS window still opaque over changing desktop background')
  }
+ await call('Runtime.evaluate',{expression:`window.kamucl.invoke('settings:set',{theme:'transparent'})`,awaitPromise:true})
  fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,binary,mainUI:true,macUI,skin:{facePixels,shirtPixels},nativeMaterial,url:page.url},null,2));ws.close()
  console.log('PASS native macOS '+arch+' packaged app '+version)
 }

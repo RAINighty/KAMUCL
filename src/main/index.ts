@@ -257,13 +257,16 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
   // 仅清理联机相关子进程/监听器；不影响 Minecraft 生命周期。
   void stopDirectHost()
   void stopVoxlinkOnQuit()
   void stopTerracottaOnQuit()
   void frpManager.shutdown().catch(error => launcherLogWarn('frp', '关闭隧道失败', error))
   launcherLogInfo('main', '所有窗口已关闭，开始清理联机相关资源')
-  if (process.platform !== 'darwin') app.quit()
 })
 
 // ---------------- 崩溃取证（win11 25h2 概率闪退排查） ----------------
