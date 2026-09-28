@@ -11,7 +11,10 @@ const log = fs.openSync(path.join(proof, 'launcher.log'), 'w'), env = { ...proce
 delete env.ELECTRON_RUN_AS_NODE
 // Hosted Intel Macs expose a paravirtual GPU whose Metal argument encoder
 // aborts inside MoltenVK. This documented driver setting is CI-only.
-if (arch === 'x64') env.MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS = '0'
+if (arch === 'x64') {
+  env.MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS = '0'
+  env.MVK_CONFIG_USE_MTLHEAP = '0'
+}
 const child = spawn(path.join(app, 'Contents/MacOS/KAMUCL'), ['--remote-debugging-port=9230', '--inspect=9231'], { env, stdio: ['ignore', log, log] })
 const wait = ms => new Promise(r => setTimeout(r, ms))
 let ws, mainWs, evaluate, gamePid, gameFolder, debuggerProcess, events = []
@@ -152,6 +155,7 @@ async function main() {
     process.kill(gamePid,0);await wait(1000)
   }
   assert(worldStarted,'demo world did not start')
+  await wait(10000) // Let the client finish its terrain transition before capturing it.
   execFileSync('/usr/sbin/screencapture',['-x','-D','1',path.join(proof,'minecraft-world.png')])
   execFileSync(helper,['close',String(gamePid),'6000'],{timeout:8000})
   let exited=false
@@ -168,7 +172,7 @@ async function main() {
   const regionFiles=fs.readdirSync(regionDir).filter(f=>f.endsWith('.mca')&&fs.statSync(path.join(regionDir,f)).size>0)
   assert(regionFiles.length>0,'demo world chunks were not saved')
   assert(!fs.readFileSync(path.join(proof,'launcher.log'),'utf8').includes('Object has been destroyed'),'closed window broke background callbacks')
-  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, worldStarted,savedWorld:true,regionFiles,nativeFocus:true, gracefulClose:true,closeAndDockReopen:true,ciMetalArgumentBuffers:env.MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS??null }, null, 2))
+  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, worldStarted,savedWorld:true,regionFiles,nativeFocus:true, gracefulClose:true,closeAndDockReopen:true,ciMetalArgumentBuffers:env.MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS??null,ciMetalHeap:env.MVK_CONFIG_USE_MTLHEAP??null }, null, 2))
   gamePid=null
   console.log('PASS actual Minecraft window', arch, version)
 }
