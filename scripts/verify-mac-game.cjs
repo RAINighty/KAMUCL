@@ -93,7 +93,8 @@ async function main() {
   metadata.arguments.game.push('--demo'); fs.writeFileSync(idPath, JSON.stringify(metadata))
   await evaluate(`window.kamucl.invoke('game:launch',${JSON.stringify(installed.installedId)},null,${JSON.stringify(folder)})`)
   let nativeWindow, lastState
-  const fixture = path.resolve(`release/mac-proof-${arch}/material-fixture`)
+  const fixture = path.resolve(`release/mac-proof-${arch}-app/material-fixture`)
+  assert(fs.existsSync(fixture), 'native window probe is missing: '+fixture)
   for (let i = 0; i < 240; i++) {
     const batch = await evaluate('window.__gameTestEvents.splice(0)'); events.push(...batch)
     for (const e of batch) {
