@@ -14,7 +14,12 @@ module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
       // Dismiss an actually covering notification through its real visible close button.
       if(!state?.dismiss)return
       proof.occlusions.push({selector,...state});persist();await screenshot('skin-notification-occlusion-'+proof.occlusions.length)
-      for(const [type,buttons]of [['mouseMoved',0],['mousePressed',1],['mouseReleased',0]])await call('Input.dispatchMouseEvent',{type,...state.dismiss,button:type==='mouseMoved'?'none':'left',buttons,clickCount:type==='mouseMoved'?0:1})
+      // A notification can expire while capturing its evidence. Its former
+      // close coordinates may now belong to the editor entry underneath.
+      const fresh=await evaluate(`(()=>{const toast=[...document.querySelectorAll('.toast')].find(e=>e.textContent.trim()===${JSON.stringify(state.toast)}),close=toast?.querySelector('.toast-close'),r=close?.getBoundingClientRect();return close&&r&&!close.disabled&&r.width>0&&r.height>0&&close.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))?{x:r.left+r.width/2,y:r.top+r.height/2}:null})()`)
+      proof.occlusions.at(-1).freshDismiss=fresh;persist()
+      if(!fresh)return
+      for(const [type,buttons]of [['mouseMoved',0],['mousePressed',1],['mouseReleased',0]])await call('Input.dispatchMouseEvent',{type,...fresh,button:type==='mouseMoved'?'none':'left',buttons,clickCount:type==='mouseMoved'?0:1})
       await wait(250)
     })
     const p=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`)
@@ -62,8 +67,9 @@ module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
   await main(`globalThis.skin118OriginalDialog=testElectron.dialog.showSaveDialog;globalThis.skin118SaveMode='normal';testElectron.dialog.showSaveDialog=async()=>{if(skin118SaveMode==='delay')return await new Promise(r=>globalThis.skin118ResumeSave=r);if(skin118SaveMode==='error')throw Error('验证保存拒绝');return skin118SaveMode==='cancel'?{canceled:true}:{canceled:false,filePath:${JSON.stringify(output)}}}`)
   try{
     await nav('skins')
-    for(const [width,height,zoom] of [[960,620,1],[1280,900,1.25],[1440,960,1.5]]){
-      await main(`testElectron.BrowserWindow.getAllWindows()[0].setSize(${width},${height});testElectron.BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(${zoom})`);await wait(250);await screenshot('skin-page-'+width+'-'+zoom);await open();await pose('正面');await screenshot('skin-editor-'+width+'-'+zoom)
+    for(const [width,height,zoom] of [[960,620,1],[1280,900,1.25],[1440,960,1.5],[1440,684,1.5]]){
+      await main(`testElectron.BrowserWindow.getAllWindows()[0].setSize(${width},${height});testElectron.BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(${zoom})`);await wait(250);await screenshot('skin-page-'+width+'-'+zoom+(height===684?'-compact':''));await open();await pose('正面');await screenshot('skin-editor-'+width+'-'+zoom+(height===684?'-compact':''))
+      const previewHeight=await evaluate(`document.querySelector('.skin-editor canvas').getBoundingClientRect().height`);assert(previewHeight>=120,'skin canvas must remain large enough to draw: '+previewHeight);
       const partControls=await evaluate(`(()=>{const scope=document.querySelector('.editor-model').getBoundingClientRect();return [...document.querySelectorAll('.part-tools button')].map(e=>{const r=e.getBoundingClientRect();return{name:e.textContent.trim(),visible:r.width>0&&r.height>0&&r.left>=scope.left&&r.right<=scope.right&&r.top>=scope.top&&r.bottom<=scope.bottom&&r.bottom<=innerHeight}})})()`);assert.equal(partControls.length,6);assert(partControls.every(p=>p.visible),'all six part controls must be visible without preview scrolling: '+JSON.stringify(partControls));
       const baseline=await png(),before=await canvasShot();await gesture('middle');assert.notEqual(await canvasShot(),before,'middle drag changes actual model rendering');assert.equal(await png(),baseline,'middle rotation preserves all exported RGBA pixels')
       assert(await evaluate(`[...document.querySelectorAll('.editor-footer-history button')].every(b=>b.disabled)`),'rotation has no undo record')
@@ -76,11 +82,11 @@ module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
       const layout=await evaluate(`(()=>{const d=document.querySelector('.skin-close-dialog'),r=d.getBoundingClientRect(),x=document.querySelector('.editor-close').getBoundingClientRect(),f=document.querySelector('.editor-footer').getBoundingClientRect();return{innerWidth,innerHeight,confirm:{left:r.left,top:r.top,right:r.right,bottom:r.bottom},x:{top:x.top,right:x.right,bottom:x.bottom},footer:{top:f.top,bottom:f.bottom},focus:document.activeElement.textContent.trim(),role:d.getAttribute('role')}})()`)
       assert(layout.confirm.top>=0&&layout.confirm.bottom<=layout.innerHeight&&layout.confirm.right<=layout.innerWidth);assert(layout.x.top>=0&&layout.x.bottom<=layout.innerHeight);assert(layout.footer.bottom<=layout.innerHeight);assert.equal(layout.role,'alertdialog');assert.equal(layout.focus,'继续绘制')
       for(let i=0;i<6;i++){await key('Tab');assert(await evaluate(`document.querySelector('.skin-close-dialog').contains(document.activeElement)`),'Tab stays inside confirmation')}
-      await screenshot('skin-close-'+width+'-'+zoom);await cancelConfirm()
+      await screenshot('skin-close-'+width+'-'+zoom+(height===684?'-compact':''));await cancelConfirm()
       await coordinateClick('[aria-label="关闭绘制皮肤"]');await main(`skin118SaveMode='cancel'`);await clickText('.skin-close-dialog','保存并退出');assert(await evaluate(`!!document.querySelector('.skin-close-dialog')`),'cancelled save keeps document open');await cancelConfirm()
       if(width===960){await coordinateClick('[aria-label="关闭绘制皮肤"]');await main(`skin118SaveMode='error'`);await clickText('.skin-close-dialog','保存并退出');assert(await evaluate(`!!document.querySelector('.skin-close-dialog')`));await visibleError('.skin-close-dialog','验证保存拒绝');await cancelConfirm()}
       await main(`skin118SaveMode='normal'`);await discardEditor();assert(await evaluate(`document.activeElement?.classList.contains('skin-editor-entry')`),'editor restores page opener focus')
-      proof.layouts.push({width,height,zoom,...layout,middleRotate:true,altRotate:true,rgbaPreserved:true,oneUndoStroke:true,partControls});persist()
+      proof.layouts.push({width,height,zoom,...layout,middleRotate:true,altRotate:true,rgbaPreserved:true,oneUndoStroke:true,partControls,previewHeight});persist()
     }
     // Suppress only the final acknowledged destroy/quit IPC in this throwaway process.
     await main(`globalThis.skin118CloseListeners=testElectron.ipcMain.listeners('window:close');globalThis.skin118QuitListeners=testElectron.ipcMain.listeners('window:skinEditorQuit');globalThis.skin118WindowRequests=0;globalThis.skin118QuitRequests=0;testElectron.ipcMain.removeAllListeners('window:close');testElectron.ipcMain.removeAllListeners('window:skinEditorQuit');testElectron.ipcMain.on('window:close',()=>skin118WindowRequests++);testElectron.ipcMain.on('window:skinEditorQuit',()=>skin118QuitRequests++);testElectron.BrowserWindow.getAllWindows()[0].setSize(960,620);testElectron.BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1)`);await wait(250)
