@@ -1,13 +1,24 @@
 # CURRENT STATUS
 
-## 交付状态
+## Identity
+
+- Project: KAMUCL。
+- Version or revision: 1.1.6，应用实现 f5ae0fe，最终源码标签 v1.1.6。
+- Status timestamp: 2026-10-02 01:52（Asia/Hong_Kong）。
 
 - 项目：KAMUCL，版本 1.1.6。
 - 本地时间：2026-10-02 01:52。
 - 应用实现：f5ae0fe；原生 Mac 完整验证：d5f93ee。最终对应源码以 v1.1.6 标签为准。
 - 本批六项功能完成；master 与 main 保持独立历史，逐批 cherry-pick 同步。
 
-## 实际验证
+## Last verified state
+
+- Build command: npm ci；node scripts/build-bridge.cjs；npm run build。
+- Build result: 当前工作区与干净源码构建通过。
+- Test/validation commands: npm test；npx tsc --noEmit；node scripts/check-licenses.cjs；平台与 GUI 验证脚本。
+- Validation results: 560 项测试及下列实际成品检查通过；未覆盖项目单独列出。
+- Finished artifact: 下表七个已验证的 Windows / Mac 成品。
+- Artifact SHA256: 下表记录全部七个成品的完整 SHA256。
 
 - npm test：560 / 560，通过，无跳过。
 - npx tsc --noEmit、npm run build、node scripts/check-licenses.cjs：通过。
@@ -22,17 +33,19 @@
 
 证据：docs/validation-1.1.6/windows.json、mac.json、voxlink-live.json；Mac CI 运行 36900960198。
 
-## 功能与重要文件
+## Completed
 
 皮肤、投影、模组收藏、七人互动、Windows 内存整理的入口及边界见 docs/FEATURES_1.1.6.md。
 VoxLink 的固定上游版本、逐值常量、协议适配和未覆盖项见 docs/VOXLINK_AUDIT_1.1.6.md。
 START_HERE.md 给出完整 JDK、Node、构建、验证及成品使用方法。
 
-## 未覆盖与限制
+## Remaining
 
 真实微软皮肤上传、真实工单附件提交、公网对称 NAT 和跨 Java 客户端仍需实际参与者验收。
 未验证所有投影 MOD 的游戏内加载、未来 26.x、所有收藏项目依赖组合、Windows 启动前整理的真实游戏全过程、
 每种受保护进程和每个平台的新功能窄窗口组合。模拟服务、回环协议和实际网络证据分别记录。
+## Known issues and risks
+
 投影未知迁移会明确提示损失或拒绝转换；原文件保留。Mac 仅 ad-hoc 签名，没有开发者签名或公证。
 内存整理独立实现，不包含 PCL 程序或未公开代码；不结束进程或改变长期内存策略。
 
@@ -52,7 +65,7 @@ START_HERE.md 给出完整 JDK、Node、构建、验证及成品使用方法。
 | KAMUCL-1.1.6-mac-x64.zip | 101261197 | 9daf551707d6043a948416e9b2b01e7f1d243402cd0f159f2afd7b1e352efffd |
 
 
-## 验证与后续使用
+## Recommended next action
 
 交接包记录的便携验证入口：node scripts/check-licenses.cjs。
 接收者先核对外层 SHA256，再核对 _handoff/manifest.json 并运行 START_HERE.md 中的验证命令。

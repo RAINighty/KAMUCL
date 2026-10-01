@@ -3,7 +3,12 @@
 本包包含六项功能的源码、资源、锁文件、测试、许可证与已验证的发布成品。
 功能入口和投影转换边界见 `docs/FEATURES_1.1.6.md`，当前验证状态和成品摘要见 `CURRENT_STATUS.md`。
 
-## 使用成品
+- Project: KAMUCL 1.1.6。
+- Deliverable: 六项功能、双平台成品、完整源码和验证记录。
+- Packaged artifact: Windows EXE / ZIP、Mac arm64 / x64 DMG / ZIP。
+- Intended receiver: 启动器使用者及接续开发者。
+
+## Use the deliverable
 
 Windows x64 使用 `KAMUCL-1.1.6.exe`，或先解压 `KAMUCL-1.1.6-windows-x64.zip`。
 保留 EXE 旁的 `KAMUCL-runtime` 缓存；无法运行自解压包装器时可使用 unpacked ZIP。
@@ -11,13 +16,18 @@ Mac 按芯片选择 arm64 或 x64 的 DMG / ZIP，将 APP 放到 Applications。
 Mac 成品采用 ad-hoc 签名，未进行 Apple Developer ID 签名或公证。
 交接 ZIP 的成品位于 `_handoff/artifacts/`；GitHub Release 提供各平台的独立下载。
 
-## 环境与构建
+## Prerequisites
+
+- Operating system: Windows x64，或 macOS Apple Silicon / Intel。
+- Runtime/tool versions: Node.js 22+、npm、完整 JDK 17+、Git；Mac 构建需 Xcode 命令行工具。
 
 源码开发需要 Node.js 22 或更高版本、npm、Git、JDK 17 或更高版本及网络访问。
 必须将 `JAVA_HOME` 指向包含 `javac` 和 `jar` 的完整 JDK。
 Windows 使用 PowerShell；Mac 原生构建需要 Xcode 命令行工具及对应架构的 macOS。
 工具、运行库和游戏依赖会从其官方服务下载，缓存不包含在源码或交接包内。
 登录账号、VoxLink 工单凭据、发布令牌和签名材料由使用者另行提供，本包不包含这些内容。
+
+## Setup
 
 ```text
 npm ci
@@ -32,7 +42,7 @@ Windows 成品命令为 `npm run dist:win`。Mac 原生双架构交付流程见
 `.github/workflows/mac-build.yml`；macOS 当前使用 Electron 33.4.11，Windows 使用 Electron 44.3.0。
 不要在 Windows 上把交叉打包结果作为 Mac 实际启动验收。
 
-## 干净解压验证
+## Verify
 
 无需安装 npm 依赖即可运行许可证与对应源码检查，失败时退出码非零：
 
