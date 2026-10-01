@@ -12,7 +12,7 @@ require.cache[modulePath].exports=async ctx=>{
  const result={version:ctx.version,models:{},layout:[]}
  for(const variant of ['classic','slim']){
   await select(variant);await button('新建');await wait(200)
-  await evaluate(`(()=>{const e=document.querySelector('.skin-editor input[type=color]');e.value='#1177ee';e.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+  await evaluate(`(()=>{const e=document.querySelector('.skin-editor .palette-hex');e.value='#1177ee';e.dispatchEvent(new Event('input',{bubbles:true}))})()`)
   for(const [x,y]of [[.385,.44],[.615,.44],[.5,.44],[.46,.76],[.54,.76]])await paint(x,y)
   await button('保存 PNG…');await wait(250)
   const pixels=await main(`(()=>{const b=testElectron.nativeImage.createFromPath(${JSON.stringify(output)}).toBitmap(),p=[];for(let i=0;i<b.length;i+=4)if(b[i]===238&&b[i+1]===119&&b[i+2]===17)p.push([i/4%64,Math.floor(i/4/64)]);return p})()`)

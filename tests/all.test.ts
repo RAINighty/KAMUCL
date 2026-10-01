@@ -129,3 +129,7 @@ import './ui-refinement.test'
 
 import './ui-motion-112.test'
 import './curseforge-cdn-114.test'
+import './skin-palette-preferences.test'
+import './skin-colors-117.test'
+import './gallery-favorites-117.test'
+import './mascot-117.test'

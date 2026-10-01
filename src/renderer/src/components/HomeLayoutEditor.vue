@@ -1,12 +1,9 @@
 <script setup lang="ts">
 /** 图一固定布局下的个性化背景与启动卡图片管理。 */
-import banner1 from '../assets/banner1.webp'
-import banner2 from '../assets/banner2.webp'
-import banner3 from '../assets/banner3.webp'
-import banner4 from '../assets/banner4.png'
-const builtInPreviews=[banner1,banner2,banner3,banner4]
+import { builtInLaunchImages } from '../launchImages'
+import ConfirmModal from './ConfirmModal.vue'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { carouselImages, carouselDuration, MAX_CAROUSEL_IMAGES } from '@shared/appearancePolicy'
+import { carouselImages, carouselKeys, activeCarouselKeys, carouselDuration, MAX_CAROUSEL_IMAGES } from '@shared/appearancePolicy'
 import { updateSettings } from '../settingsUpdates'
 import {
   errText,
@@ -14,8 +11,7 @@ import {
   importBackground,
   importBackgroundMulti,
   importLaunchThumbnail,
-  resetBackground,
-  resetLaunchThumbnail
+  resetBackground
 } from '../api'
 import { store, toast } from '../store'
 import { managedImageUrl } from '../managedAssets'
@@ -49,19 +45,38 @@ const fitModes: Array<{ value: ImageFit; label: string }> = [
 const importingBackground = ref(false)
 const importingThumbnail = ref(false)
 const backgroundPreviewFailed = ref(false)
-const thumbnailPreviewFailed = ref(false)
 const images = computed(() => carouselImages(store.settings?.launchThumbnail))
-function changeImages(next: string[]) {
+const slides = computed(() => carouselKeys(store.settings?.launchThumbnail).map(key => {
+  const bundled = builtInLaunchImages.find(image => image.key === key)
+  return { key, src: bundled?.src ?? managedImageUrl(key), title: bundled?.title ?? `自定义图片 ${images.value.indexOf(key) + 1}`, builtin: !!bundled }
+}))
+const activeSlides = computed(() => new Set(activeCarouselKeys(store.settings?.launchThumbnail)))
+const removeThumbnail = ref<string | null>(null)
+const removingThumbnail = ref(false)
+const brokenThumbnailPreviews = ref(new Set<string>())
+function setSlidesEnabled(keys: string[], enabled: boolean) {
   if (!store.settings) return
-  thumbnailPreviewFailed.value = false
-  save({ launchThumbnail: { ...store.settings.launchThumbnail, images: next, image: next[0] ?? '' } })
+  const disabled = new Set(store.settings.launchThumbnail.disabled ?? [])
+  for (const key of keys) enabled ? disabled.delete(key) : disabled.add(key)
+  save({ launchThumbnail: { ...store.settings.launchThumbnail, disabled: [...disabled] } })
+}
+async function deleteThumbnail() {
+  if (!store.settings || !removeThumbnail.value || removingThumbnail.value) return
+  removingThumbnail.value = true
+  const next = images.value.filter(image => image !== removeThumbnail.value)
+  try {
+    await updateSettings({ launchThumbnail: { ...store.settings.launchThumbnail, images: next, image: next[0] ?? '' } })
+    removeThumbnail.value = null
+  } catch (e) { toast('移除图片失败：' + errText(e), 'error') }
+  finally { removingThumbnail.value = false }
 }
 function moveImage(index: number, direction: number) {
-  const next = [...images.value]
+  if (!store.settings) return
+  const next = slides.value.map(image => image.key)
   const target = index + direction
   if (target < 0 || target >= next.length) return
   ;[next[index], next[target]] = [next[target], next[index]]
-  changeImages(next)
+  save({ launchThumbnail: { ...store.settings.launchThumbnail, order: next } })
 }
 function setDuration(value: string, image?: string) {
   if (!store.settings) return
@@ -152,8 +167,7 @@ async function pickLaunchThumbnail() {
     const settings = await importLaunchThumbnail()
     if (settings) {
       store.settings = settings
-      thumbnailPreviewFailed.value = false
-      toast('启动卡缩略图已保存到 KAMUCL 资源目录', 'success')
+      toast('图片已追加到启动卡轮播，原文件不受影响', 'success')
     }
   } catch (error) {
     toast('导入缩略图失败：' + errText(error), 'error')
@@ -162,14 +176,9 @@ async function pickLaunchThumbnail() {
   }
 }
 
-async function resetThumbnail() {
-  try {
-    store.settings = await resetLaunchThumbnail()
-    thumbnailPreviewFailed.value = false
-    toast('启动卡已恢复内置轮播图片', 'success')
-  } catch (error) {
-    toast('恢复缩略图失败：' + errText(error), 'error')
-  }
+function resetThumbnail() {
+  if (!store.settings) return
+  save({ launchThumbnail: { ...store.settings.launchThumbnail, order: carouselKeys({ ...store.settings.launchThumbnail, order: [] }), disabled: [] } })
 }
 
 function setLaunchFit(fit: ImageFit) {
@@ -325,26 +334,17 @@ function setLaunchFit(fit: ImageFit) {
     <div class="layout-head">
       <div>
         <h3 class="group-title group-title-tight">首页启动卡</h3>
-        <p class="muted group-hint group-hint-flush">实例专属图片优先；未设置时使用这里的全局图片，再回退内置轮播。</p>
+        <p class="muted group-hint group-hint-flush">实例专属图片优先；否则按下面的勾选与顺序混合轮播。取消勾选会保留图片，全部关闭时使用主题底色。</p>
       </div>
-      <button data-ui="HomeLayoutEditor:033eef52e2e9" class="btn btn-ghost btn-sm" @click="resetThumbnail">恢复内置轮播</button>
+      <button data-ui="HomeLayoutEditor:033eef52e2e9" class="btn btn-ghost btn-sm" @click="resetThumbnail">恢复默认顺序并全选</button>
     </div>
-    <div data-ui="HomeLayoutEditor:9a79e6484980" v-if="store.settings?.launchThumbnail.image && !thumbnailPreviewFailed" class="image-preview launch-preview">
-      <img data-ui="HomeLayoutEditor:3e1ea1e8ba39"
-        :src="managedImageUrl(store.settings.launchThumbnail.image)"
-        :style="{ objectFit: fitCss(store.settings.launchThumbnail.fit) }"
-        alt="启动卡缩略图预览"
-        @error="thumbnailPreviewFailed = true"
-      />
-    </div>
-    <div v-else class="built-in-previews"><img v-for="(src,index) in builtInPreviews" :key="src" :src="src" :alt="`内置插画 ${index+1}`"/><small class="muted">{{thumbnailPreviewFailed ? '图片不可用，已回退内置轮播' : `当前使用 ${builtInPreviews.length} 张内置插画轮播`}}</small></div>
     <div class="bg-row">
-      <span class="muted bg-label">默认图片</span>
+      <span class="muted bg-label">图片管理</span>
       <button data-ui="HomeLayoutEditor:d9002bd65d2e" class="btn btn-ghost btn-sm" :disabled="importingThumbnail" @click="pickLaunchThumbnail">
         {{ importingThumbnail ? '处理中…' : '添加图片（可多选）…' }}
       </button>
       <span data-ui="HomeLayoutEditor:6054c28ad3cc" class="muted bg-img-path">
-        {{ images.length ? `${images.length} / ${MAX_CAROUSEL_IMAGES} 张 · 已由 KAMUCL 管理` : '内置轮播' }}
+        已选 {{ activeSlides.size }} / {{ slides.length }} 张 · 自定义 {{ images.length }} / {{ MAX_CAROUSEL_IMAGES }} 张
       </span>
     </div>
     <div class="bg-row">
@@ -361,18 +361,26 @@ function setLaunchFit(fit: ImageFit) {
         </button>
       </div>
     </div>
-    <ol data-ui="HomeLayoutEditor:78dcf55b4b19" v-if="images.length" class="carousel-list" aria-label="启动卡轮播顺序">
-      <li data-ui="HomeLayoutEditor:c9fcdfd782bb" v-for="(image, index) in images" :key="image">
-        <img :src="managedImageUrl(image)" :alt="`第 ${index + 1} 张`" />
-        <span>{{ index + 1 }}</span>
-        <label data-ui="HomeLayoutEditor:1b8a2f6bf653" class="slide-duration">停留 <input data-ui="HomeLayoutEditor:b820622679f5" type="number" min="1" max="120" step="0.5" :aria-label="`第 ${index + 1} 张停留秒数`" :value="carouselDuration(store.settings?.launchThumbnail.durations?.[image] ?? store.settings?.launchThumbnail.intervalSeconds)" @change="setDuration(($event.target as HTMLInputElement).value, image)" /> 秒</label>
+    <div class="carousel-selection-actions">
+      <button class="btn btn-ghost btn-sm" @click="setSlidesEnabled(slides.map(image => image.key), true)">全选</button>
+      <button class="btn btn-ghost btn-sm" @click="setSlidesEnabled(slides.map(image => image.key), false)">全不选</button>
+      <button class="btn btn-ghost btn-sm" @click="setSlidesEnabled(builtInLaunchImages.map(image => image.key), false)">关闭内置图片</button>
+      <span v-if="!activeSlides.size" class="muted" role="status">轮播已关闭，显示主题底色</span>
+    </div>
+    <ol data-ui="HomeLayoutEditor:78dcf55b4b19" class="carousel-list launch-carousel-list" aria-label="启动卡轮播顺序">
+      <li data-ui="HomeLayoutEditor:c9fcdfd782bb" v-for="(image, index) in slides" :key="image.key" :class="{ disabled: !activeSlides.has(image.key) }">
+        <img v-if="!brokenThumbnailPreviews.has(image.key)" :src="image.src" :alt="image.title" @error="brokenThumbnailPreviews = new Set([...brokenThumbnailPreviews, image.key])" />
+        <span v-else class="carousel-preview-missing" aria-label="图片不可用">图片不可用</span>
+        <label class="carousel-enabled"><input type="checkbox" :checked="activeSlides.has(image.key)" :aria-label="`${image.title}参与轮播`" @change="setSlidesEnabled([image.key], ($event.target as HTMLInputElement).checked)" /><span :title="image.builtin ? image.title : image.key">{{ image.title }}<small>{{ image.builtin ? '内置图片' : '自定义图片' }}</small></span></label>
+        <label data-ui="HomeLayoutEditor:1b8a2f6bf653" class="slide-duration">停留 <input data-ui="HomeLayoutEditor:b820622679f5" type="number" min="1" max="120" step="0.5" :aria-label="`${image.title}停留秒数`" :value="carouselDuration(store.settings?.launchThumbnail.durations?.[image.key] ?? store.settings?.launchThumbnail.intervalSeconds)" @change="setDuration(($event.target as HTMLInputElement).value, image.key)" /> 秒</label>
         <button data-ui="HomeLayoutEditor:2b6f46e2b899" class="btn btn-ghost btn-sm" :disabled="index === 0" title="向前移动" @click="moveImage(index, -1)">↑</button>
-        <button data-ui="HomeLayoutEditor:5dd6420ad302" class="btn btn-ghost btn-sm" :disabled="index === images.length - 1" title="向后移动" @click="moveImage(index, 1)">↓</button>
-        <button data-ui="HomeLayoutEditor:ebd5db203bf7" class="btn btn-ghost btn-sm" @click="changeImages(images.filter((_, i) => i !== index))">移除</button>
+        <button data-ui="HomeLayoutEditor:5dd6420ad302" class="btn btn-ghost btn-sm" :disabled="index === slides.length - 1" title="向后移动" @click="moveImage(index, 1)">↓</button>
+        <button data-ui="HomeLayoutEditor:ebd5db203bf7" v-if="!image.builtin" class="btn btn-ghost btn-sm" @click="removeThumbnail = image.key">移除文件</button>
       </li>
     </ol>
     <div class="bg-row"><label data-ui="HomeLayoutEditor:dee929e66133" for="carousel-default-duration">默认停留时间</label><input data-ui="HomeLayoutEditor:c51dd8fea2e7" id="carousel-default-duration" type="number" min="1" max="120" step="0.5" class="input num-input" :value="carouselDuration(store.settings?.launchThumbnail.intervalSeconds)" @change="setDuration(($event.target as HTMLInputElement).value)" /><span class="muted">秒 · 用于内置轮播及未单独设置的图片</span></div>
   </div></details>
+  <ConfirmModal :open="!!removeThumbnail" title="移除自定义启动卡图片" message="将删除 KAMUCL 管理的图片副本，原文件不受影响。若只想暂停轮播，请取消参与勾选。" confirm-text="移除文件" :busy="removingThumbnail" @confirm="deleteThumbnail" @cancel="removeThumbnail = null" />
 </template>
 
 <style scoped>
@@ -489,7 +497,16 @@ function setLaunchFit(fit: ImageFit) {
 .mono {
   font-size: var(--text-xs);
 }
-.built-in-previews{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}.built-in-previews img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:var(--radius-sm)}.built-in-previews small{grid-column:1/-1;font-size:12px}.group+.group{margin-top:0}@media(max-width:650px){.built-in-previews{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.group+.group{margin-top:0}
+.carousel-selection-actions { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px; }
+.carousel-selection-actions .muted { font-size:12px; }
+.carousel-enabled { display:flex;align-items:center;gap:8px;min-width:140px;flex:1;cursor:pointer; }
+.carousel-enabled span { min-width:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere; }
+.carousel-enabled small { display:block;color:var(--text-dim);font-size:11px; }
+.carousel-enabled input { flex:none;accent-color:var(--accent); }
+.launch-carousel-list li.disabled { background:var(--card-2); }
+.launch-carousel-list li.disabled img { opacity:.45; }
+.carousel-preview-missing { flex:none!important;display:grid;place-items:center;width:64px;height:40px;color:var(--text-dim);font-size:10px;border:1px solid var(--border);border-radius:var(--radius-sm); }
 
 .layout-setting { padding:0; }
 .layout-setting>summary { display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;font-weight:600;font-size:14px; }
@@ -500,8 +517,6 @@ function setLaunchFit(fit: ImageFit) {
 .layout-setting .layout-head { margin-bottom:10px;flex-wrap:wrap; }
 .layout-setting .layout-head h3 { display:none; }
 .layout-setting .image-preview { height:90px;max-width:320px; }
-.layout-setting .built-in-previews { max-width:440px; }
-.layout-setting .built-in-previews img { height:60px; }
 .layout-setting .bg-row { margin:8px 0;gap:8px; }
 .layout-setting .carousel-list { grid-template-columns:minmax(0,1fr);max-height:220px;overflow:auto; }
 @media(max-width:600px) { .layout-setting>summary{flex-wrap:wrap;gap:4px 12px}.layout-setting>summary small{flex-basis:80%} }

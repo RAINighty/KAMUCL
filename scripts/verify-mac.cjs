@@ -89,10 +89,12 @@ main().finally(async()=>{
  // Keep the common-feature checks here so they cannot be omitted by a workflow step.
  execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{
   env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_TEST_THEME:'black-orange'},
-  stdio:'inherit',timeout:180000
+  stdio:'inherit',timeout:300000
  })
  const extensionProof=path.join(proof,'extensions');fs.mkdirSync(extensionProof,{recursive:true})
  fs.copyFileSync('out/extension-ui-black-orange.json',path.join(extensionProof,'results.json'))
+ for(const name of ['skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json'])fs.copyFileSync(path.join('out',name),path.join(extensionProof,name))
+ for(const name of ['mascot-slap-117.wav','mascot-sweep-117.webm'])if(fs.existsSync(path.join('out',name)))fs.copyFileSync(path.join('out',name),path.join(extensionProof,name))
  for(const name of fs.readdirSync('release/ui-refinement-black-orange'))if(name.startsWith('extension-')&&name.endsWith('.png'))fs.copyFileSync(path.join('release/ui-refinement-black-orange',name),path.join(extensionProof,name))
  console.log('PASS native macOS '+arch+' extension GUI '+version)
 }).catch(e=>{console.error(e);process.exitCode=1})

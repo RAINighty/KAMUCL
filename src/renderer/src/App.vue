@@ -71,6 +71,10 @@ const RecordingsView = defineAsyncComponent(() => import('./views/RecordingsView
 const ProjectionsView = defineAsyncComponent(() => import('./views/ProjectionsView.vue'))
 const MascotStage = defineAsyncComponent(() => import('./components/MascotStage.vue'))
 const mascotOpen = ref(false)
+const mascotRef = ref<{flush:()=>Promise<void>}>()
+const mascotKeyboard = ref(false)
+function openMascots(event:MouseEvent){mascotKeyboard.value=event.detail===0;mascotOpen.value=true}
+function closeMascots(){mascotOpen.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.brand-avatar')?.focus())}
 const PacksView = defineAsyncComponent(() => import('./views/PacksView.vue'))
 const ShadersView = defineAsyncComponent(() => import('./views/ShadersView.vue'))
 const KeysView = defineAsyncComponent(() => import('./views/KeysView.vue'))
@@ -215,7 +219,8 @@ const { navEl, bubbleStyle, selectionStyle, retarget: retargetNav, reset: resetN
 
 /** 关闭启动器不影响游戏：游戏在跑时点关闭先提示一次，再真正关闭 */
 let closeHintShown = false
-const win = (action: 'minimize' | 'maximize' | 'close') => {
+const win = async (action: 'minimize' | 'maximize' | 'close') => {
+  if(action==='close'&&mascotRef.value){try{await mascotRef.value.flush()}catch(error){toast('互动次数尚未保存：'+errText(error),'error');return}}
   if (action === 'close' && store.launchState?.status === 'running' && !closeHintShown) {
     closeHintShown = true
     toast('关闭启动器不影响游戏，游戏继续运行', 'info')
@@ -1245,8 +1250,7 @@ onUnmounted(() => {
     <aside data-ui="App:25064d2bb910" class="sidebar" data-edit="sidebar">
       <!-- Logo 区 -->
       <div data-ui="App:fc5fc8ba7e96" class="logo-area">
-        <button class="brand-avatar" :class="{'avatar-open':mascotOpen}" aria-label="打开七人互动彩蛋" :aria-expanded="mascotOpen" @click="mascotOpen=true"><img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" /></button>
-        <MascotStage v-if="mascotOpen" @close="mascotOpen=false" />
+        <button class="brand-avatar" :class="{'avatar-open':mascotOpen}" aria-label="打开七人互动彩蛋" :aria-expanded="mascotOpen" @click="openMascots"><img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" /></button>
         <div data-ui="App:7494cda29e47" class="logo-text">
           <span data-ui="App:c396a9ff34cb" class="logo-name">KAMUCL</span>
           <span data-ui="App:31accf043a9a" class="logo-version">v{{ appVersion }}</span>
@@ -1327,7 +1331,7 @@ onUnmounted(() => {
     <!-- ============ 右侧（顶栏 + 内容） ============ -->
     <div data-ui="App:f900e94b908a" class="main-area">
       <!-- 顶部栏（可拖拽） -->
-      <header data-ui="App:db645f1637b0" class="topbar" data-edit="topbar" @pointerdown="onTopbarPointerDown">
+      <header data-ui="App:db645f1637b0" class="topbar" :class="{'mascots-open':mascotOpen}" data-edit="topbar" @pointerdown="onTopbarPointerDown">
         <button data-ui="App:3cd32ab47022"
           v-if="canGoBack && store.currentView !== 'home'"
           class="top-back"
@@ -1337,7 +1341,7 @@ onUnmounted(() => {
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" /></svg>
         </button>
-        <div class="topbar-spacer"><CreatorMotto :disabled="store.editMode" /></div>
+        <div class="topbar-spacer"><MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @close="closeMascots"/><CreatorMotto v-else :disabled="store.editMode" /></div>
 
         <div data-ui="App:5f4d42b34aae" class="top-actions">
           <button data-ui="App:e7efd70d16b8" v-if="store.currentView !== 'home'" class="top-btn dl-toggle" @click="dlOpen = !dlOpen">
@@ -2071,9 +2075,18 @@ onUnmounted(() => {
 .topbar-spacer { flex: 1; min-width: 0; align-self: stretch; }
 @media (max-width: 1050px) {
   .topbar-spacer { overflow: hidden; }
-  .topbar-spacer > * { visibility: hidden; }
+  .topbar-spacer > .creator-motto { visibility: hidden; }
   .top-actions { flex-shrink: 0; }
   .top-actions .top-btn { white-space: nowrap; flex-shrink: 0; padding-inline: 6px; gap: 4px; }
+}
+.topbar.mascots-open{gap:8px;padding-inline:12px}
+.topbar.mascots-open .topbar-spacer{overflow:visible}
+@media(max-width:1150px){
+  .topbar.mascots-open .top-actions{gap:2px}
+  .topbar.mascots-open .top-btn{font-size:0;gap:0;width:28px;padding:0}
+  .topbar.mascots-open .top-icon-btn,.topbar.mascots-open .win-btn{width:28px;flex-shrink:0}
+  .topbar.mascots-open .top-divider{margin-inline:2px}
+  .topbar.mascots-open .top-back{width:28px;flex-shrink:0}
 }
 
 .top-actions {

@@ -407,6 +407,8 @@ export interface Settings {
   background: BackgroundSettings
   /** 首页启动卡的全局默认缩略图（实例专属缩略图优先）。 */
   launchThumbnail: LaunchThumbnailSettings
+  /** Skin painter colors are local preferences; changing them does not edit the skin. */
+  skinEditorPalette?: SkinEditorPaletteSettings
   closeAfterLaunch: boolean
   /** 默认按键同步：开启后启动任何版本时把启动器默认键位写入该实例 options.txt 的 key_* 项 */
   keySync?: boolean
@@ -554,10 +556,21 @@ export interface LaunchThumbnailSettings {
   image: string
   /** Ordered managed carousel images; absent means migrate legacy `image`. */
   images?: string[]
+  /** Mixed ordering: stable builtin:<id> keys and managed custom image paths. */
+  order?: string[]
+  /** Disabled slides remain in the managed image library until explicitly deleted. */
+  disabled?: string[]
   /** Default/per-image dwell time, in seconds (1..120). */
   intervalSeconds?: number
   durations?: Record<string, number>
   fit: ImageFit
+}
+
+export interface SkinEditorPaletteSettings {
+  custom: string[]
+  recent: string[]
+  color: string
+  alpha: number
 }
 
 export const DEFAULT_BACKGROUND: BackgroundSettings = {

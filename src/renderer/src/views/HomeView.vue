@@ -2,7 +2,7 @@
 import { openInstanceCenter } from '../instanceCenter'
 import { appearancePreview } from '../visualDesign'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { carouselImages, carouselDuration } from '@shared/appearancePolicy'
+import { activeCarouselKeys, carouselDuration } from '@shared/appearancePolicy'
 import { useMotion } from '../motion'
 import { CarouselPlayback } from '@shared/carouselPlayback'
 import {
@@ -48,13 +48,9 @@ import type {
 } from '@shared/types'
 import { trackBootTask } from '../bootTasks'
 import { managedImageUrl } from '../managedAssets'
-import banner1 from '../assets/banner1.webp'
-import banner2 from '../assets/banner2.webp'
-import banner3 from '../assets/banner3.webp'
-import banner4 from '../assets/banner4.png'
+import { builtInLaunchImages } from '../launchImages'
 
 const LAST_VERSION_KEY = 'kamucl.lastVersion'
-const builtInBanners = [banner1, banner2, banner3, banner4]
 
 // ---------------- 当前实例与展示图 ----------------
 const selectedId = computed({get: () => store.resourceVersionId, set: id => { store.resourceVersionId = id }})
@@ -72,28 +68,29 @@ function fitCss(fit: ImageFit): 'fill' | 'contain' | 'cover' {
 }
 
 const failedBanners = ref(new Set<string>())
-const customBanners = computed(() => {
+const globalBanners = computed(() => {
+  const global = appearancePreview.value?.launchThumbnail
+  return activeCarouselKeys(global).map(path => {
+    const bundled = builtInLaunchImages.find(image => image.key === path)
+    return { path, src: bundled?.src ?? managedImageUrl(path), fit: fitCss(global?.fit ?? 'crop'), custom: !bundled }
+  })
+})
+const instanceBanners = computed(() => {
   const version = currentVersion.value
   if (version?.thumbnail) {
     return [{
       path: version.thumbnail,
       src: managedImageUrl(version.thumbnail),
-      fit: version.thumbnailFit ?? ('crop' as ImageFit)
+      fit: fitCss(version.thumbnailFit ?? 'crop'),
+      custom: true
     }]
   }
-  const global = appearancePreview.value?.launchThumbnail
-  return carouselImages(global).map(path => ({ path, src: managedImageUrl(path), fit: global?.fit ?? 'crop' as ImageFit }))
+  return []
 })
 
 const banners = computed(() => {
-  const custom = customBanners.value.filter(item => !failedBanners.value.has(item.path))
-  if (custom.length) return custom.map(item => ({ ...item, fit: fitCss(item.fit), custom: true }))
-  return builtInBanners.map((src) => ({
-    src,
-    fit: 'cover' as const,
-    custom: false,
-    path: src
-  }))
+  const instance = instanceBanners.value.filter(item => !failedBanners.value.has(item.path))
+  return instance.length ? instance : globalBanners.value.filter(item => !failedBanners.value.has(item.path))
 })
 const { decorativeActive } = useMotion()
 watch(decorativeActive, active => active ? startBannerTimer() : stopBannerTimer())
@@ -110,7 +107,7 @@ function preloadBanner(src: string) {
   im.onload = () => readyBanners.add(src)
   im.src = src
 }
-const bannerScope = computed(() => currentVersion.value?.thumbnail ? `instance:${currentVersion.value.folder}:${currentVersion.value.id}` : customBanners.value.length ? 'global' : 'builtin')
+const bannerScope = computed(() => instanceBanners.value.some(item => !failedBanners.value.has(item.path)) ? `instance:${currentVersion.value?.folder}:${currentVersion.value?.id}` : 'global')
 
 function stopBannerTimer() {
   if (playback && playbackKey) {
@@ -122,6 +119,7 @@ function stopBannerTimer() {
 
 function startBannerTimer() {
   stopBannerTimer()
+  if (!banners.value.length) { playback = null; playbackKey = ''; bannerIndex.value = 0; return }
   playbackKey = 'kamucl.carousel.' + bannerScope.value
   let saved
   try { saved = JSON.parse(localStorage.getItem(playbackKey) ?? 'null') } catch { /* invalid bookmark */ }
@@ -140,7 +138,7 @@ function startBannerTimer() {
 }
 
 watch(
-  () => JSON.stringify([bannerScope.value, customBanners.value.map(item => item.path), appearancePreview.value?.launchThumbnail.intervalSeconds, appearancePreview.value?.launchThumbnail.durations]),
+  () => JSON.stringify([instanceBanners.value, globalBanners.value, appearancePreview.value?.launchThumbnail.intervalSeconds, appearancePreview.value?.launchThumbnail.durations]),
   () => {
     failedBanners.value = new Set()
     startBannerTimer()
@@ -148,11 +146,11 @@ watch(
 )
 
 function onBannerError(item: { custom: boolean; path: string }) {
-  if (!item.custom) return
+  if (failedBanners.value.has(item.path)) return
   failedBanners.value = new Set([...failedBanners.value, item.path])
   bannerIndex.value = 0
   startBannerTimer()
-  toast('已跳过不可用的启动卡图片；全部不可用时使用内置轮播', 'error')
+  toast('已跳过不可用的启动卡图片；仅显示已勾选且可用的图片', 'error')
 }
 
 // ---------------- 启动、设置与日志 ----------------
@@ -477,7 +475,7 @@ onUnmounted(() => {
 <template>
   <div data-ui="HomeView:a32c099bc136" class="home-dashboard">
     <div data-ui="HomeView:5fc354f9fa6d" class="home-main">
-      <section data-ui="HomeView:53555cbc5ab3" class="hero-card" data-edit="banner">
+      <section data-ui="HomeView:53555cbc5ab3" class="hero-card" :class="{ 'no-banner': !banners.length }" data-edit="banner">
         <img data-ui="HomeView:1182a4262184"
           v-for="(item, index) in banners"
           :key="item.path"
@@ -489,7 +487,7 @@ onUnmounted(() => {
           aria-hidden="true"
           @error="onBannerError(item)"
         />
-        <div data-ui="HomeView:5838d59b9e2a" class="hero-shade"></div>
+        <div data-ui="HomeView:5838d59b9e2a" v-if="banners.length" class="hero-shade"></div>
 
         <div data-ui="HomeView:2e850cf13849" class="hero-content" data-edit="bannerText">
           <span data-ui="HomeView:13616e708e66" class="hero-kicker">当前版本</span>
@@ -809,6 +807,10 @@ onUnmounted(() => {
 }
 .hero-image { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity var(--motion-carousel) ease; }
 .hero-image.active { opacity: 1; }
+.hero-card.no-banner { background: var(--surface-content); box-shadow: none; }
+.no-banner .hero-content, .no-banner .hero-content h1, .no-banner .hero-game-version { color: var(--text); text-shadow: none; }
+.no-banner .hero-kicker, .no-banner .hero-settings, .no-banner .hero-more { background: var(--card-2); color: var(--text); border-color: var(--border); backdrop-filter: none; }
+.no-banner .loader-badge { color: var(--accent-2); background: var(--accent-soft); }
 .hero-shade {
   position: absolute;
   inset: 0;

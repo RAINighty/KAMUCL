@@ -40,7 +40,13 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   const click=async selector=>evaluate('document.querySelector('+JSON.stringify(selector)+')?.click()');
   const type=async (selector,value)=>evaluate('(()=>{const e=document.querySelector('+JSON.stringify(selector)+');e.value='+JSON.stringify(value)+';e.dispatchEvent(new Event("input",{bubbles:true}))})()');
   const nav=async id=>{if(['mods','packs','shaders','recordings','bridge','servers'].includes(id)&&!await evaluate('!!document.querySelector("[data-nav='+id+']")?.getClientRects().length'))await click('[data-nav=resources]');await click('[data-nav='+id+']');await wait(350)};
-  if(process.env.KAMUCL_EXTENSION_GUI)await require('./verify-extension-ui.cjs')({call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version});
+  if(process.env.KAMUCL_EXTENSION_GUI){
+    const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version};
+    await require('./verify-extension-ui.cjs')(harness);
+    for(const [id,file] of [['palette','verify-skin-palette-ui.cjs'],['header','verify-mascot-header-ui.cjs'],['gallery','verify-gallery-favorites-ui.cjs']]){
+      if(!process.env.KAMUCL_117_MODULE||process.env.KAMUCL_117_MODULE===id)await require('./'+file)({...harness,screenshot:name=>harness.screenshot(name.startsWith('extension-')?name:'extension-117-'+name)});
+    }
+  }
   const closeApp=async()=>{if(process.platform==='darwin')await main('setTimeout(()=>testElectron.app.quit(),500)');mainWs.close();await wait(100);if(process.platform!=='darwin')await evaluate("window.kamucl.send('window:close')");for(let i=0;i<100&&child.exitCode===null;i++)await wait(100);assert.equal(child.exitCode,0)};
   if(process.env.KAMUCL_EXTENSION_ONLY){await closeApp();return}
   // Reset renderer caches populated by extension fixtures before the original regression.

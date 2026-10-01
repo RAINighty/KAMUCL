@@ -15,11 +15,10 @@ import ConfirmModal from './ConfirmModal.vue'
 import DupCleanModal from './DupCleanModal.vue'
 import SelectMenu from './SelectMenu.vue'
 import type { FsEntry, ModUpdateReport } from '@shared/types'
-import { favorites, loadFavorites } from '../modFavorites'
-import type { ModFavorite } from '@shared/modFavorites'
+import { favorites, loadFavorites, setLocalFavorite } from '../modFavorites'
 const onlyFavorites=ref(false),favoriteBusy=ref(''),linkFile=ref(''),linkSource=ref('modrinth'),linkProject=ref('')
 function localFavorite(name:string){const m=catalog.value[name];return favorites.value.some(f=>f.key===m?.identity || (!!m?.sha1&&f.sha1===m.sha1))}
-async function toggleFavorite(name:string,link=false){const v=currentVersion.value;if(!v||favoriteBusy.value)return;favoriteBusy.value=name;try{favorites.value=await window.kamucl.invoke('mods:favoriteLocal',v.id,v.folder||activeFolder.value,name,link||!localFavorite(name),link?{source:linkSource.value,projectId:linkProject.value.trim()}:undefined) as ModFavorite[];linkFile.value='';await loadCatalog(loadGeneration)}catch(e){toast(errText(e),'error')}finally{favoriteBusy.value=''}}
+async function toggleFavorite(name:string,link=false){const v=currentVersion.value;if(!v||favoriteBusy.value)return;favoriteBusy.value=name;try{const changed=await setLocalFavorite(catalog.value[name]?.identity||catalog.value[name]?.sha1||name,v.id,v.folder||activeFolder.value,name,link||!localFavorite(name),link?{source:linkSource.value,projectId:linkProject.value.trim()}:undefined);if(changed){linkFile.value='';await loadCatalog(loadGeneration)}}catch(e){toast(errText(e),'error')}finally{favoriteBusy.value=''}}
 onMounted(()=>void loadFavorites())
 
 function dragResource(event: DragEvent, entry: FsEntry) {
