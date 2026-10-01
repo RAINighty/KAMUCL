@@ -14,24 +14,45 @@ export function slapSamples(sampleRate:number):Float32Array {
 }
 export class MascotAudio {
  private context?:AudioContext;private buffer?:AudioBuffer;private gain?:GainNode
- private voices=new Set<AudioBufferSourceNode>();private next=0;private played=0;private closed=false
- constructor(private prefs:()=>MascotSound,private stats:(played:number,voices:number)=>void){}
+ private voices=new Set<AudioBufferSourceNode>();private next=0;private played=0;private closed=false;private paused=false
+ private suspending?:Promise<void>
+ constructor(private prefs:()=>MascotSound,private stats:(played:number,voices:number)=>void,private active:()=>boolean=()=>true){}
+ private allowed(){return!this.closed&&!this.paused&&this.active()}
+ private stateChanged=()=>{if(this.context?.state==='running'&&!this.allowed())this.suspend(this.context)}
+ private suspend(context:AudioContext){
+  if(context.state==='closed'||this.suspending)return
+  // A pending resume can finish after suspend. Guard both the resulting state
+  // event and the completed operation, without spinning on an unavailable device.
+  const pending=context.suspend().then(()=>{
+   if(this.suspending===pending)this.suspending=undefined
+   if(context===this.context&&!this.allowed()&&context.state==='running')this.suspend(context)
+  },()=>{if(this.suspending===pending)this.suspending=undefined})
+  this.suspending=pending
+ }
  async unlock(){
-  if(this.closed)return
+  if(this.closed||!this.active()){if(this.context)this.suspend(this.context);return}
+  this.paused=false
   try{
    if(!this.context){
     const context=this.context=new AudioContext({latencyHint:'interactive'})
+    context.addEventListener('statechange',this.stateChanged)
     this.buffer=context.createBuffer(1,Math.ceil(context.sampleRate*.075),context.sampleRate)
     this.buffer.copyToChannel(new Float32Array(slapSamples(context.sampleRate)),0)
     const limiter=context.createDynamicsCompressor();limiter.threshold.value=-12;limiter.knee.value=10;limiter.ratio.value=8;limiter.attack.value=.001;limiter.release.value=.04
     this.gain=context.createGain();this.gain.connect(limiter);limiter.connect(context.destination)
    }
-   if(this.context.state==='suspended')await this.context.resume()
+   const context=this.context
+   // A quick foreground transition can overtake an earlier suspend request.
+   // Finish that request before deciding whether the current context needs resume.
+   if(this.suspending)await this.suspending
+   if(!this.allowed()){this.suspend(context);return}
+   if(context.state==='suspended')await context.resume()
+   if(!this.allowed())this.suspend(context)
   }catch{/* Audio device availability must not block interaction or persistence. */}
  }
  play(){
   const prefs=this.prefs(),context=this.context
-  if(this.closed||prefs.muted||!prefs.volume||!context||context.state!=='running'||!this.buffer||!this.gain)return
+  if(!this.allowed()||prefs.muted||!prefs.volume||!context||context.state!=='running'||!this.buffer||!this.gain)return
   this.gain.gain.setTargetAtTime(prefs.volume*.75,context.currentTime,.004)
   const source=context.createBufferSource();source.buffer=this.buffer;source.playbackRate.value=1+(this.played%5-2)*.025;source.connect(this.gain)
   if(this.voices.size>=24){const oldest=this.voices.values().next().value;try{oldest?.stop()}catch{}}
@@ -43,6 +64,6 @@ export class MascotAudio {
   this.next=start+.015;source.start(start);this.played++;this.stats(this.played,this.voices.size)
  }
  update(){if(this.gain&&this.context)this.gain.gain.setTargetAtTime(this.prefs().muted?0:this.prefs().volume*.75,this.context.currentTime,.004)}
- pause(){this.next=0;for(const source of this.voices){try{source.stop()}catch{}}void this.context?.suspend().catch(()=>{})}
- async dispose(){this.closed=true;this.pause();await this.context?.close().catch(()=>{});this.context=undefined;this.buffer=undefined;this.gain=undefined}
+ pause(){this.paused=true;this.next=0;for(const source of this.voices){try{source.stop()}catch{}}if(this.context)this.suspend(this.context)}
+ async dispose(){this.closed=true;this.pause();const context=this.context;await context?.close().catch(()=>{});context?.removeEventListener('statechange',this.stateChanged);this.context=undefined;this.buffer=undefined;this.gain=undefined}
 }

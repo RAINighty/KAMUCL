@@ -4,7 +4,7 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  const textClick=async(scope,text)=>evaluate(`(()=>{const b=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)});if(!b)throw Error('Missing '+${JSON.stringify(text)});b.click()})()`);
  const settings=()=>evaluate("window.kamucl.invoke('settings:get')");
  const original=await settings();
- const motionReadiness=[];
+ const motionReadiness=[],motionPreference={fixture:'prefers-reduced-motion: no-preference'};let result;
  const motionSnapshot=async()=>{
   const native=await main("(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/renderer/index.html'));return{isVisible:w.isVisible(),isMinimized:w.isMinimized(),focused:w.isFocused(),bounds:w.getBounds(),backgroundThrottling:w.webContents.getBackgroundThrottling(),platform:process.platform,electron:process.versions.electron}})()");
   const renderer=await evaluate("(async()=>{const s=await window.kamucl.invoke('settings:get');return{documentHidden:document.hidden,visibilityState:document.visibilityState,motion:document.documentElement.dataset.motion,reduceMotion:s.reduceMotion,systemReduced:matchMedia('(prefers-reduced-motion: reduce)').matches,nativeVisibility:await window.kamucl.invoke('window:visibility'),stageHidden:document.querySelector('.mascot-stage')?.classList.contains('hidden')??null,images:document.querySelectorAll('.hero-image').length,timers:window.__galleryTimers?.size??null}})()");
@@ -22,12 +22,18 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
    await wait(80);const sample=await motionSnapshot();proof.samples.push(sample);
    const {native,renderer}=sample;
    ready=native.isVisible&&!native.isMinimized&&native.focused&&renderer.nativeVisibility&&!renderer.documentHidden&&renderer.visibilityState==='visible'&&renderer.motion==='full'&&renderer.reduceMotion!==true&&!renderer.systemReduced&&(expectedTimers===undefined||renderer.timers===expectedTimers);
-   fs.writeFileSync('out/gallery-favorites-motion-live.json',JSON.stringify({version,motionReadiness},null,2));
+   fs.writeFileSync('out/gallery-favorites-motion-live.json',JSON.stringify({version,motionPreference,motionReadiness},null,2));
    if(ready)break;
   }
   if(!ready)console.error('Gallery motion readiness diagnostics',JSON.stringify(proof,null,2));
   assert(ready,label+': real foreground window and normal-motion carousel must become ready');
  };
+ // Test normal carousel playback explicitly, independent of the CI desktop's
+ // accessibility preference. Record the real preference before the override,
+ // restore it even after failure, and leave OS settings/product defaults alone.
+ await call('Emulation.setEmulatedMedia',{features:[]});await wait(80);motionPreference.system=await motionSnapshot();
+ await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
+ try{
  const sources=[path.join(root,'gallery-one.png'),path.join(root,'gallery-two.png')];
  await main(`(()=>{const fs=process.mainModule.require('node:fs');for(const [i,file]of ${JSON.stringify(sources)}.entries()){const b=Buffer.alloc(16*16*4);for(let j=0;j<b.length;j+=4){b[j]=i?30:80;b[j+1]=120;b[j+2]=i?180:220;b[j+3]=255}fs.writeFileSync(file,testElectron.nativeImage.createFromBitmap(b,{width:16,height:16}).toPNG())}testElectron.dialog.showOpenDialog=async()=>({canceled:false,filePaths:${JSON.stringify(sources)}})})()`);
  const imported=await evaluate("window.kamucl.invoke('appearance:importLaunchThumbnail')");
@@ -59,5 +65,10 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  await main("for(const [channel,fn]of [['versions:catalog',()=>({versions:[{id:'26.3',type:'release',url:'https://fixture.invalid/26.3.json',releaseTime:'2026-09-15T11:00:00Z'}],checkedAt:Date.now(),stale:false})],['loaders:list',()=>['fixture-loader']],['mods:favoriteVersions',async(_e,s,p,mc,l)=>[{source:s,projectId:p,fileId:'fixture',version:'compatible-'+l,fileName:'fixture.jar',gameVersions:[mc],loaders:[l],releaseType:'release',size:1,url:'https://fixture.invalid/fixture.jar'}]]]){testElectron.ipcMain.removeHandler(channel);testElectron.ipcMain.handle(channel,fn)}");
  await nav('game');await click('[data-tab=download]');await wait(150);await click('.latest-release .btn-gold');await wait(120);await click('.favorite-picker>label input');await textClick('.loader-options','Fabric');await wait(250);const picker=await evaluate('document.querySelector(".favorite-picker").innerText');assert(picker.includes('外置收藏 MR')&&picker.includes('外置收藏 CF'));await textClick('.modal-actions','取消');
  await evaluate(`window.kamucl.invoke('settings:set',{launchThumbnail:${JSON.stringify(original.launchThumbnail)}})`);await nav('home');await evaluate('window.setInterval=window.__gallerySet;window.clearInterval=window.__galleryClear');
- fs.writeFileSync('out/gallery-favorites-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify({version,builtins:7,mixed:true,disabledPreservesFiles:true,zeroAndSingleNoTimer:true,mixedOrder:reordered,themeRoundtrip:true,externalBothSources:true,detailAndInstallSynced:true,writeFailureRecoverable:true,motionReadiness},null,2));console.log('Gallery and external favorites GUI checks passed');
+ result={version,builtins:7,mixed:true,disabledPreservesFiles:true,zeroAndSingleNoTimer:true,mixedOrder:reordered,themeRoundtrip:true,externalBothSources:true,detailAndInstallSynced:true,writeFailureRecoverable:true};
+ }finally{
+  await call('Emulation.setEmulatedMedia',{features:[]});await wait(80);motionPreference.restored=await motionSnapshot();
+  fs.writeFileSync('out/gallery-favorites-motion-live.json',JSON.stringify({version,motionPreference,motionReadiness},null,2));
+ }
+ fs.writeFileSync('out/gallery-favorites-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify({...result,motionPreference,motionReadiness},null,2));console.log('Gallery and external favorites GUI checks passed');
 };

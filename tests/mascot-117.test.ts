@@ -7,7 +7,7 @@ import {createRequire} from 'node:module'
 import {build} from 'esbuild'
 import sharp from 'sharp'
 import {MASCOTS,MascotSweepGate,addMascotHits,normalizeMascotSound,type MascotHitRect} from '../src/shared/mascots'
-import {slapSamples} from '../src/renderer/src/mascotAudio'
+import {MascotAudio,slapSamples} from '../src/renderer/src/mascotAudio'
 
 const rectangles:MascotHitRect[]=MASCOTS.map((m,index)=>({id:m.id,left:20+index*30,right:40+index*30,top:10,bottom:24}))
 test('a sparse pointer sweep intersects all seven hip zones in travel order',()=>{
@@ -36,6 +36,63 @@ test('batched counts retain overflow bounds, stable ties, and sound migration de
 test('original palm-pop waveform is deterministic, bounded, nonzero and fades out',()=>{
  const a=slapSamples(48000),b=slapSamples(48000);assert.deepEqual(a,b);assert.equal(a.length,3600)
  assert(a.every(n=>Number.isFinite(n)&&Math.abs(n)<1));assert(a.some(n=>Math.abs(n)>.25));assert(Math.max(...a.slice(-100).map(Math.abs))<.005)
+})
+
+class FakeMascotAudioContext extends EventTarget {
+ state='suspended';sampleRate=48000;currentTime=0;destination={};resumeCalls=0;suspendCalls=0;sourceStarts=0
+ deferResume=false;deferSuspend=false;pendingResume?:()=>void;pendingSuspend?:()=>void
+ transition(state:string){this.state=state;this.dispatchEvent(new Event('statechange'))}
+ createBuffer(){return{copyToChannel(){}}}
+ createDynamicsCompressor(){return{threshold:{value:0},knee:{value:0},ratio:{value:0},attack:{value:0},release:{value:0},connect(){}}}
+ createGain(){return{gain:{setTargetAtTime(){}},connect(){}}}
+ createBufferSource(){const context=this;return{buffer:undefined,playbackRate:{value:1},onended:null as null|(()=>void),connect(){},disconnect(){},start(){context.sourceStarts++},stop(){this.onended?.()}}}
+ resume(){this.resumeCalls++;const finish=()=>{if(this.state!=='closed')this.transition('running')};if(this.deferResume)return new Promise<void>(resolve=>{this.pendingResume=()=>{finish();resolve()}});finish();return Promise.resolve()}
+ suspend(){this.suspendCalls++;const finish=()=>{if(this.state!=='closed')this.transition('suspended')};if(this.deferSuspend)return new Promise<void>(resolve=>{this.pendingSuspend=()=>{finish();resolve()}});finish();return Promise.resolve()}
+ close(){this.transition('closed');return Promise.resolve()}
+}
+async function fakeMascotAudio(run:(contexts:FakeMascotAudioContext[])=>Promise<void>,deferResume=false){
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'AudioContext'),contexts:FakeMascotAudioContext[]=[]
+ class Context extends FakeMascotAudioContext {constructor(){super();this.deferResume=deferResume;contexts.push(this)}}
+ Object.defineProperty(globalThis,'AudioContext',{configurable:true,writable:true,value:Context})
+ try{await run(contexts)}finally{if(previous)Object.defineProperty(globalThis,'AudioContext',previous);else delete(globalThis as any).AudioContext}
+}
+const settleAudio=async()=>{for(let i=0;i<5;i++)await Promise.resolve()}
+test('hidden audio cannot create, resume or play a context, and visible activation restores playback',async()=>{
+ await fakeMascotAudio(async contexts=>{
+  let visible=false;const audio=new MascotAudio(()=>({muted:false,volume:.45}),()=>{},()=>visible)
+  await audio.unlock();audio.play();assert.equal(contexts.length,0,'hidden unlock must not start an audio device')
+  visible=true;await audio.unlock();const context=contexts[0];audio.play();assert.equal(context.sourceStarts,1)
+  visible=false;audio.pause();await settleAudio();const resumes=context.resumeCalls;await audio.unlock();audio.play();assert.equal(context.resumeCalls,resumes);assert.equal(context.sourceStarts,1);assert.equal(context.state,'suspended')
+  // Browsers can change a context state independently of a JS resume request.
+  context.transition('running');await settleAudio();assert.equal(context.state,'suspended','hidden native auto-resume is suspended again')
+  visible=true;await audio.unlock();assert.equal(context.state,'running');audio.play();assert.equal(context.sourceStarts,2)
+  await audio.dispose();await audio.unlock();assert.equal(context.state,'closed');assert.equal(contexts.length,1)
+ })
+})
+test('a deferred resume finishing after pause cannot leave hidden audio running',async()=>{
+ await fakeMascotAudio(async contexts=>{
+  let visible=true;const audio=new MascotAudio(()=>({muted:false,volume:.45}),()=>{},()=>visible)
+  const unlocking=audio.unlock(),context=contexts[0];assert.equal(context.resumeCalls,1)
+  visible=false;audio.pause();context.pendingResume!();await unlocking;await settleAudio()
+  assert.equal(context.state,'suspended');audio.play();assert.equal(context.sourceStarts,0)
+  context.deferResume=false;visible=true;await audio.unlock();assert.equal(context.state,'running');await audio.dispose()
+ },true)
+})
+test('foreground waits for an earlier pending suspend before resuming the same context',async()=>{
+ await fakeMascotAudio(async contexts=>{
+  let visible=true;const audio=new MascotAudio(()=>({muted:false,volume:.45}),()=>{},()=>visible)
+  await audio.unlock();const context=contexts[0];context.deferSuspend=true;visible=false;audio.pause()
+  visible=true;const unlocking=audio.unlock();context.pendingSuspend!();await unlocking
+  assert.equal(context.state,'running','an earlier hide operation cannot suspend a newly restored stage')
+  context.deferSuspend=false;await audio.dispose()
+ })
+})
+test('disposing while resume is pending never restores an audio context or voice',async()=>{
+ await fakeMascotAudio(async contexts=>{
+  const audio=new MascotAudio(()=>({muted:false,volume:.45}),()=>{},()=>true)
+  const unlocking=audio.unlock(),context=contexts[0];await audio.dispose();context.pendingResume!();await unlocking;await audio.unlock();audio.play()
+  assert.equal(context.state,'closed');assert.equal(context.resumeCalls,1);assert.equal(context.sourceStarts,0);assert.equal(contexts.length,1)
+ },true)
 })
 test('seven Minecraft textures are independent 64×64 RGBA skin atlases with opaque base faces',async()=>{
  const hashes=new Set<string>()

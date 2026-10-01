@@ -19,7 +19,7 @@ let gl:WebGLRenderer|undefined,scene:Scene,camera:OrthographicCamera,resize:Resi
 let rectangles:MascotHitRect[]=[],displayOrder=MASCOTS.map(m=>m.id) as string[]
 let sortTimer:ReturnType<typeof setTimeout>|undefined,saveTimer:ReturnType<typeof setTimeout>|undefined,retryTimer:ReturnType<typeof setTimeout>|undefined,retryDelay=800
 let hits:string[]=[],batch:MascotBatch|undefined,flight:Promise<void>|undefined,soundRevision=0,savedSoundRevision=0,pendingReported=false
-const audio=new MascotAudio(()=>sound.value,(played,voices)=>{if(host.value){host.value.dataset.soundsPlayed=String(played);host.value.dataset.activeSounds=String(voices)}})
+const audio=new MascotAudio(()=>sound.value,(played,voices)=>{if(host.value){host.value.dataset.soundsPlayed=String(played);host.value.dataset.activeSounds=String(voices)}},()=>!hidden.value)
 const unsaved=()=>!!batch||!!hits.length||savedSoundRevision!==soundRevision
 function reportPending(){const pending=unsaved();if(pending!==pendingReported){pendingReported=pending;window.kamucl.send('window:mascotPending',pending)}}
 async function save():Promise<void>{
@@ -125,7 +125,7 @@ async function buildScene(){
   resize=new ResizeObserver(fit);resize.observe(strip.value!);fit();ready.value=true;wake()
  }catch{supported.value=false;ready.value=true;gl?.dispose();gl=undefined}
 }
-watch(hidden,value=>{if(value){cancelAnimationFrame(frame);frame=0;gate.reset();audio.pause();void flush().catch(()=>{})}else{void audio.unlock();wake()}})
+watch(hidden,value=>{if(value){cancelAnimationFrame(frame);frame=0;gate.reset();audio.pause();void flush().catch(()=>{})}else{void audio.unlock();wake()}},{flush:'sync'})
 watch(decorativeActive,wake)
 watch(reduced,wake)
 onMounted(async()=>{

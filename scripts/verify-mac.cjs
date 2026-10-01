@@ -129,7 +129,7 @@ main().finally(async()=>{
  // The existing native workflow calls this script for both the APP and mounted DMG.
  // Keep the common-feature checks here so they cannot be omitted by a workflow step.
  const extensionProof=path.join(proof,'extensions');fs.mkdirSync(extensionProof,{recursive:true})
- const proofNames=['extension-ui-black-orange.json','skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json','mascot-header-layout-live.json','mascot-header-visibility-live.json','mascot-slap-117.wav','mascot-sweep-117.webm'],shots='release/ui-refinement-black-orange'
+ const proofNames=['extension-ui-black-orange.json','skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json','mascot-header-layout-live.json','mascot-header-visibility-live.json','gallery-favorites-motion-live.json','mascot-slap-117.wav','mascot-sweep-117.webm'],shots='release/ui-refinement-black-orange'
  const attemptStarted=Date.now(),fresh=file=>fs.existsSync(file)&&fs.statSync(file).mtimeMs>=attemptStarted
  let extensionError,complete=false
  try{
