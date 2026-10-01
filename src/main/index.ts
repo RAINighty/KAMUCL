@@ -145,6 +145,14 @@ function createWindow(startup?: Awaited<ReturnType<typeof createStartupSplash>>)
   mainWindow.on('hide', () => memTrim?.noteHidden())
   mainWindow.on('restore', () => memTrim?.noteVisible())
   mainWindow.on('show', () => memTrim?.noteVisible())
+  // Native hiding does not consistently update Page Visibility on every Electron/macOS combination.
+  const reportVisibility = (visible: boolean) => {
+    if (!mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('window:visibility', visible)
+  }
+  mainWindow.on('hide', () => reportVisibility(false))
+  mainWindow.on('minimize', () => reportVisibility(false))
+  mainWindow.on('show', () => reportVisibility(mainWindow.isVisible() && !mainWindow.isMinimized()))
+  mainWindow.on('restore', () => reportVisibility(mainWindow.isVisible() && !mainWindow.isMinimized()))
   if (process.platform === 'win32') {
     // Native draggable regions do not dispatch DOM clicks. Observe, never consume.
     mainWindow.hookWindowMessage(0x00A1, (wParam) => {
@@ -221,6 +229,7 @@ app.whenReady().then(async () => {
   ipcMain.on('window:minimize', () => win?.minimize())
   ipcMain.on('window:maximize', () => win && toggleMaximize(win))
   ipcMain.on('window:close', () => win?.close())
+  ipcMain.handle('window:visibility', event => event.sender === win?.webContents && win.isVisible() && !win.isMinimized())
   ipcMain.on('window:skinEditorQuit',event=>{if(event.sender===win?.webContents&&!skinEditorDirty&&!skinEditorPrefsPending)app.quit()})
   ipcMain.on('window:skinEditorDirty',(event,value)=>{if(event.sender===win?.webContents)skinEditorDirty=value===true})
   ipcMain.on('window:skinEditorPrefsPending',(event,value)=>{

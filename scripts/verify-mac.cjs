@@ -33,14 +33,28 @@ async function main(){
  const screenshot=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(proof,'main.png'),Buffer.from(screenshot.data,'base64'))
  // Inspect rendered default-skin pixels; a live WebGL context alone would miss the old faceless fallback.
  await call('Runtime.evaluate',{expression:`document.querySelector('.viewer3d')?.scrollIntoView({block:'center'})`});await wait(1000)
- const skinBounds=await call('Runtime.evaluate',{expression:`(()=>{const c=document.querySelector('.viewer3d canvas');const r=c?.getBoundingClientRect();return r?{x:r.x,y:r.y,width:r.width,height:r.height}:null})()`,returnByValue:true})
+ const skinBounds=await call('Runtime.evaluate',{expression:`(()=>{const c=document.querySelector('.viewer3d canvas');const r=c?.getBoundingClientRect(),v=window.visualViewport;return r?{bounds:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{width:v?.width||innerWidth,height:v?.height||innerHeight,offsetLeft:v?.offsetLeft||0,offsetTop:v?.offsetTop||0,innerWidth,innerHeight,devicePixelRatio}}:null})()`,returnByValue:true})
  assert(skinBounds.result.value,'skin WebGL canvas missing')
- const sharp=require('sharp'),bounds=skinBounds.result.value
- const skinShot=await call('Page.captureScreenshot',{format:'png',clip:{...bounds,scale:1}})
- fs.writeFileSync(path.join(proof,'default-skin.png'),Buffer.from(skinShot.data,'base64'))
- const skinPixels=await sharp(Buffer.from(skinShot.data,'base64')).removeAlpha().raw().toBuffer()
+ const sharp=require('sharp'),{bounds,viewport}=skinBounds.result.value
+ // A separately clipped CDP screenshot can return a black GPU surface on macOS
+ // despite the visible WebGL texture being present in the complete compositor
+ // frame. Capture the current full visible frame, then crop its actual pixels.
+ const skinShot=await call('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false})
+ const skinFrame=Buffer.from(skinShot.data,'base64');fs.writeFileSync(path.join(proof,'default-skin-frame.png'),skinFrame)
+ const frameMeta=await sharp(skinFrame).metadata(),frameWidth=frameMeta.width,frameHeight=frameMeta.height
+ assert(frameWidth>0&&frameHeight>0&&viewport.width>0&&viewport.height>0,'skin capture dimensions invalid')
+ const scaleX=frameWidth/viewport.width,scaleY=frameHeight/viewport.height
+ const raw={left:Math.floor((bounds.x-viewport.offsetLeft)*scaleX),top:Math.floor((bounds.y-viewport.offsetTop)*scaleY),right:Math.ceil((bounds.x+bounds.width-viewport.offsetLeft)*scaleX),bottom:Math.ceil((bounds.y+bounds.height-viewport.offsetTop)*scaleY)}
+ const left=Math.max(0,Math.min(frameWidth,raw.left)),top=Math.max(0,Math.min(frameHeight,raw.top)),right=Math.max(left,Math.min(frameWidth,raw.right)),bottom=Math.max(top,Math.min(frameHeight,raw.bottom))
+ const crop={left,top,width:right-left,height:bottom-top}
+ const skinCapture={source:'Page.captureScreenshot full visible compositor frame, cropped with sharp',frame:'default-skin-frame.png',bounds,viewport,frameSize:{width:frameWidth,height:frameHeight},scale:{x:scaleX,y:scaleY},rawCrop:raw,crop,clamped:raw.left!==left||raw.top!==top||raw.right!==right||raw.bottom!==bottom}
+ fs.writeFileSync(path.join(proof,'default-skin-capture.json'),JSON.stringify(skinCapture,null,2))
+ assert(crop.width>0&&crop.height>0,'skin canvas is outside the captured visible frame')
+ const croppedSkin=await sharp(skinFrame).extract(crop).png().toBuffer();fs.writeFileSync(path.join(proof,'default-skin.png'),croppedSkin)
+ const skinPixels=await sharp(croppedSkin).removeAlpha().raw().toBuffer()
  let facePixels=0,shirtPixels=0
  for(let i=0;i<skinPixels.length;i+=3){const [r,g,b]=skinPixels.subarray(i,i+3);if(r>140&&r>g*1.12&&g>b*1.05)facePixels++;if(g>85&&g>r*1.25&&b>r*1.2)shirtPixels++}
+ fs.writeFileSync(path.join(proof,'default-skin-capture.json'),JSON.stringify({...skinCapture,facePixels,shirtPixels},null,2))
  assert(facePixels>20&&shirtPixels>20,'default skin texture not rendered')
  // The black-purple default intentionally uses a 96% solid surface. Test native
  // material using the existing translucent black-orange theme, without changing defaults.
@@ -78,7 +92,7 @@ async function main(){
    assert(nativeMaterial.difference>2,'native macOS window still opaque over changing desktop background')
  }
  await call('Runtime.evaluate',{expression:`window.kamucl.invoke('settings:set',{theme:'transparent'})`,awaitPromise:true})
- fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,binary,mainUI:true,macUI,skin:{facePixels,shirtPixels},nativeMaterial,url:page.url},null,2));ws.close()
+ fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,binary,mainUI:true,macUI,skin:{facePixels,shirtPixels,capture:skinCapture},nativeMaterial,url:page.url},null,2));ws.close()
  console.log('PASS native macOS '+arch+' packaged app '+version)
 }
 main().finally(async()=>{
