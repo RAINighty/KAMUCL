@@ -6,6 +6,29 @@ module.exports=async function verifyMascotHeader(h){
  // walking/recoil explicitly before the independent reduced-motion regression.
  await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]})
  await nav('skins')
+ await main(`(()=>{globalThis.mascotPersistenceTrace={pending:[],batches:[]};globalThis.mascotProofBatchBase=testElectron.ipcMain._invokeHandlers.get('mascots:batch');globalThis.mascotProofPendingListener=(_event,pending)=>mascotPersistenceTrace.pending.push({pending,time:Date.now()});testElectron.ipcMain.on('window:mascotPending',mascotProofPendingListener);testElectron.ipcMain.removeHandler('mascots:batch');testElectron.ipcMain.handle('mascots:batch',async(event,value)=>{const entry={batchId:value.batchId,hits:[...value.hits],time:Date.now(),status:'pending'};mascotPersistenceTrace.batches.push(entry);try{const result=await mascotProofBatchBase(event,value);Object.assign(entry,{status:'saved',completed:Date.now(),counts:result.counts});return result}catch(error){Object.assign(entry,{status:'failed',completed:Date.now(),error:String(error)});throw error}})})()`)
+ proof.persistence=[]
+ const persistenceSnapshot=async()=>{
+  const local=await evaluate(`(()=>{const stage=document.querySelector('.mascot-stage'),active=document.activeElement;return{stageOpen:!!stage,stageHidden:stage?.classList.contains('hidden')??null,focused:{hit:active?.dataset?.hit||null,label:active?.getAttribute('aria-label'),disabled:active?.disabled??null},buttons:[...document.querySelectorAll('.mascot-hit')].map(e=>({id:e.dataset.hit,count:Number(e.getAttribute('aria-label').match(/累计 (\\d+) 次/)?.[1]),disabled:e.disabled,focused:e===active}))}})()`)
+  const saved=await evaluate("window.kamucl.invoke('mascots:state')"),ipc=await main('mascotPersistenceTrace')
+  return{time:Date.now(),local,saved,ipc}
+ }
+ const awaitCounts=async(label,expected,closed=false)=>{
+  const check={label,expected,closed,samples:[]};proof.persistence.push(check)
+  let snapshot,localMatched=false,savedMatched=false,ready=false
+  for(let i=0;i<50;i++){
+   snapshot=await persistenceSnapshot();check.samples.push(snapshot)
+   localMatched=closed?!snapshot.local.stageOpen:snapshot.local.stageOpen&&Object.entries(expected).every(([id,count])=>snapshot.local.buttons.find(b=>b.id===id)?.count===count)
+   savedMatched=Object.entries(expected).every(([id,count])=>(snapshot.saved.counts[id]||0)===count)
+   ready=localMatched&&savedMatched&&snapshot.ipc.pending.at(-1)?.pending!==true
+   fs.writeFileSync('out/mascot-header-persistence-live.json',JSON.stringify({version,checks:proof.persistence},null,2))
+   if(ready)break
+   await wait(80)
+  }
+  if(!ready)console.error('Mascot persistence completion diagnostics',JSON.stringify(check,null,2))
+  assert(localMatched,label+': local UI must reach the exact expected counts/focus-close state');assert(savedMatched,label+': persistent counts must reach the exact expected counts');assert(ready,label+': the real pending-save protection must clear only after acknowledgement')
+  return snapshot.saved
+ }
  await evaluate(`(()=>{
   window.__mascotSoundProof={events:[],peakVoices:0,active:0,closed:0,contexts:[],audioLifecycleCalls:[],audioStateTransitions:[],recorders:[],recording:[],draws:0,glReleased:0};const proof=window.__mascotSoundProof;
   const getContext=HTMLCanvasElement.prototype.getContext,draw=WebGL2RenderingContext.prototype.drawElements;
@@ -35,12 +58,12 @@ module.exports=async function verifyMascotHeader(h){
  assert.equal(await evaluate('document.querySelectorAll(".slap-burst").length'),7,'seven independent visual feedback nodes')
  await move(geometry.left,geometry.y);await wait(50);assert.equal(await evaluate('window.__mascotSoundProof.events.length'),14,'reverse sweep during recoil must stay responsive')
  await wait(600)
- let state=await evaluate("window.kamucl.invoke('mascots:state')")
+ let state=await awaitCounts('two full sweeps',Object.fromEntries(geometry.ids.map(id=>[id,(before.counts[id]||0)+2])))
  for(const id of geometry.ids)assert.equal(state.counts[id],(before.counts[id]||0)+2,id+' two full sweeps')
  const stationary={...state.counts};await wait(650);state=await evaluate("window.kamucl.invoke('mascots:state')");assert.deepEqual(state.counts,stationary)
  proof.checks.push('single-event seven hits, reverse sweep during recoil, simultaneous visual feedback, stationary hold')
  await evaluate('document.querySelector("[data-hit=qiqi]").focus()')
- await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space'});await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space'});await wait(700)
+ await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space'});await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space'});await awaitCounts('keyboard Space equivalence',{...stationary,qiqi:stationary.qiqi+1});await wait(500)
  assert.equal((await evaluate("window.kamucl.invoke('mascots:state')")).counts.qiqi,stationary.qiqi+1)
  assert.equal((await evaluate("window.kamucl.invoke('mascots:state')")).order[0],'qiqi')
  const afterKeyboard=await evaluate("window.kamucl.invoke('mascots:state')");await wait(500);assert.deepEqual((await evaluate("window.kamucl.invoke('mascots:state')")).counts,afterKeyboard.counts)
@@ -76,7 +99,7 @@ module.exports=async function verifyMascotHeader(h){
  assert.equal(await evaluate('document.querySelector(".mascot-stage").classList.contains("reduced")'),true)
  proof.motion.reduced=await evaluate(`({systemReduced:matchMedia('(prefers-reduced-motion: reduce)').matches,stageReduced:document.querySelector('.mascot-stage').classList.contains('reduced'),draws:window.__mascotSoundProof.draws})`);assert.equal(proof.motion.reduced.systemReduced,true)
  const reducedDraws=await evaluate('window.__mascotSoundProof.draws');await wait(200);assert.equal(await evaluate('window.__mascotSoundProof.draws'),reducedDraws,'reduced-motion idle releases the RAF loop')
- const reducedCounts=await evaluate("window.kamucl.invoke('mascots:state')");await click('[data-hit=q3]');await wait(200);assert.equal((await evaluate("window.kamucl.invoke('mascots:state')")).counts.q3,reducedCounts.counts.q3+1,'reduced motion remains interactive')
+ const reducedCounts=await evaluate("window.kamucl.invoke('mascots:state')");await click('[data-hit=q3]');await awaitCounts('reduced motion remains interactive',{...reducedCounts.counts,q3:reducedCounts.counts.q3+1})
  await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await wait(250)
  proof.motion.restored=await evaluate(`({systemReduced:matchMedia('(prefers-reduced-motion: reduce)').matches,stageReduced:document.querySelector('.mascot-stage').classList.contains('reduced'),draws:window.__mascotSoundProof.draws})`);assert.equal(proof.motion.restored.systemReduced,false);assert.equal(proof.motion.restored.stageReduced,false)
  const visibilitySnapshot=async()=>{
@@ -103,8 +126,8 @@ module.exports=async function verifyMascotHeader(h){
  const sample=await evaluate('window.__mascotSoundProof.samples'),wav=Buffer.alloc(44+sample.values.length*2)
  wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(sample.sampleRate,24);wav.writeUInt32LE(sample.sampleRate*2,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(sample.values.length*2,40);sample.values.forEach((v,i)=>wav.writeInt16LE(Math.round(v*32767),44+i*2));fs.writeFileSync('out/mascot-slap-117.wav',wav)
  await click('[aria-label="互动设置"]');await evaluate("(()=>{const input=document.querySelector('[aria-label=\"拍打音效音量\"]');input.value='32';input.dispatchEvent(new Event('input',{bubbles:true}))})()");await click('[aria-label="静音拍打音效"]');await wait(180)
- const soundBefore=await evaluate('window.__mascotSoundProof.events.length');await click('[data-hit=q3]');await wait(200);assert.equal(await evaluate('window.__mascotSoundProof.events.length'),soundBefore,'mute affects actual sources')
- await click('[aria-label="关闭七人互动"]');await wait(100)
+ const soundBefore=await evaluate('window.__mascotSoundProof.events.length'),beforeMuted=await evaluate("window.kamucl.invoke('mascots:state')");await click('[data-hit=q3]');const mutedCounts={...beforeMuted.counts,q3:beforeMuted.counts.q3+1};await awaitCounts('muted hit still saves once',mutedCounts);assert.equal(await evaluate('window.__mascotSoundProof.events.length'),soundBefore,'mute affects actual sources')
+ await click('[aria-label="关闭七人互动"]');await awaitCounts('close flushes and restores the LOGO',mutedCounts,true)
  assert.equal(await evaluate('!!document.querySelector(".mascot-stage")'),false);assert.equal(await evaluate('window.__mascotSoundProof.closed'),1,'closing must release the owned AudioContext')
  assert.equal(await evaluate('window.__mascotSoundProof.glReleased'),1,'closing actually loses the owned WebGL context')
  const persisted=JSON.parse(fs.readFileSync(path.join(profile,'mascot-counts.json'),'utf8'));assert.deepEqual(persisted.sound,{muted:true,volume:.32})
@@ -114,9 +137,9 @@ module.exports=async function verifyMascotHeader(h){
  const focusedId=await evaluate('document.activeElement.dataset.hit');assert(focusedId,'keyboard LOGO activation focuses the first ready Minecraft hip')
  assert.equal((await evaluate("window.kamucl.invoke('mascots:state')")).counts.q3,closeCount)
  assert.equal(await evaluate('document.querySelector(".stage-tools button").getAttribute("aria-pressed")'),'true')
- const repeatBefore=await evaluate("window.kamucl.invoke('mascots:state')");await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space'});await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',autoRepeat:true});await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',autoRepeat:true});await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space'});await wait(200);assert.equal((await evaluate("window.kamucl.invoke('mascots:state')")).counts[focusedId],repeatBefore.counts[focusedId]+1,'held keyboard Space is one slap')
+ const repeatBefore=await evaluate("window.kamucl.invoke('mascots:state')");await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space'});await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',autoRepeat:true});await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',autoRepeat:true});await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space'});await awaitCounts('held keyboard Space is exactly one slap',{...repeatBefore.counts,[focusedId]:repeatBefore.counts[focusedId]+1})
  const beforeEscape=await evaluate("window.kamucl.invoke('mascots:state')")
- await click('[data-hit=q3]');await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape'});await wait(100);assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'mascot-counts.json'),'utf8')).counts.q3,beforeEscape.counts.q3+1,'Escape immediately flushes the last hit');assert.equal(await evaluate('document.activeElement.classList.contains("brand-avatar")'),true)
+ await click('[data-hit=q3]');await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape'});await awaitCounts('Escape flushes the final hit before closing',{...beforeEscape.counts,q3:beforeEscape.counts.q3+1},true);assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'mascot-counts.json'),'utf8')).counts.q3,beforeEscape.counts.q3+1,'Escape immediately flushes the last hit');assert.equal(await evaluate('document.activeElement.classList.contains("brand-avatar")'),true)
  proof.checks.push('sound/volume persisted, mute, close flush, reopen counts, owned audio context released')
  proof.checks.push('real keyboard LOGO activation, focus entry/restore, Space repeat suppressed, full model corner bounds')
  await main(`(()=>{globalThis.originalMascotBatch=testElectron.ipcMain._invokeHandlers.get('mascots:batch');globalThis.dropMascotAck=true;testElectron.ipcMain.removeHandler('mascots:batch');testElectron.ipcMain.handle('mascots:batch',async(event,value)=>{const result=await originalMascotBatch(event,value);if(dropMascotAck){dropMascotAck=false;throw Error('isolated fixture: committed batch acknowledgement lost')}return result});globalThis.mascotPendingTrace=[];testElectron.ipcMain.on('window:mascotPending',(_event,value)=>mascotPendingTrace.push(value))})()`)
@@ -124,8 +147,8 @@ module.exports=async function verifyMascotHeader(h){
  const beforeLostAck=await evaluate("window.kamucl.invoke('mascots:state')");await click('[data-hit=q3]');await click('[aria-label="关闭七人互动"]');await wait(150)
  assert.equal(await evaluate('!!document.querySelector(".mascot-stage")'),true,'unknown save acknowledgement keeps the stage open')
  assert.equal(await main('mascotPendingTrace[mascotPendingTrace.length-1]'),true,'failed flush never falsely clears close protection')
- await wait(900);assert.equal((await evaluate("window.kamucl.invoke('mascots:state')")).counts.q3,beforeLostAck.counts.q3+1,'retry after a committed but lost response does not double count')
- await click('[aria-label="关闭七人互动"]');await wait(100);assert.equal(await evaluate('!!document.querySelector(".mascot-stage")'),false);assert.equal(await main('mascotPendingTrace[mascotPendingTrace.length-1]'),false)
+ await awaitCounts('committed but lost acknowledgement retries without double count',{...beforeLostAck.counts,q3:beforeLostAck.counts.q3+1})
+ await click('[aria-label="关闭七人互动"]');await awaitCounts('close after unknown acknowledgement saves exactly once',{...beforeLostAck.counts,q3:beforeLostAck.counts.q3+1},true);assert.equal(await evaluate('!!document.querySelector(".mascot-stage")'),false);assert.equal(await main('mascotPendingTrace[mascotPendingTrace.length-1]'),false)
  await main(`testElectron.ipcMain.removeHandler('mascots:batch');testElectron.ipcMain.handle('mascots:batch',originalMascotBatch)`)
  proof.checks.push('committed-but-lost acknowledgement retries without duplicates, failed close preserves pending protection')
  const batch={batchId:'gui-117-idempotent-proof',hits:['q3','milo']},beforeBatch=await evaluate("window.kamucl.invoke('mascots:state')")
@@ -137,6 +160,7 @@ module.exports=async function verifyMascotHeader(h){
    if(recording[0]){fs.writeFileSync('out/mascot-sweep-117.webm',Buffer.from(recording[0]));proof.audio.recording='only the stage compressor output, no microphone or system capture';proof.audio.output=await evaluate('window.__mascotSoundProof.output');assert(proof.audio.output.peak>0&&proof.audio.output.peak<.999,'actual recorded mixer output is nonzero and unclipped')}
  proof.audio.lifecycleCalls=await evaluate('window.__mascotSoundProof.audioLifecycleCalls');proof.audio.stateTransitions=await evaluate('window.__mascotSoundProof.audioStateTransitions');proof.finalState=afterBatch;fs.writeFileSync('out/mascot-header-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify(proof,null,2));console.log('1.1.7 Minecraft header mascot GUI checks passed')
  await evaluate('(()=>{const h=window.__mascotHooks;window.AudioContext=h.Original;AudioBufferSourceNode.prototype.start=h.start;AudioNode.prototype.connect=h.connect;h.Original.prototype.close=h.close;h.Original.prototype.resume=h.resume;h.Original.prototype.suspend=h.suspend;HTMLCanvasElement.prototype.getContext=h.getContext;WebGL2RenderingContext.prototype.drawElements=h.draw})()')
+ await main("testElectron.ipcMain.removeHandler('mascots:batch');testElectron.ipcMain.handle('mascots:batch',mascotProofBatchBase);testElectron.ipcMain.removeListener('window:mascotPending',mascotProofPendingListener)")
  await nav('home')
  await call('Emulation.setEmulatedMedia',{features:[]})
 }
