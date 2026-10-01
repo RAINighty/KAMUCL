@@ -10,8 +10,9 @@
    编译依赖并校验 SHA256。离线可用 KAMUCL_BUILD_LIBS 指向同坐标 Maven 目录。
 4. 修改 src/main/core/voxlink 或其他源码，运行 npm run build。
    Windows 原生程序由系统 .NET Framework csc.exe 编译；Mac 不需要它。
-5. npm start 启动修改版。Windows 用 npm run dist:win；Mac 原生机器使用
-   npx electron-builder --mac dir --arm64（Intel 用 --x64）。
+5. npm start 启动修改版。Windows 用 npm run dist:win；本批 Windows 使用 Electron 44.3.0。
+   Mac 在原生机器使用 npx electron-builder --mac dir --arm64 --config.electronVersion=33.4.11 --publish never
+   （Intel 将 --arm64 替换为 --x64），与本批原生验证和发行运行库保持一致。
 6. .github/workflows/mac-build.yml 描述原生构建、签名、APP ZIP 与 DMG 验证。
    npm test、npx tsc --noEmit 与 npm run license:check 提供本地检查。
 
