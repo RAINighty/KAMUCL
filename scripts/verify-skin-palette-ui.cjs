@@ -21,8 +21,19 @@ module.exports = async ({ evaluate, call, main, nav, wait, root, screenshot, ver
   await main(`testElectron.dialog.showSaveDialog=async()=>({canceled:false,filePath:${JSON.stringify(output)}})`)
   assert(await clean(), 'new editor starts without skin changes')
   await edit('.palette-hue', '120')
-  const sv = await evaluate(`(()=>{const r=document.querySelector('.palette-sv').getBoundingClientRect();return{x:r.x+r.width*.8,y:r.y+r.height*.4}})()`)
+  // Focusing the hue input can scroll the independent tools pane. Measure the
+  // actual visible SV target again before dispatching trusted coordinates.
+  let sv,previous=''
+  const readiness={version,samples:[]},saveReadiness=()=>fs.writeFileSync('out/skin-palette-ready-live.json',JSON.stringify(readiness,null,2))
+  for(let i=0;i<40;i++){
+    await evaluate(`document.activeElement?.blur();document.querySelector('.palette-sv').scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`);await wait(80)
+    const state=await evaluate(`(()=>{const e=document.querySelector('.palette-sv'),r=e.getBoundingClientRect(),x=r.x+r.width*.8,y=r.y+r.height*.4,hit=document.elementFromPoint(x,y);return{x,y,rect:{x:r.x,y:r.y,width:r.width,height:r.height},innerWidth,innerHeight,hit:hit?.className,visible:r.width>0&&r.height>0&&x>=0&&x<innerWidth&&y>=0&&y<innerHeight&&!e.closest('[inert]')&&e.contains(hit)}})()`),signature=JSON.stringify(state)
+    readiness.samples.push(state);saveReadiness();if(state.visible&&signature===previous){sv=state;break}previous=signature
+  }
+  if(!sv){await screenshot('skin-palette-target-failure');assert.fail('SV target not visible and stable: '+JSON.stringify(readiness.samples.at(-1)))}
   for (const [type, buttons] of [['mouseMoved',0],['mousePressed',1],['mouseReleased',0]]) await call('Input.dispatchMouseEvent',{type,x:sv.x,y:sv.y,button:type==='mouseMoved'?'none':'left',buttons,clickCount:type==='mouseMoved'?0:1})
+  for(let i=0;i<30;i++){readiness.actual={s:Number(await field('[aria-label="HSV S"]')),v:Number(await field('[aria-label="HSV V"]'))};saveReadiness();if(Math.abs(readiness.actual.s-80)<1&&Math.abs(readiness.actual.v-60)<1)break;await wait(50)}
+  await screenshot('skin-palette-sv-coordinate')
   assert(Math.abs(Number(await field('[aria-label="HSV S"]'))-80)<1); assert(Math.abs(Number(await field('[aria-label="HSV V"]'))-60)<1)
   assert(await clean(), 'SV and hue gestures never edit skin pixels')
   await edit('.palette-hex', '#1177ee')
