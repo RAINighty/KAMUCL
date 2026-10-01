@@ -35,12 +35,23 @@ KAMUCLOffset 扩展保留，游戏忽略该扩展的事实会在转换前提示�
 上游逐值常量测试使用固定提交的 Java fixture。
 `scripts/verify-extension-ui.cjs` 在隔离 Electron 进程内检查新功能，
 由 `scripts/verify-ui-refinement.cjs` 调用；测试数据及模拟 IPC 不写入正式产品代码。
+`scripts/verify-skin-surfaces-ui.cjs` 补验两种模型的手臂、身体、腿部 UV，
+以及编辑器在最小窗口和缩放后的滚动布局。
 上传与工单 GUI 成功/失败测试使用隔离模拟账号和服务，并非真实账号上传成功的证据。
 
 Windows：`scripts/verify-windows-package.cjs` 核对 EXE、中文路径 ZIP 解压、冷/热启动和完整运行包。
 Mac：`.github/workflows/mac-build.yml` 在原生 ARM/Intel runner 上构建、签名、挂载 DMG、启动 APP，
 运行新功能 GUI 和实际 Minecraft 检查。验证输出随 CI artifacts 保留。
 Mac 使用 ad-hoc 签名；没有 Apple Developer ID 签名或公证。
+
+本次结果：560 项测试通过；Windows 深色、浅色、自定义主题的全页面 GUI 回归通过，
+两种原生 Mac 架构的 APP / DMG、公共功能、实际 Minecraft 26.2 和正常保存退出通过。
+最终 Mac 运行：`36900960198`，代码 `d5f93ee`；后续提交仅包含交付文档及验证入口。
+Windows 成品和源码干净构建证据见 `docs/validation-1.1.6/windows.json`。
+
+没有覆盖全部投影 MOD 的游戏内加载、所有 26.x 后续版本、真实收藏项目的全部依赖组合、
+Windows 启动前整理的真实游戏全过程、每种受保护进程和所有平台的新功能窄窗口组合。
+这些项目不描述为已通过；未验证的投影数据迁移会在产品中明确提示或拒绝。
 
 实际上游标准/旧 TURN 已在临时私有房间完成 5000 字节传输和哈希校验，随后释放中继并退出房间。
 证据见 docs/validation-1.1.6/voxlink-live.json，命令为 node scripts/verify-voxlink-live.cjs --live。
