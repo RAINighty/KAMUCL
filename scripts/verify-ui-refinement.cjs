@@ -37,9 +37,26 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   await call('Page.reload'); await wait(2200);
   assert.equal(await evaluate('document.documentElement.dataset.theme'),process.env.KAMUCL_TEST_THEME||'black-orange','requested theme must actually apply');
   const screenshot=async name=>{await wait(220);fs.writeFileSync(path.join(shotDir,name+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'))};
-  const click=async selector=>evaluate('document.querySelector('+JSON.stringify(selector)+')?.click()');
+  const click=async selector=>{
+    let state;
+    for(let i=0;i<50;i++){
+      state=await evaluate('(()=>{const e=document.querySelector('+JSON.stringify(selector)+');return {exists:!!e,disabled:!!e?.disabled,inert:!!e?.closest("[inert]")}})()');
+      if(state.exists&&!state.disabled&&!state.inert)return evaluate('document.querySelector('+JSON.stringify(selector)+').click()');
+      await wait(80);
+    }
+    throw Error('Clickable target did not become ready: '+selector+' '+JSON.stringify(state));
+  };
   const type=async (selector,value)=>evaluate('(()=>{const e=document.querySelector('+JSON.stringify(selector)+');e.value='+JSON.stringify(value)+';e.dispatchEvent(new Event("input",{bubbles:true}))})()');
-  const nav=async id=>{if(['mods','packs','shaders','recordings','bridge','servers'].includes(id)&&!await evaluate('!!document.querySelector("[data-nav='+id+']")?.getClientRects().length'))await click('[data-nav=resources]');await click('[data-nav='+id+']');await wait(350)};
+  const nav=async id=>{
+    if(['mods','packs','shaders','recordings','projections','bridge','servers'].includes(id)&&!await evaluate('document.querySelector("[data-nav=resources]")?.getAttribute("aria-expanded")==="true"'))await click('[data-nav=resources]');
+    await click('[data-nav='+id+']');
+    let state,ready=false;
+    for(let i=0;i<50;i++){
+      state=await evaluate('(()=>{const e=document.querySelector("[data-nav='+id+']");return {current:e?.getAttribute("aria-current"),inert:!!e?.closest("[inert]"),selected:document.querySelector("[data-nav][aria-current=page]")?.dataset.nav,resourcesExpanded:document.querySelector("[data-nav=resources]")?.getAttribute("aria-expanded")}})()');
+      if(state.current==='page'&&!state.inert){ready=true;break}await wait(80);
+    }
+    assert(ready,'Navigation did not select '+id+': '+JSON.stringify(state));await wait(350);
+  };
   if(process.env.KAMUCL_EXTENSION_GUI){
     const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version};
     await require('./verify-extension-ui.cjs')(harness);
