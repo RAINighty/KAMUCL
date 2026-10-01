@@ -101,14 +101,25 @@ main().finally(async()=>{
 }).then(()=>{
  // The existing native workflow calls this script for both the APP and mounted DMG.
  // Keep the common-feature checks here so they cannot be omitted by a workflow step.
- execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{
-  env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_TEST_THEME:'black-orange'},
-  stdio:'inherit',timeout:300000
- })
  const extensionProof=path.join(proof,'extensions');fs.mkdirSync(extensionProof,{recursive:true})
- fs.copyFileSync('out/extension-ui-black-orange.json',path.join(extensionProof,'results.json'))
- for(const name of ['skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json'])fs.copyFileSync(path.join('out',name),path.join(extensionProof,name))
- for(const name of ['mascot-slap-117.wav','mascot-sweep-117.webm'])if(fs.existsSync(path.join('out',name)))fs.copyFileSync(path.join('out',name),path.join(extensionProof,name))
- for(const name of fs.readdirSync('release/ui-refinement-black-orange'))if(name.startsWith('extension-')&&name.endsWith('.png'))fs.copyFileSync(path.join('release/ui-refinement-black-orange',name),path.join(extensionProof,name))
+ const proofNames=['extension-ui-black-orange.json','skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json','mascot-header-layout-live.json','mascot-header-visibility-live.json','mascot-slap-117.wav','mascot-sweep-117.webm'],shots='release/ui-refinement-black-orange'
+ const attemptStarted=Date.now(),fresh=file=>fs.existsSync(file)&&fs.statSync(file).mtimeMs>=attemptStarted
+ let extensionError,complete=false
+ try{
+  execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{
+   env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_TEST_THEME:'black-orange'},
+   stdio:'inherit',timeout:300000
+  })
+  for(const name of proofNames.slice(0,4))assert(fresh(path.join('out',name)),'successful GUI run is missing current proof '+name)
+  complete=true
+ }catch(error){extensionError=String(error);throw error}
+ finally{
+  // Failed GUI runs must retain their last real layout/visibility snapshot and
+  // screenshots in the uploaded artifact, not only in the ephemeral runner.
+  const copied=[]
+  for(const name of proofNames)if(fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name==='extension-ui-black-orange.json'?'results.json':name));copied.push(name)}
+  if(fs.existsSync(shots))for(const name of fs.readdirSync(shots))if(name.startsWith('extension-')&&name.endsWith('.png')&&fresh(path.join(shots,name))){fs.copyFileSync(path.join(shots,name),path.join(extensionProof,name));copied.push(name)}
+  fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({complete,error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
+ }
  console.log('PASS native macOS '+arch+' extension GUI '+version)
 }).catch(e=>{console.error(e);process.exitCode=1})

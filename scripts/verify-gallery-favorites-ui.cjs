@@ -4,6 +4,30 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  const textClick=async(scope,text)=>evaluate(`(()=>{const b=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)});if(!b)throw Error('Missing '+${JSON.stringify(text)});b.click()})()`);
  const settings=()=>evaluate("window.kamucl.invoke('settings:get')");
  const original=await settings();
+ const motionReadiness=[];
+ const motionSnapshot=async()=>{
+  const native=await main("(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/renderer/index.html'));return{isVisible:w.isVisible(),isMinimized:w.isMinimized(),focused:w.isFocused(),bounds:w.getBounds(),backgroundThrottling:w.webContents.getBackgroundThrottling(),platform:process.platform,electron:process.versions.electron}})()");
+  const renderer=await evaluate("(async()=>{const s=await window.kamucl.invoke('settings:get');return{documentHidden:document.hidden,visibilityState:document.visibilityState,motion:document.documentElement.dataset.motion,reduceMotion:s.reduceMotion,systemReduced:matchMedia('(prefers-reduced-motion: reduce)').matches,nativeVisibility:await window.kamucl.invoke('window:visibility'),stageHidden:document.querySelector('.mascot-stage')?.classList.contains('hidden')??null,images:document.querySelectorAll('.hero-image').length,timers:window.__galleryTimers?.size??null}})()");
+  return{native,renderer};
+ };
+ const activateGallery=async(label,expectedTimers)=>{
+  const proof={label,before:await motionSnapshot(),samples:[]};motionReadiness.push(proof);
+  // Reloading after the native hide/show regression can leave macOS occlusion
+  // pending. Activate the real window; never replace document.hidden or accept
+  // a stopped multi-image carousel as a successful normal-motion test.
+  await main("(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/renderer/index.html'));if(w.isMinimized())w.restore();w.show();w.focus();testElectron.app.focus({steal:true})})()");
+  await call('Emulation.setFocusEmulationEnabled',{enabled:true});await call('Page.bringToFront');
+  let ready=false;
+  for(let i=0;i<50;i++){
+   await wait(80);const sample=await motionSnapshot();proof.samples.push(sample);
+   const {native,renderer}=sample;
+   ready=native.isVisible&&!native.isMinimized&&native.focused&&renderer.nativeVisibility&&!renderer.documentHidden&&renderer.visibilityState==='visible'&&renderer.motion==='full'&&renderer.reduceMotion!==true&&!renderer.systemReduced&&(expectedTimers===undefined||renderer.timers===expectedTimers);
+   fs.writeFileSync('out/gallery-favorites-motion-live.json',JSON.stringify({version,motionReadiness},null,2));
+   if(ready)break;
+  }
+  if(!ready)console.error('Gallery motion readiness diagnostics',JSON.stringify(proof,null,2));
+  assert(ready,label+': real foreground window and normal-motion carousel must become ready');
+ };
  const sources=[path.join(root,'gallery-one.png'),path.join(root,'gallery-two.png')];
  await main(`(()=>{const fs=process.mainModule.require('node:fs');for(const [i,file]of ${JSON.stringify(sources)}.entries()){const b=Buffer.alloc(16*16*4);for(let j=0;j<b.length;j+=4){b[j]=i?30:80;b[j+1]=120;b[j+2]=i?180:220;b[j+3]=255}fs.writeFileSync(file,testElectron.nativeImage.createFromBitmap(b,{width:16,height:16}).toPNG())}testElectron.dialog.showOpenDialog=async()=>({canceled:false,filePaths:${JSON.stringify(sources)}})})()`);
  const imported=await evaluate("window.kamucl.invoke('appearance:importLaunchThumbnail')");
@@ -11,6 +35,7 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  await call('Page.reload');await wait(1400);
  // Observe actual 100ms carousel timers without changing application code.
  await evaluate("(()=>{window.__galleryTimers=new Set();window.__gallerySet=window.setInterval;window.__galleryClear=window.clearInterval;window.setInterval=(fn,ms,...args)=>{const id=window.__gallerySet(fn,ms,...args);if(ms===100)window.__galleryTimers.add(id);return id};window.clearInterval=id=>{window.__galleryTimers.delete(id);window.__galleryClear(id)}})()");
+ await activateGallery('after gallery reload');
  const openGallery=async()=>{await nav('settings');await textClick('.settings-scopes','启动器设置');await textClick('.settings-categories','外观');await evaluate('document.querySelector("details[data-section=thumbnail]").open=true');await wait(150)};
  await openGallery();assert.equal(await evaluate('document.querySelectorAll(".launch-carousel-list>li").length'),7+images.length);
  const originalImages=[...images];
@@ -21,7 +46,7 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  await evaluate('(()=>{const row=document.querySelector(".launch-carousel-list>li");const input=row.querySelector(".slide-duration input");input.value="1";input.dispatchEvent(new Event("change",{bubbles:true}));row.querySelector("button[title=向后移动]").click()})()');await wait(200);saved=await settings();const reordered=saved.launchThumbnail.order;assert.equal(saved.launchThumbnail.durations['builtin:piston'],1);assert.equal(reordered[1],'builtin:piston');
  // Disable one custom file using its checkbox, preserving its physical managed copy.
  await evaluate(`(()=>{const row=[...document.querySelectorAll('.launch-carousel-list>li')].find(e=>e.querySelector('label span')?.title===${JSON.stringify(images[0])});if(!row)throw Error('custom row missing');row.querySelector('input[type=checkbox]').click()})()`);await wait(150);saved=await settings();assert(saved.launchThumbnail.disabled.includes(images[0]));assert(fs.existsSync(images[0]));await screenshot('gallery-settings');
- await nav('home');assert.equal(await evaluate('document.querySelectorAll(".hero-image").length'),6+images.length);assert.equal(await evaluate('window.__galleryTimers.size'),1);
+ await nav('home');assert.equal(await evaluate('document.querySelectorAll(".hero-image").length'),6+images.length);await activateGallery('multiple enabled images',1);assert.equal(await evaluate('window.__galleryTimers.size'),1);
  // Theme code uses bundled IDs directly, remaps managed references, and keeps disabled data.
  const code=await evaluate("window.kamucl.invoke('appearance:exportTheme')");const payload=JSON.parse(gunzipSync(Buffer.from(code.slice(8),'base64')));assert(payload.launchThumbnail.order.includes('builtin:piston'));assert(payload.launchThumbnail.disabled[0].startsWith('image-'));
  const roundtrip=await evaluate(`window.kamucl.invoke('appearance:importTheme',${JSON.stringify(code)},true)`);assert(roundtrip.launchThumbnail.order.includes('builtin:piston'));assert(roundtrip.launchThumbnail.disabled.includes(roundtrip.launchThumbnail.images[0]));assert.deepEqual(roundtrip.launchThumbnail.images.map(file=>fs.readFileSync(file)),images.map(file=>fs.readFileSync(file)));
@@ -34,5 +59,5 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  await main("for(const [channel,fn]of [['versions:catalog',()=>({versions:[{id:'26.3',type:'release',url:'https://fixture.invalid/26.3.json',releaseTime:'2026-09-15T11:00:00Z'}],checkedAt:Date.now(),stale:false})],['loaders:list',()=>['fixture-loader']],['mods:favoriteVersions',async(_e,s,p,mc,l)=>[{source:s,projectId:p,fileId:'fixture',version:'compatible-'+l,fileName:'fixture.jar',gameVersions:[mc],loaders:[l],releaseType:'release',size:1,url:'https://fixture.invalid/fixture.jar'}]]]){testElectron.ipcMain.removeHandler(channel);testElectron.ipcMain.handle(channel,fn)}");
  await nav('game');await click('[data-tab=download]');await wait(150);await click('.latest-release .btn-gold');await wait(120);await click('.favorite-picker>label input');await textClick('.loader-options','Fabric');await wait(250);const picker=await evaluate('document.querySelector(".favorite-picker").innerText');assert(picker.includes('外置收藏 MR')&&picker.includes('外置收藏 CF'));await textClick('.modal-actions','取消');
  await evaluate(`window.kamucl.invoke('settings:set',{launchThumbnail:${JSON.stringify(original.launchThumbnail)}})`);await nav('home');await evaluate('window.setInterval=window.__gallerySet;window.clearInterval=window.__galleryClear');
- fs.writeFileSync('out/gallery-favorites-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify({version,builtins:7,mixed:true,disabledPreservesFiles:true,zeroAndSingleNoTimer:true,mixedOrder:reordered,themeRoundtrip:true,externalBothSources:true,detailAndInstallSynced:true,writeFailureRecoverable:true},null,2));console.log('Gallery and external favorites GUI checks passed');
+ fs.writeFileSync('out/gallery-favorites-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify({version,builtins:7,mixed:true,disabledPreservesFiles:true,zeroAndSingleNoTimer:true,mixedOrder:reordered,themeRoundtrip:true,externalBothSources:true,detailAndInstallSynced:true,writeFailureRecoverable:true,motionReadiness},null,2));console.log('Gallery and external favorites GUI checks passed');
 };
