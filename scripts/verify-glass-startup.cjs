@@ -74,9 +74,15 @@ app.whenReady().then(async () => {
     assert(original,'floating glass must produce actual canvas draw calls')
     const bounds = overlay.getBounds()
     fakeCursor = { x: Math.round(bounds.x + original.x), y: Math.round(bounds.y + original.y) }
-    await wait(1000)
-    const moved = await overlay.webContents.executeJavaScript('({pose:glassProof.poses[0],pointer:glassProof.pointer,caption:document.body.innerText})')
-    assert(Math.hypot(moved.pose.x-original.x,moved.pose.y-original.y)>30, 'nearby cursor must repel actual rendered glass')
+    let moved,displacement=0
+    // Native CI presentation can skip frames; observe the response, not one wall-clock sample.
+    for(let i=0;i<40;i++){
+      await wait(50)
+      moved=await overlay.webContents.executeJavaScript('({pose:glassProof.poses[0],pointer:glassProof.pointer,caption:document.body.innerText})')
+      displacement=moved.pose?Math.hypot(moved.pose.x-original.x,moved.pose.y-original.y):0
+      if(displacement>30&&moved.pointer?.x===fakeCursor.x-bounds.x&&moved.pointer?.y===fakeCursor.y-bounds.y)break
+    }
+    assert(displacement>30, 'nearby cursor must repel actual rendered glass: '+JSON.stringify({original,moved,displacement}))
     assert.equal(moved.pointer.x, fakeCursor.x-bounds.x); assert.equal(moved.pointer.y,fakeCursor.y-bounds.y)
     assert(!main.isVisible(), 'animation and cursor must not reveal unready main window')
     fs.writeFileSync(path.join(root,'floating.png'),(await overlay.webContents.capturePage()).toPNG())
