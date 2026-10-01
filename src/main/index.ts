@@ -84,6 +84,7 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 let win: BrowserWindow | null = null
+let skinEditorDirty=false
 /** 内存压榨控制器：whenReady 时初始化；createWindow 的窗口事件经此转发（静默瘦身） */
 let memTrim: MemoryTrimController | null = null
 
@@ -118,6 +119,8 @@ function createWindow(startup?: Awaited<ReturnType<typeof createStartupSplash>>)
   trackWindowState(win)
   win.once('show', () => { void acknowledgeUpdateStartup().catch(error => launcherLogWarn('update', '更新确认失败', error)) })
   const mainWindow = win
+  skinEditorDirty=false
+  mainWindow.on('close',event=>{if(skinEditorDirty&&!mainWindow.webContents.isDestroyed()){event.preventDefault();mainWindow.webContents.send('window:skinEditorClose')}})
   mainWindow.once('closed', () => { if (win === mainWindow) win = null })
   // 静默瘦身钩子：最小化/隐藏触发工作集整理 + 渲染层瘦身广播；恢复不做处理（自然回涨）
   mainWindow.on('minimize', () => memTrim?.noteHidden())
@@ -200,6 +203,8 @@ app.whenReady().then(async () => {
   ipcMain.on('window:minimize', () => win?.minimize())
   ipcMain.on('window:maximize', () => win && toggleMaximize(win))
   ipcMain.on('window:close', () => win?.close())
+  ipcMain.on('window:skinEditorQuit',event=>{if(event.sender===win?.webContents&&!skinEditorDirty)app.quit()})
+  ipcMain.on('window:skinEditorDirty',(event,value)=>{if(event.sender===win?.webContents)skinEditorDirty=value===true})
 
   createWindow(startup)
   launcherLogInfo('main', '主窗口创建完成')
@@ -257,7 +262,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', event => {
+  if(skinEditorDirty&&win&&!win.webContents.isDestroyed()){event.preventDefault();win.webContents.send('window:skinEditorClose',{quit:true});return}
   // 仅清理联机相关子进程/监听器；不影响 Minecraft 生命周期。
   void stopDirectHost()
   void stopVoxlinkOnQuit()

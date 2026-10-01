@@ -1,7 +1,7 @@
 {
   "name": "kamucl",
   "productName": "KAMUCL",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "KAMUCL - 简约美观的一键式 Minecraft 启动器",
   "main": "out/main/index.js",
   "scripts": {
@@ -89,19 +89,22 @@
     "@iarna/toml": "2.2.5",
     "adm-zip": "^0.6.0",
     "koffi": "^3.2.1",
-    "undici": "^6.28.0"
+    "undici": "^6.28.0",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
     "@types/adm-zip": "^0.5.7",
     "@types/node": "^22.9.0",
     "@types/three": "0.185.0",
+    "@types/ws": "8.18.1",
     "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-vue": "^5.2.0",
     "asar": "^3.2.0",
     "electron": "44.3.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
+    "minecraft-data": "3.117.0",
     "sharp": "^0.35.4",
     "skinview-utils": "0.7.1",
     "three": "^0.185.1",

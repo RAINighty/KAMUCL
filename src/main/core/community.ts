@@ -6,6 +6,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import {AsyncLocalStorage} from 'node:async_hooks'
 import type {
   CommunityFile,
   CommunityKind,
@@ -33,11 +34,14 @@ const errText = (e: unknown): string => (e instanceof Error ? e.message : String
 
 const UA = { 'User-Agent': 'KAMUCL/0.4.0' }
 const TIMEOUT = 30000
+const requestSignal=new AsyncLocalStorage<AbortSignal>()
+export const withCommunitySignal=<T>(signal:AbortSignal|undefined,run:()=>Promise<T>):Promise<T>=>signal?requestSignal.run(signal,run):run()
 
 // ---------------- 基础请求 ----------------
 
 async function fetchJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT), headers: { ...UA, ...headers } })
+  const signal=requestSignal.getStore();signal?.throwIfAborted()
+  const res = await fetch(url, { signal: signal?AbortSignal.any([signal,AbortSignal.timeout(TIMEOUT)]):AbortSignal.timeout(TIMEOUT), headers: { ...UA, ...headers } })
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`)
   return res.json()
 }

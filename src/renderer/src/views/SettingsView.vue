@@ -29,6 +29,7 @@ import {
 import { enterEditMode, store, toast } from '../store'
 import { DEFAULT_CUSTOM_THEME, THEME_PRESETS } from '@shared/types'
 import { autoMemoryMB } from '@shared/memory'
+import MemoryOrganizer from '../components/MemoryOrganizer.vue'
 import type { LocalUpdateCheck, PluginInfo, ReleaseInfo, Settings, ThemeName, UpdateStateInfo } from '@shared/types'
 import { QQ_GROUP_NUMBER } from '@shared/branding'
 import HomeLayoutEditor from '../components/HomeLayoutEditor.vue'
@@ -853,6 +854,7 @@ async function onRemovePlugin(p: PluginInfo) {
             {{ memoryInfoText }}
             <button data-ui="SettingsView:87a00792aa4a" class="memory-refresh" type="button" @click="refreshSystemInfo">刷新</button>
           </p>
+          <MemoryOrganizer @refresh="refreshSystemInfo" />
         </div>
       </details>
 

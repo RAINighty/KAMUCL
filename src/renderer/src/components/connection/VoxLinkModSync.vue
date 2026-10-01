@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { InstanceTarget } from '@shared/instanceCenter'
-import type { ModSyncPlan, ModSyncScope } from '@shared/voxlinkMods'
+import type { ModSyncPlan, ModSyncScope, ModSyncGate, ModSyncGateResult } from '@shared/voxlinkMods'
 import UpdateDialogShell from '../UpdateDialogShell.vue'
 const props = defineProps<{ code: string; target?: InstanceTarget }>()
-const emit = defineEmits<{ join: []; dismiss: [] }>()
+const emit = defineEmits<{ join: [gate:ModSyncGate]; dismiss: [] }>()
 const scope = ref<ModSyncScope>('required'), plan = ref<ModSyncPlan | null>(null)
 const busy = ref(false), message = ref(''), done = ref(false), selected = ref<string[]>([])
 const missing = computed(() => plan.value?.rows.filter(r => r.status === 'missing') || [])
@@ -18,15 +18,17 @@ onMounted(() => { offProgress = window.kamucl.on('voxlink:mods:progress', value 
 function cancel() { ++epoch; if (operation) void window.kamucl.invoke('voxlink:mods:cancel', operation); operation = ''; busy.value = false }
 function dismiss() { cancel(); emit('dismiss') }
 function cancelDownload() { if (operation) void window.kamucl.invoke('voxlink:mods:cancel', operation); message.value = '正在取消下载…' }
-function join() { cancel(); emit('join') }
+function join(gate:ModSyncGate='BYPASSED') { cancel();if(gate==='BYPASSED')void window.kamucl.invoke('voxlink:mods:bypass',props.code);emit('join',gate) }
 async function check() {
   if (!props.target || busy.value) return
   const current = ++epoch; operation = crypto.randomUUID(); busy.value = true; message.value = ''; plan.value = null
   try {
-    const result = await window.kamucl.invoke('voxlink:mods:check', { operation, code: props.code, scope: scope.value, target: props.target }) as ModSyncPlan | null
+    const result = await window.kamucl.invoke('voxlink:mods:check', { operation, code: props.code, scope: scope.value, target: props.target }) as ModSyncPlan | ModSyncGateResult
     if (current !== epoch) return
-    if (!result || !result.unknownMods.length && result.rows.every(r => r.status === 'installed')) { join(); return }
-    plan.value = result; selected.value = missing.value.map(r => r.entry.sha1)
+    if(result.gate&&result.gate!=='MANIFEST'){join(result.gate);return}
+    const manifest=result as ModSyncPlan
+    if (!manifest.unknownMods.length && manifest.rows.every(r => r.status === 'installed')) { join('MANIFEST'); return }
+    plan.value = manifest; selected.value = missing.value.map(r => r.entry.sha1)
   } catch (error) { if (current === epoch) message.value = (error as Error).message }
   finally { if (current === epoch) busy.value = false }
 }
@@ -68,7 +70,7 @@ onUnmounted(() => { cancel(); offProgress?.() })
     <p v-if="message" :class="done ? 'connection-muted' : 'connection-error'" role="status">{{ message }}</p>
     <template #footer>
       <button class="btn btn-ghost" @click="busy && plan ? cancelDownload() : dismiss()">{{ busy ? '取消' : '返回' }}</button>
-      <button class="btn btn-ghost" :disabled="busy && !!plan" @click="join">{{ done ? '已知需重启，继续加入' : busy ? '跳过检查并加入' : '直接加入' }}</button>
+      <button class="btn btn-ghost" :disabled="busy && !!plan" @click="join()">{{ done ? '已知需重启，继续加入' : busy ? '跳过检查并加入' : '直接加入' }}</button>
       <button v-if="!plan" class="btn btn-gold" :disabled="busy || !target" @click="check">检查模组</button>
       <button v-else-if="!done && missing.length" class="btn btn-gold" :disabled="busy || !selected.length" @click="download">下载所选（{{ selected.length }}）</button>
     </template>

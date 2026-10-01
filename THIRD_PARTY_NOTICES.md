@@ -8,7 +8,8 @@ copyright, license and trademark rights remain with their respective holders.
 Upstream: https://github.com/AUGUHDAR/VoxLink
 Revisions: 6b11d930fe4fe568dacc8c47fa0e46e08fa4b110 (original protocol replacement),
 721c7fae05851971996e49a3ad0e595d5aa9a053 (launcher-integration contract / 1.1.7 behaviors),
-924845e897d8fb36dca2474ade30e675278559d0 (1.0.94 strict punching policy audit).
+924845e897d8fb36dca2474ade30e675278559d0 (1.0.94 strict punching policy audit),
+c475faa98cca16d4a2eeef4422c862c36091e1fc (1.1.6 standard TURN, tickets and 1.1.9 behavior audit).
 Authors: AUGUHDAR / VoxLink contributors.
 
 The adaptations of PunchAuth.java and TurnRelayClient.java are in
@@ -21,7 +22,11 @@ TcpHolePuncher, P2PBridge, TurnTcpChannel, PunchProfile/PunchTuner and LogUpload
 The 1.0.94 port additionally includes punchProfiles.ts, punchPolicy.ts, punchRounds.ts
 and the StunProbe sequential sampling/resend portions of stun.ts. Unmodified Java
 parameter fixtures under tests/fixtures/voxlink-924845e retain the same LGPL license.
-The authoritative integration contract is docs/launcher-integration.md at that revision.
+The 1.1.6 changes additionally adapt StdTurnClient, TURN background/standby flows,
+TicketClient and NatLabels in stdTurn.ts, turnRelay.ts, turnBackground.ts, tickets.ts
+and src/shared/voxlinkNat.ts. Updated unmodified parameter fixtures are in
+tests/fixtures/voxlink-c475faa9. The authoritative integration contract is
+docs/launcher-integration.md at revision c475faa9.
 These files are distributed under LGPL-3.0-only. Node lifecycle,
 cancellation, HTTP fallback and UI reporting are KAMUCL changes.
 The former app-desktop Go adaptations have been replaced; the Java license does
@@ -44,6 +49,28 @@ KAMUCL's preview interaction adapter is an original MIT contribution.
 The previous HMCL/FCL-derived preview and conversion are no longer used.
 
 ## Other bundled libraries
+
+ws 8.22.0 (MIT) provides native WebSocket control frames. Full terms: licenses/ws.txt.
+minecraft-data 3.117.0 declares MIT in its package metadata. The generated snapshot
+retains factual registry fields only; attribution and MIT terms: licenses/minecraft-data.txt.
+Mojang 26.2/26.3 block names and valid property values were extracted using the
+official server data generator. No Mojang JAR is distributed in this launcher.
+
+## System memory organization
+
+Feature reference: PCL / 龙腾猫跃, https://github.com/Meloong-Git/PCL .
+PCL usage guidance: https://github.com/Meloong-Git/PCL/blob/main/LICENCE .
+KAMUCL's implementation is independently written using Microsoft's documented
+EmptyWorkingSet API: https://learn.microsoft.com/windows/win32/api/psapi/nf-psapi-emptyworkingset .
+It does not include PCL binaries or unpublished implementations, and is not a
+PCL derivative or an endorsed integration. Existing games are skipped.
+
+## Seven-character illustrations
+
+The user supplied front/back character references. KAMUCL's transparent 2D
+illustrations were generated from those references; capes were removed and
+backs were completed. Derived animation layers are included in source. Character
+and trademark rights remain with their respective holders; no affiliation is implied.
 
 Vue/runtime packages, Three.js, @iarna/toml, adm-zip, koffi and undici:
 complete license texts are retained in licenses/ and dependency packages.

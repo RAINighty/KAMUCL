@@ -9,6 +9,8 @@ import { mcmodSearchUrl } from '@shared/communityLinks'
 import SelectMenu from '../components/SelectMenu.vue'
 import MarqueeText from '../components/MarqueeText.vue'
 import ModInstallDialog from '../components/ModInstallDialog.vue'
+import { favorites, loadFavorites, toggleProject } from '../modFavorites'
+onMounted(()=>void loadFavorites())
 import type {
   CommunityFile,
   CommunityKind,
@@ -640,6 +642,7 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
         <div data-ui="CommunityView:6904c547ed30" class="modal download-modal">
           <h3 data-ui="CommunityView:7b81ed690844" class="modal-title"><MarqueeText :text="'下载 ' + modal.item?.title"/></h3>
           <div data-ui="CommunityView:a84b1e456827" v-if="modal.item" class="modal-links">
+            <button v-if="modal.kind==='mod'" class="btn btn-ghost btn-sm" @click="toggleProject(modal.item.source,modal.item.projectId,modal.item.title)">{{favorites.some(f=>f.key===modal.item!.source+':'+modal.item!.projectId)?'★ 已收藏':'☆ 收藏模组'}}</button>
             <button data-ui="CommunityView:6fabba70cd3a" class="btn btn-ghost btn-sm" @click="openExternal(sourceUrl(modal.item))">
               {{ modal.item.source === 'modrinth' ? 'Modrinth 源页面' : 'CurseForge 源页面' }}
             </button>

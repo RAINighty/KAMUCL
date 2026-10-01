@@ -1,7 +1,11 @@
 <script setup lang="ts">
+import { natLabel } from '@shared/voxlinkNat'
 import VoxLinkModSync from './VoxLinkModSync.vue'
+import VoxLinkTickets from './VoxLinkTickets.vue'
+import { unreadTickets } from '../../voxlinkTickets'
 import SelectMenu from '../SelectMenu.vue'
 import type { InstalledVersion } from '@shared/types'
+import type { ModSyncGate } from '@shared/voxlinkMods'
 import VoxLinkRelatedLinks from './VoxLinkRelatedLinks.vue'
 import { displayVersionName as versionLabel } from '../../store'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -25,6 +29,9 @@ const instanceOptions = computed(() => instances.value.filter(v => !v.failed && 
 const chosenInstance = computed(() => instances.value.find(v => JSON.stringify([v.folder, v.id]) === instanceKey.value))
 const selectedTarget = computed(() => chosenInstance.value ? { id: chosenInstance.value.id, folder: chosenInstance.value.folder } : undefined)
 const pendingJoin = ref('')
+const ticketsOpen=ref(false)
+const gateNote=ref(''),signalingNote=ref('')
+const natInfo=ref<{local:string;remote:string;profile:string}|null>(null)
 const state = ref<Snapshot | null>(null)
 const busy = ref(false)
 const error = ref('')
@@ -206,6 +213,7 @@ function resetConn(): void {
   punchStartTs.value = 0
   relayTried.value = false
   directTried.value = false
+  natInfo.value=null
 }
 
 function onStage(s: StageEvent): void {
@@ -245,6 +253,10 @@ function onEvent(payload: { type: string; data: unknown }): void {
   if (payload.type === 'stage') { onStage(payload.data as StageEvent); return }
   if (payload.type === 'conn:state') { onConnState(payload.data as ConnStateEvent); return }
   if (payload.type === 'mods:download-result') toast(String((payload.data as { message?: string })?.message || '模组已下载，请重启游戏使其生效'), 'info')
+  if(payload.type==='mods:gate')gateNote.value=String((payload.data as {message?:string})?.message||'')
+  if(payload.type==='signaling:degraded')signalingNote.value=String((payload.data as {message?:string})?.message||'')
+  if(payload.type==='signaling:recovered')signalingNote.value=''
+  if(payload.type==='nat:state')natInfo.value=payload.data as typeof natInfo.value
   if (payload.type === 'bridge') pushLog(`[bridge] ${JSON.stringify(payload.data)}`)
 }
 
@@ -286,11 +298,12 @@ async function startJoin(code: string): Promise<void> {
   if(busy.value)return
   pendingJoin.value = c
 }
-async function joinAfterMods(): Promise<void> {
+async function joinAfterMods(gate:ModSyncGate): Promise<void> {
+  gateNote.value={MANIFEST:'模组清单已检查；不同版本的文件需手动处理',UNSUPPORTED:'房主不支持模组清单，尚未检查一致性',EMPTY:'房主模组清单为空',NOT_READY:'房主清单未就绪或获取失败，尚未检查一致性',BYPASSED:'你已跳过模组检查'}[gate]
   const c = pendingJoin.value; pendingJoin.value = ''
   const operation=++uiOperation
   busy.value = true; error.value = ''; resetConn()
-  const r = await call<{ ok: boolean }>('voxlink:start', { mode: 'join', code: c })
+  const r = await call<{ ok: boolean }>('voxlink:start', { mode: 'join', code: c, target:selectedTarget.value })
   if(operation!==uiOperation)return
   if (r?.ok) await status()
   busy.value = false
@@ -298,7 +311,7 @@ async function joinAfterMods(): Promise<void> {
 async function stop(): Promise<void> {
   if(leaving.value)return
   ++uiOperation;leaving.value=true
-  try {await call('voxlink:stop');resetConn();await status()}
+  try {await call('voxlink:stop',busy.value?'用户取消加入':'用户退出房间');resetConn();await status()}
   finally {leaving.value=false;busy.value=false;turnBusy.value=false}
 }
 async function useTurn() {
@@ -368,8 +381,12 @@ onUnmounted(() => { offEvent?.(); if (tickTimer) clearInterval(tickTimer) })
     <header data-ui="VoxLinkPanel:e2b25d0f5bce" class="vox-toolbar">
       <p class="connection-muted">{{ inFlow ? '保持本页开启，即可随时查看连接状态。' : '先选择游戏实例，再创建房间或寻找好友。' }}</p>
       <VoxLinkRelatedLinks />
+      <button class="btn btn-ghost" @click="ticketsOpen=true">我的工单{{ unreadTickets?' · '+unreadTickets+' 条未读':'' }}</button>
     </header>
     <p data-ui="VoxLinkPanel:e56ab4ac207d" v-if="error" class="connection-error vox-alert" role="alert">{{ error }}</p>
+    <p v-if="gateNote" class="connection-muted vox-alert" role="status">{{ gateNote }}</p>
+    <p v-if="signalingNote" class="connection-error vox-alert" role="status">{{ signalingNote }}</p>
+    <p v-if="natInfo" class="connection-muted">本机 {{ natInfo.local }} · 对端 {{ natInfo.remote }} · 打洞模板 {{ natInfo.profile }}</p>
     <p data-ui="VoxLinkPanel:5878cb7ab6d6" v-if="sessionClosed" class="connection-error vox-alert">房间已结束，请重新创建或加入。</p>
 
     <ConnectionPanel v-if="inFlow" :title="connected ? '连接成功' : conn?.status === 'failed' ? '连接尚未完成' : isHost ? '房间已准备好' : '正在连接好友'" :subtitle="nextStep">
@@ -415,10 +432,11 @@ onUnmounted(() => { offEvent?.(); if (tickTimer) clearInterval(tickTimer) })
       <div data-ui="VoxLinkPanel:5dc76e918969" key="lobby" v-else-if="tab === 'lobby'" class="tab-body">
         <div data-ui="VoxLinkPanel:5f0b077855e1" class="lobby-bar"><label data-ui="VoxLinkPanel:7a9c6cad1211" class="connection-field lobby-search">发现房间<input data-ui="VoxLinkPanel:b708e83ac19a" v-model="search" class="input" placeholder="搜索房间名…" @keydown.enter="loadLobby" /></label><button data-ui="VoxLinkPanel:016a2518dbf1" class="btn btn-ghost" :disabled="loadingLobby" @click="loadLobby">{{ loadingLobby ? '刷新中…' : '刷新大厅' }}</button></div>
         <p data-ui="VoxLinkPanel:e312b633a89b" v-if="!rooms.length" class="connection-muted">{{ loadingLobby ? '正在寻找公开房间…' : '暂时没有公开房间，创建一个邀请好友吧。' }}</p>
-        <ul data-ui="VoxLinkPanel:23ebb3082754" v-else class="lobby-list"><li data-ui="VoxLinkPanel:84d06265d7c7" v-for="room in rooms" :key="room.code" class="lobby-item"><div data-ui="VoxLinkPanel:69f9a9318d00" class="lobby-main"><span class="connection-eyebrow">{{ room.category || '一起游玩' }}</span><strong>{{ room.name }}</strong><small>{{ [room.gameVersion, room.loader].filter(Boolean).join(' · ') || '版本未标注' }}</small><span data-ui="VoxLinkPanel:f8116c66cc88" v-if="room.clientTag === 'kamucl'" class="kamucl-badge">KAMUCL 房间</span></div><div data-ui="VoxLinkPanel:1040c97a6114" class="lobby-side"><span data-ui="VoxLinkPanel:9d3841267bb7" class="connection-muted">{{ room.currentPlayers ?? '?' }}/{{ room.maxPlayers ?? '?' }} 人</span><button data-ui="VoxLinkPanel:446640f4241c" class="btn btn-gold" @click="startJoin(room.code)">加入 →</button></div></li></ul>
+        <ul data-ui="VoxLinkPanel:23ebb3082754" v-else class="lobby-list"><li data-ui="VoxLinkPanel:84d06265d7c7" v-for="room in rooms" :key="room.code" class="lobby-item"><div data-ui="VoxLinkPanel:69f9a9318d00" class="lobby-main"><span class="connection-eyebrow">{{ room.category || '一起游玩' }}</span><strong>{{ room.name }}</strong><small>{{ [room.gameVersion, room.loader].filter(Boolean).join(' · ') || '版本未标注' }} · {{ natLabel('UNKNOWN',room.natType) }}</small><span data-ui="VoxLinkPanel:f8116c66cc88" v-if="room.clientTag === 'kamucl'" class="kamucl-badge">KAMUCL 房间</span></div><div data-ui="VoxLinkPanel:1040c97a6114" class="lobby-side"><span data-ui="VoxLinkPanel:9d3841267bb7" class="connection-muted">{{ room.currentPlayers ?? '?' }}/{{ room.maxPlayers ?? '?' }} 人</span><button data-ui="VoxLinkPanel:446640f4241c" class="btn btn-gold" @click="startJoin(room.code)">加入 →</button></div></li></ul>
       </div>
     </ConnectionPanel>
     <VoxLinkModSync v-if="pendingJoin" :code="pendingJoin" :target="selectedTarget" @join="joinAfterMods" @dismiss="pendingJoin = ''" />
+    <VoxLinkTickets v-if="ticketsOpen" @close="ticketsOpen=false" />
     <details data-ui="VoxLinkPanel:6110025709f6" class="connection-details reference-details"><summary>联机设置</summary><div data-ui="VoxLinkPanel:00597c7aef0f" class="connection-detail-content"><label class="connection-toggle"><span>协助其他玩家中继<small>允许使用玩家中继。TURN 始终由你主动点击，不会自动启用。</small></span><input data-ui="VoxLinkPanel:87677ed49b2c" type="checkbox" :checked="state?.settings.allowRelay ?? true" :disabled="joined" @change="toggleRelay" /><span class="connection-toggle-track" aria-hidden="true"></span></label><label class="connection-toggle"><span>发送联机故障诊断<small>向 VoxLink 上传脱敏的联机日志，帮助排查连接问题。</small></span><input data-ui="VoxLinkPanel:1db3b2b22cc9" type="checkbox" :checked="state?.settings.uploadDiagnostics ?? false" @change="toggleDiagnostics" /><span class="connection-toggle-track" aria-hidden="true"></span></label></div></details>
     <details data-ui="VoxLinkPanel:c39538d7cf3d" class="connection-details log-details"><summary>连接记录 · {{ logs.length }} 条</summary><div data-ui="VoxLinkPanel:09f23d68d816" class="log-tools"><button data-ui="VoxLinkPanel:5e98e2a6c162" class="btn btn-ghost" @click="logLevel = logLevel === 'all' ? 'important' : 'all'">{{ logLevel === 'all' ? '只看阶段与异常' : '显示详细记录' }}</button><button data-ui="VoxLinkPanel:3b583dbf59f3" class="btn btn-ghost" :disabled="!logs.length" @click="copyLogs">复制日志</button></div><details data-ui="VoxLinkPanel:4df65d02a080" v-for="group in logGroups" :key="group.label" class="log-group"><summary>{{ ({stun:'网络检测',host_stun:'房主网络检测',punch:'建立直连',host_punch:'好友连接',p2p:'直连',turn:'TURN 中继',relay:'玩家中继'} as Record<string,string>)[group.label] || group.label }} · {{ group.rows.length }} 条</summary><div data-ui="VoxLinkPanel:1325cce1cc38" class="connection-log-viewport"><p data-ui="VoxLinkPanel:ec5b6c9228e1" v-for="(log,i) in group.rows" :key="i" class="connection-log-line" :class="log.level"><span data-ui="VoxLinkPanel:a0bb180b19af" class="log-ts">{{ log.ts }}</span><span data-ui="VoxLinkPanel:688da0e690b8" class="log-level">{{ log.level === 'error' ? '错误' : log.level === 'warn' ? '提醒' : log.level === 'stage' ? '阶段' : '详细' }}</span>{{ log.text }}</p></div></details><p data-ui="VoxLinkPanel:754d75aae709" v-if="!logGroups.length" class="connection-muted">暂无阶段或异常记录。</p></details>
   </div>

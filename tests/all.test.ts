@@ -1,4 +1,6 @@
 import './download-cancellation.test'
+import './extension-features.test'
+import './voxlink-116.test'
 import './game-pipe-concurrency.test'
 import './download-policy.test'
 import './download-progress.test'

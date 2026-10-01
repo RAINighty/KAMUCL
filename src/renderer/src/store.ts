@@ -20,6 +20,7 @@ export type ViewName =
   | 'packs'
   | 'shaders'
   | 'recordings'
+  | 'projections'
   | 'keys'
   | 'bridge'
   | 'skins'

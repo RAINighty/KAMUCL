@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import SupplementalModsResult from './components/SupplementalModsResult.vue'
 import { shouldReportGameCrash, signedExitCode } from '@shared/gameExit'
 const isMac = window.kamucl.platform === 'darwin'
 import LaunchNotice from './components/LaunchNotice.vue'
+import { pollTickets } from './voxlinkTickets'
 import CreatorMotto from './components/CreatorMotto.vue'
 import ModpackSupplement from './components/ModpackSupplement.vue'
 import { instanceCenter, openInstanceCenter } from './instanceCenter'
@@ -66,6 +68,9 @@ const InstanceCenter = defineAsyncComponent(() => import('./components/InstanceC
 const GameView = defineAsyncComponent(() => import('./views/GameView.vue'))
 const ModsView = defineAsyncComponent(() => import('./views/ModsView.vue'))
 const RecordingsView = defineAsyncComponent(() => import('./views/RecordingsView.vue'))
+const ProjectionsView = defineAsyncComponent(() => import('./views/ProjectionsView.vue'))
+const MascotStage = defineAsyncComponent(() => import('./components/MascotStage.vue'))
+const mascotOpen = ref(false)
 const PacksView = defineAsyncComponent(() => import('./views/PacksView.vue'))
 const ShadersView = defineAsyncComponent(() => import('./views/ShadersView.vue'))
 const KeysView = defineAsyncComponent(() => import('./views/KeysView.vue'))
@@ -89,6 +94,7 @@ const viewMap: Record<ViewName, Component> = {
   mods: ModsView,
   packs: PacksView,
   recordings: RecordingsView,
+  projections: ProjectionsView,
   shaders: ShadersView,
   keys: KeysView,
   bridge: BridgeView,
@@ -173,6 +179,7 @@ const resourceSubItems: Array<{ key: ViewName; label: string; icon: string }> = 
   },
 
   { key: 'recordings', label: '录像', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="14" height="14" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg>' },
+  { key: 'projections', label: '投影', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 9 5v8l-9 5-9-5V8zM3 8l9 5 9-5M12 13v8"/></svg>' },
   {
     key: 'bridge',
     label: 'MOD 面板',
@@ -190,7 +197,7 @@ const resourceSubItems: Array<{ key: ViewName; label: string; icon: string }> = 
 const resourceExpanded = ref(localStorage.getItem('kamucl.resourceExpanded') === 'true')
 watch(resourceExpanded, value => localStorage.setItem('kamucl.resourceExpanded', String(value)))
 const inResourceGroup = computed(() =>
-  ['mods', 'packs', 'shaders', 'bridge', 'servers', 'recordings'].includes(store.currentView)
+  ['mods', 'packs', 'shaders', 'bridge', 'servers', 'recordings', 'projections'].includes(store.currentView)
 )
 
 // Route timings also respect the OS preference when Vue uses explicit timeout fallback.
@@ -1047,6 +1054,7 @@ function onEditKeydown(e: KeyboardEvent) {
 const offs: Array<() => void> = []
 
 onMounted(async () => {
+  void pollTickets()
   offs.push(installVisualDesign())
   void loadExitNotices()
   applyTheme(store.settings?.theme, store.settings?.custom)
@@ -1222,6 +1230,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <SupplementalModsResult />
   <LaunchNotice />
   <InstanceCenter v-if="instanceCenter.target" :key="instanceCenter.target.folder+instanceCenter.target.id" />
   <Teleport :to="designStageReady ? '#design-preview-host' : 'body'" :disabled="!designStageReady">
@@ -1236,7 +1245,8 @@ onUnmounted(() => {
     <aside data-ui="App:25064d2bb910" class="sidebar" data-edit="sidebar">
       <!-- Logo 区 -->
       <div data-ui="App:fc5fc8ba7e96" class="logo-area">
-        <img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" />
+        <button class="brand-avatar" :class="{'avatar-open':mascotOpen}" aria-label="打开七人互动彩蛋" :aria-expanded="mascotOpen" @click="mascotOpen=true"><img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" /></button>
+        <MascotStage v-if="mascotOpen" @close="mascotOpen=false" />
         <div data-ui="App:7494cda29e47" class="logo-text">
           <span data-ui="App:c396a9ff34cb" class="logo-name">KAMUCL</span>
           <span data-ui="App:31accf043a9a" class="logo-version">v{{ appVersion }}</span>
@@ -1717,6 +1727,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.brand-avatar{display:block;background:transparent;border:0;padding:0;border-radius:12px;cursor:pointer;transition:opacity .25s,transform .35s;flex-shrink:0}.brand-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.brand-avatar.avatar-open{opacity:0;transform:scale(.5) rotate(-12deg);pointer-events:none}
 /* 配置不兼容弹窗 */
 .cfg-mismatch-mask { z-index: 9600; display: grid; place-items: center; }
 .cfg-mismatch-modal { width: min(460px, 90vw); padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }

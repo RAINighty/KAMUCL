@@ -14,7 +14,7 @@ import { probeHostPort } from '../src/main/core/voxlink/mc_ports'
 import { stunResendDelay } from '../src/main/core/voxlink/stun'
 
 test('VoxLink upstream fixture: every profile field, 55 send fields, 11 symmetric fields and 9 tuner constants agree',()=>{
-  const source=fs.readFileSync('tests/fixtures/voxlink-924845e/PunchProfile.java','utf8')
+  const source=fs.readFileSync('tests/fixtures/voxlink-c475faa9/PunchProfile.java','utf8')
   const fields=(name:string)=>source.match(new RegExp(`(?:private|public) ${name}\\(([^)]*)\\)`))![1].split(',').map(s=>s.trim().split(/\s+/).at(-1)!)
   const check=(name:string,type:string,input:string)=>{
     const tokens=input.match(/new int\[\]\{[^}]*\}|"[^"]*"|\w+/g)!
@@ -27,7 +27,7 @@ test('VoxLink upstream fixture: every profile field, 55 send fields, 11 symmetri
   check('RECIPE','SymParams',source.match(/RECIPE = new SymParams\(([^)]*)\)/)![1])
   for(const m of source.matchAll(/public static final PunchProfile (\w+) = new PunchProfile\(([^;]*)\);/g)){check(m[1],'PunchProfile',m[2]);profile++}
   assert.equal(send,5);assert.equal(profile,8);assert.equal(fields('SendParams').length,11);assert.equal(fields('SymParams').length,11)
-  const tuner=fs.readFileSync('tests/fixtures/voxlink-924845e/PunchTuner.java','utf8')
+  const tuner=fs.readFileSync('tests/fixtures/voxlink-c475faa9/PunchTuner.java','utf8')
   const constants=Object.fromEntries([...tuner.matchAll(/private static final int (\w+) = (\d+);/g)].map(m=>[m[1],Number(m[2])]))
   assert.equal(Object.keys(constants).length,9);assert.deepEqual(TUNER,constants)
 })
@@ -93,6 +93,7 @@ test('TURN is manual after 20s; failure never re-punches and stale signals canno
   assert.equal(engine.links.size,0);assert.equal(rejoins,0)
   await assert.rejects(engine.useTurnRelay(),/暂未启用/);assert.equal(relayCalls,2)
   engine.teardown();engine.setState('hosting','ABCDEF','host-token',true,{hostPort:12345},{isDone:()=>false,request:async()=>({})})
+  engine.acceptSignal('join_request','guest')
   engine.onSignal('turn_alloc','guest',{sessionId:'invalid-test-node'})
   await new Promise(r=>setTimeout(r,20))
   engine.onSignal('join_request','guest',{});engine.onSignal('punch_info','guest',{joinerMappedIp:'127.0.0.1',joinerMappedPort:12345})

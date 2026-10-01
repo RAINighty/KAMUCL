@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // New KAMUCL orchestration using VoxLink Java signaling fields (ConnectionManager / SignalingClient,
-// AUGUHDAR/VoxLink revision 924845e897d8fb36dca2474ade30e675278559d0).
+// AUGUHDAR/VoxLink baseline 924845e897d8fb36dca2474ade30e675278559d0; updated contract c475faa98cca16d4a2eeef4422c862c36091e1fc).
 import dgram from 'node:dgram'
 import { setTimeout as delay } from 'node:timers/promises'
 import net from 'node:net'
@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { ApiClient, APIError, APP_VERSION, CLIENT_TAG, DEFAULT_SERVER_URL, validateRoomCode, validateServerURL } from './api'
 import { normalizeVoxlinkRoomName } from '../../../shared/voxlinkRoom'
+import { NAT_RAW_LABELS,natLabel } from '../../../shared/voxlinkNat'
 import { STUN_SERVERS, stunSampleSeries, samplePortsSequential, stunDeltaFromSamples, type StunMappedAddr } from './stun'
 import { chooseTcpPunchPort, tcpSimOpen, bridgePunchedSocket } from './tcpPunch'
 import { Puncher, PunchFailure, punchListen, type PuncherOptions } from './punch'
@@ -24,11 +25,13 @@ import { detectMcPorts, probeHostPort } from './mc_ports'
 import { defaultSettingsPath, loadSettings, saveSettings, type VoxlinkSettings } from './settings'
 export const PHASE_P2P='p2p',PHASE_DIRECT='direct',PHASE_PRELAY='prelay',STATUS_TRYING='trying',STATUS_FAILED='failed',STATUS_SUCCESS='success'
 export interface ConnState { phase:string;status:string;address:string;detail:string }
-export interface RoomInfo { code:string;name:string;hostIp:string;hostPort:number;maxPlayers:number;currentPlayers:number;hasPassword:boolean;category:string;gameVersion:string;loader:string;clientType:string;clientTag?:string;expiresIn:number;isHost:boolean;hostCapabilities?:string[] }
+export interface RoomInfo { code:string;name:string;hostIp:string;hostPort:number;maxPlayers:number;currentPlayers:number;hasPassword:boolean;category:string;gameVersion:string;loader:string;clientType:string;clientTag?:string;expiresIn:number;isHost:boolean;hostCapabilities?:string[];natType?:string }
 export interface LobbyRoom {code:string;name:string;hostIp?:string;hostPort?:number;currentPlayers?:number;maxPlayers?:number;hasPassword?:boolean;category?:string;gameVersion?:string;loader?:string;clientType?:string;clientTag?:string;natType?:string}
 export interface AppState {state:'idle'|'hosting'|'in_room'|'closed';code:string;token:string;isHost:boolean;room:RoomInfo|null}
 export interface CreateRoomParams {name:string;password?:string;category?:string;visible:boolean;hostPort:number;loader?:string;gameVersion?:string}
-export interface JoinRoomParams {code:string;password?:string}
+export interface JoinRoomParams {code:string;password?:string;loader?:string;gameVersion?:string}
+export const VOXLINK_CAPABILITIES=['relay','ice_restart','continuous_retry','punchAuthV1','overlayAuthV1','modSyncV1','stdTurnV1'] as const
+export const JOIN_RETRY_BACKOFF_MS=[1500,3000] as const // ConnectionManager.java: JOIN_RETRY_BACKOFF_MS.
 export interface CreateRoomResult {code:string;hostToken:string;name:string;hostIp:string;hostPort:number;expiresIn:number}
 export interface JoinRoomResult {clientToken:string;clientId:string;room:RoomInfo}
 export type LogLevel='info'|'warn'|'error'
@@ -49,6 +52,7 @@ export class ConnEngine extends EventEmitter {
   private timers=new Set<NodeJS.Timeout>()
   private relays=new Set<()=>void>()
   private relayPending=false
+  private relayAssignments=new Map<string,{candidate:string;at:number}>()
   private rounds=new Map<string,PunchRounds>()
   private tcp=new Map<string,{controller:AbortController;stop?:()=>void}>()
   private tcpPeerIp=''
@@ -57,18 +61,29 @@ export class ConnEngine extends EventEmitter {
   private winner=new Map<string,string>()
   private turnChoices=new Set<string>()
   private iceRestarts=new Map<string,{count:number;at:number}>()
+  private knownPeers=new Set<string>()
+  private lastMappings=new Map<string,{local:{address:string;port:number};remote:{address:string;port:number}}>()
+  private natNotes=new Set<string>()
+  private reportNat(local:NatClass,remote:NatClass,peer:string){
+    const raw=String(this.room?.natType??'unknown').trim().toLowerCase()
+    if(!Object.hasOwn(NAT_RAW_LABELS,raw)&&!this.natNotes.has(raw)){this.natNotes.add(raw);this.deps.netLog('warn','未收录的 NAT 类型，显示为未知：'+raw.slice(0,80))}
+    this.deps.emit('nat:state',{local:natLabel(local,undefined),remote:natLabel(remote,raw),localClass:local,remoteClass:remote,profile:this.policy(peer).profile.name})
+    const expected=raw.includes('cone')?'CONE':raw.startsWith('symmetric_easy')?'EASY_SYM':raw==='symmetric'?'HARD_SYM':undefined,key=raw+':'+remote
+    if(expected&&remote!=='UNKNOWN'&&expected!==remote&&!this.natNotes.has(key)){this.natNotes.add(key);this.deps.netLog('info',`NAT 文案与协商分类不同 (${raw} / ${remote})，打洞使用协商分类`)}
+  }
   constructor(readonly deps:EngineDeps){
     super()
     this.turn=new TurnRelay({api:deps.api,baseURL:deps.baseURL,
-      room:()=>this.session?{code:this.code,token:this.token,isHost:this.isHost,clientId:this.clientID,hostPort:this.hostPort,hostAuth:this.isHost||!!this.room?.hostCapabilities?.includes('punchAuthV1')}:null,
+      room:()=>this.session?{code:this.code,token:this.token,isHost:this.isHost,clientId:this.clientID,hostPort:this.hostPort,hostAuth:this.isHost||!!this.room?.hostCapabilities?.includes('punchAuthV1'),hostStdTurn:!!this.room?.hostCapabilities?.includes('stdTurnV1')}:null,
       directConnected:peer=>!!this.winner.get(peer||'host')&&this.winner.get(peer||'host')!=='turn',
-      connected:(peer,address)=>{this.winner.set(peer,'turn');this.stopPeerPunching(peer);if(!this.isHost)this.state('turn','success',address,'TURN 中继已连接')},
-      disconnected:peer=>{if(this.winner.get(peer)==='turn')this.winner.delete(peer)},
+      connected:(peer,address,mode)=>{this.winner.set(peer,mode??'turn');if(mode)this.mode=mode;this.stopPeerPunching(peer);if(!this.isHost)this.state(mode??'turn','success',address,mode==='p2p'?'已平滑升级为直连':mode==='prelay'?'TURN 已断开，热备玩家中继接替；若游戏已断线，请重新连接此地址':'TURN 中继已连接')},
+      disconnected:peer=>{if(['turn','p2p','prelay'].includes(this.winner.get(peer)??''))this.winner.delete(peer)},
       stage:(status,detail)=>this.stage('turn',status,detail),
       state:(status,address,detail)=>{if(!this.isHost)this.state('turn',status,address,detail)},
-      signal:(type,data,to)=>this.sendSignal(type,data,to),log:deps.netLog})
+      signal:(type,data,to)=>this.sendSignal(type,data,to),log:deps.netLog,
+      mapping:peer=>this.lastMappings.get(peer),template:peer=>({profile:this.policy(peer).profile,params:this.policy(peer).params})})
   }
-  private policy(peer:string):PunchRounds {let p=this.rounds.get(peer);if(!p){p=new PunchRounds();this.rounds.set(peer,p)}return p}
+  private policy(peer:string):PunchRounds {let p=this.rounds.get(peer);if(!p){p=new PunchRounds(message=>this.deps.netLog('info',message));this.rounds.set(peer,p)}return p}
   private stopPeerPunching(peer:string,keep?:Link,keepTcp?:string):void {
     for(const key of this.tcp.keys())if((key===peer||key.startsWith(peer+':direct:'))&&key!==keepTcp)this.cancelTcp(key)
     for(const[id,link]of this.links)if(link.peer===peer&&link!==keep)this.drop(id)
@@ -195,11 +210,13 @@ export class ConnEngine extends EventEmitter {
   private async connect(id:string,link:Link,remote:StunMappedAddr,data:Data={},relay=false):Promise<void>{
     if(!this.alive(id,link))return
     link.remote=remote;for(const punch of link.punchers)punch.setTarget({address:remote.ip,port:remote.port})
+    this.lastMappings.set(link.peer,{local:{address:link.mapped.ip,port:link.mapped.port},remote:{address:remote.ip,port:remote.port}})
     if(link.started)return
     link.started=true;clearTimeout(link.timer)
     const policy=this.policy(link.peer),prefix=this.isHost?'joiner':'host'
     const remoteNat:NatClass=data[`${prefix}Symmetric`]===true?(data[`${prefix}EasySym`]===true?'EASY_SYM':'HARD_SYM'):'CONE'
     policy.classify(link.nat,remoteNat,link.samples.length)
+    this.reportNat(link.nat,remoteNat,link.peer)
     let profile=policy.profile,params={...(policy.params??fromProfile(profile))}
     const epoch=this.generation
     let both=symmetric(link.nat)&&symmetric(remoteNat)
@@ -209,7 +226,7 @@ export class ConnEngine extends EventEmitter {
       fixedRange=true
       if(!this.isHost&&symmetric(link.nat)){
         // ConnectionManager.java: startReversePunch -> startBirthdayPunch.
-        count=link.nat==='EASY_SYM'?PROFILES.V100.birthdaySocketCount:PROFILES.V100.hardSymSocketCount
+        count=link.nat==='EASY_SYM'?profile.birthdaySocketCount:profile.hardSymSocketCount
         range=link.nat==='EASY_SYM'?profile.easySymPortRange:symmetric(remoteNat)?profile.defaultPortRange:profile.minPortRange
       }else if(this.isHost){
         const advertised=Array.isArray(data.joinerMappedPorts)?data.joinerMappedPorts.map(Number).filter(p=>Number.isInteger(p)&&p>0&&p<=65535):[]
@@ -219,7 +236,7 @@ export class ConnEngine extends EventEmitter {
         if(advertised.length>1){const expanded=new Set<number>();for(const p of advertised)for(let n=-profile.defaultPortRange;n<=profile.defaultPortRange;n++)if(p+n>0&&p+n<=65535)expanded.add(p+n);ports=[...expanded];mode='ports'}
       }else{range=profile.portPredictionMaxRange;params.timeoutMs=Math.max(params.timeoutMs,15000)} // ConnectionManager.java: simpleRevParams
     }else if(this.isHost){
-      count=symmetric(link.nat)?PROFILES.HARDSYM.hardSymSocketCount:profile.hostMultiSocketCount
+      count=symmetric(link.nat)?profile.hardSymSocketCount:profile.hostMultiSocketCount
       range=symmetric(remoteNat)?profile.joinerMultiPortRange:0
       params.timeoutMs=Math.min(params.timeoutMs,profile.hostRoundTimeoutMs)
       if(range>0){params.sendMinRounds=1;params.sendMinPass=1} // ConnectionManager.java: host roundParams
@@ -234,7 +251,7 @@ export class ConnEngine extends EventEmitter {
       const mappings=await this.addSockets(id,link,count,this.isHost||link.reverse)
       if(this.isHost&&!link.reverse&&symmetric(link.nat)){
         // ConnectionManager.java: extend host group to HARDSYM.hardSymSocketCount after dual-STUN upgrade.
-        await this.addSockets(id,link,PROFILES.HARDSYM.hardSymSocketCount,false)
+        await this.addSockets(id,link,profile.hardSymSocketCount,false)
         policy.classify(link.nat,remoteNat,link.samples.length);profile=policy.profile;params=fromProfile(profile)
         params.timeoutMs=Math.min(params.timeoutMs,profile.hostRoundTimeoutMs);if(range>0){params.sendMinRounds=1;params.sendMinPass=1}
         both=symmetric(remoteNat)
@@ -347,6 +364,7 @@ export class ConnEngine extends EventEmitter {
   }
   onSignal(type:string,from:string,data:Data):void{
     if(!this.session||this.session.isDone())return
+    if(!this.acceptSignal(type,from))return
     const run=async()=>{
       if(type==='cancel_connection'||type==='disconnect'){
         this.winner.delete(from);this.turnChoices.delete(from);this.stopPeerPunching(from);this.turn.peerLeft(from)
@@ -358,8 +376,14 @@ export class ConnEngine extends EventEmitter {
         if(this.isHost||this.mode==='turn')await this.turn.onSignal(type,from,data)
         return
       }
+      if(!this.isHost&&this.mode==='turn'&&type==='relay_notify'){await this.turn.onSignal(type,from,data);return}
+      if(this.isHost&&type==='relay_accept'&&typeof data.forClientId==='string'){
+        const assignment=this.relayAssignments.get(data.forClientId)
+        if(!assignment||assignment.candidate!==from||Date.now()-assignment.at>20000)return
+        const relay=endpoint(data,'relay');if(!relay&&data.connected===false)return;await this.sendSignal('relay_notify',relay?{relayIp:relay.ip,relayPort:relay.port,connected:data.connected===true}:{connected:true},data.forClientId);return
+      }
       if(!this.isHost&&this.mode!=='p2p'&&!['relay_notify','relay_declined','relay_setup'].includes(type))return
-      if(this.isHost&&this.turnChoices.has(from))return
+      if(this.isHost&&this.turnChoices.has(from)&&type!=='relay_request')return
       if(this.winner.has(from)&&type!=='relay_setup'&&type!=='relay_request')return
       if(type==='ice_restart'){
         if(!this.isHost&&from!=='host')return
@@ -388,8 +412,7 @@ export class ConnEngine extends EventEmitter {
             if(link)void this.connect(id,link,remote,data)
           }
         }
-        if(type==='relay_request')await this.dispatchRelay(from)
-        if(type==='relay_accept'&&typeof data.forClientId==='string')await this.sendSignal('relay_notify',{connected:true},data.forClientId)
+        if(type==='relay_request')await this.dispatchRelay(from,data)
       }else if(from==='host'){
         if(type==='tcp_punch_go' && this.tcpPeerIp && this.lastConnection?.status!=='success')void this.runTcp('host',this.tcpPeerIp,Number(data.tcpPunchPort))
         if(type==='holepunch_offer')await this.guestOffer(data)
@@ -418,17 +441,25 @@ export class ConnEngine extends EventEmitter {
       }
     };void run().catch(error=>{if(this.session)this.deps.netLog('warn',(error as Error).message)})
   }
-  private async dispatchRelay(requester:string):Promise<void>{
-    const target=this.links.get(requester)?.remote
+  private async dispatchRelay(requester:string,data:Data={}):Promise<void>{
+    const recorded=this.lastMappings.get(requester)?.remote,target=endpoint(data,'mapped')??this.links.get(requester)?.remote??(recorded?{ip:recorded.address,port:recorded.port}:undefined)
     const candidates=[...this.links.entries()].filter(([id,link])=>id!==requester&&link.remote&&link.rudp?.isConnected())
     if(!target||!candidates.length){await this.sendSignal('relay_declined',{},requester);return}
-    const [id,relay]=candidates[0];await this.sendSignal('relay_setup',{targetClientId:requester,targetIp:target.ip,targetPort:target.port},id);await this.sendSignal('relay_notify',{relayIp:relay.remote!.ip,relayPort:relay.remote!.port},requester)
+    const [id,relay]=candidates[0];this.relayAssignments.set(requester,{candidate:id,at:Date.now()});await this.sendSignal('relay_setup',{targetClientId:requester,targetIp:target.ip,targetPort:target.port,punchAuth:!!this.links.get(requester)?.auth||this.turn.peerAuth(requester)},id);await this.sendSignal('relay_notify',{relayIp:relay.remote!.ip,relayPort:relay.remote!.port},requester)
   }
   private async serveRelay(data:Data):Promise<void>{
     const remote=endpoint(data,'target'),host=this.links.get('host');if(this.deps.allowRelay?.()===false||!remote||!host?.rudp?.isConnected()){await this.sendSignal('relay_declined',{},'host');return}
-    const id=`relay:${String(data.targetClientId)}`,link=await this.prepare(id,null),epoch=this.generation
-    link.punch=new Puncher({conn:link.socket,profile:PROFILES.DEFAULT,range:PROFILES.DEFAULT.coneBackupPortRange});link.punch.setTarget({address:remote.ip,port:remote.port});link.started=true;link.punch.start()
-    const target=await link.punch.wait();if(epoch!==this.generation)return;const rc=link.rudp=new RudpConn(link.socket,target);rc.start();const stop=pumpRelay(host.rudp,rc);this.relays.add(stop);await this.sendSignal('relay_accept',{forClientId:data.targetClientId},'host')
+    const targetId=String(data.targetClientId??'');if(!targetId||targetId.length>128)return
+    const id=`relay:${targetId}`;if(this.links.has(id)||this.creating.has(id))return
+    const auth=data.punchAuth===true?derivePunchKey(this.code,targetId):null,link=await this.prepare(id,auth),epoch=this.generation,policy=this.policy('host')
+    try{
+      await this.sendSignal('relay_accept',{forClientId:targetId,relayIp:link.mapped.ip,relayPort:link.mapped.port,connected:false},'host')
+      for(let i=1;i<policy.profile.relaySocketCount;i++){const socket=await punchListen(0);if(epoch!==this.generation||link.controller.signal.aborted){socket.close();return}link.sockets.push(socket)}
+      link.punch=new Puncher({conn:link.socket,sockets:link.sockets,authKey:auth,profile:policy.profile,params:policy.params,range:policy.profile.coneBackupPortRange,timeoutMs:15000});link.punch.setTarget({address:remote.ip,port:remote.port});link.started=true;link.punch.start()
+      const target=await link.punch.wait();if(epoch!==this.generation||link.controller.signal.aborted)return
+      link.socket=link.punch.conn;for(const socket of link.sockets)if(socket!==link.socket)try{socket.close()}catch{};link.sockets=[link.socket]
+      const rc=link.rudp=new RudpConn(link.socket,target);rc.start();const stop=pumpRelay(host.rudp,rc);this.relays.add(stop);await this.sendSignal('relay_accept',{forClientId:targetId,connected:true},'host')
+    }catch(error){if(epoch===this.generation){this.drop(id);await this.sendSignal('relay_declined',{forClientId:targetId},'host').catch(()=>{});this.deps.netLog('info','玩家中继探测未命中：'+(error as Error).message)}}
   }
   usePlayerRelay():{ok:boolean;err?:string}{if(!this.session||this.isHost)return{ok:false,err:'请先加入房间'};if(this.relayPending)return{ok:false,err:'正在请求玩家中继'};this.mode='prelay';this.stopPeerPunching('host');this.relayPending=true;this.state('prelay','trying','','正在寻找玩家中继');void this.sendSignal('relay_request',{},'host').catch(error=>{this.relayPending=false;this.state('prelay','failed','',error.message)});this.later(()=>{if(this.relayPending){this.relayPending=false;this.state('prelay','failed','','玩家中继请求超时，可尝试 TURN')}},20000);return{ok:true}}
   async useTurnRelay():Promise<void>{
@@ -438,21 +469,36 @@ export class ConnEngine extends EventEmitter {
     this.mode='turn';this.reconnectPending=false;this.stopPeerPunching('host');this.state('turn','trying','','正在建立你选择的 TURN 中继')
     await this.turn.startGuest()
   }
+  acceptSignal(type:string,from:string):boolean{
+    if(typeof from!=='string'||!from||from.length>128)return false
+    if(from==='server'||from==='host')return true
+    if(this.isHost&&type==='join_request'){this.knownPeers.add(from);return true}
+    return this.knownPeers.has(from)
+  }
   tryDirect():{ok:boolean;err?:string}{if(!this.session||this.isHost||!net.isIP(this.hostIp)||!this.hostPort)return{ok:false,err:'当前房间没有有效直连地址'};const epoch=this.generation;const socket=net.createConnection({host:this.hostIp,port:this.hostPort});this.state('direct','trying','','正在测试直连');let finished=false;const finish=(ok:boolean)=>{if(finished)return;finished=true;clearTimeout(timer);socket.destroy();if(epoch===this.generation)this.state('direct',ok?'success':'failed',ok?`${net.isIP(this.hostIp)===6?'['+this.hostIp+']':this.hostIp}:${this.hostPort}`:'',ok?'直连可用':'直连不可用')};const timer=setTimeout(()=>finish(false),3000);socket.once('connect',()=>finish(true));socket.once('error',()=>finish(false));return{ok:true}}
   relayRelease():void{this.turn.stop()}
-  teardown(retry=false):void{this.generation++;for(const timer of this.timers)clearTimeout(timer);this.timers.clear();if(!retry)this.rounds.clear();this.iceRestarts.clear();this.winner.clear();this.turnChoices.clear();this.reconnectPending=false;this.tcpPeerIp='';for(const id of [...this.tcp.keys()])this.cancelTcp(id);this.turn.stop();for(const id of [...this.links.keys()])this.drop(id);for(const stop of this.relays)stop();this.relays.clear();this.creating.clear();this.relayPending=false;if(!retry)this.joinedAt=0;this.mode='p2p';this.lastConnection=null;this.stages={}}
+  teardown(retry=false):void{this.generation++;for(const timer of this.timers)clearTimeout(timer);this.timers.clear();if(!retry){this.rounds.clear();this.knownPeers.clear();this.natNotes.clear()}this.lastMappings.clear();this.relayAssignments.clear();this.iceRestarts.clear();this.winner.clear();this.turnChoices.clear();this.reconnectPending=false;this.tcpPeerIp='';for(const id of [...this.tcp.keys()])this.cancelTcp(id);this.turn.stop();for(const id of [...this.links.keys()])this.drop(id);for(const stop of this.relays)stop();this.relays.clear();this.creating.clear();this.relayPending=false;if(!retry)this.joinedAt=0;this.mode='p2p';this.lastConnection=null;this.stages={}}
 }
 export interface AppOptions {settings?:VoxlinkSettings;settingsPath?:string;api?:ApiClient;serverURL?:string}
 export class VoxlinkApp {
   readonly api:ApiClient;readonly engine:ConnEngine;settings:VoxlinkSettings;settingsPath:string;state:AppState['state']='idle';room:RoomInfo|null=null
   private operation=0;private pending=false;private joinPassword='';private rejoining=false
+  private operationController=new AbortController();private joinEnvironment:{loader?:string;gameVersion?:string}={}
+  private async requestJoin(code:string,password:string|undefined,signal:AbortSignal):Promise<JoinRoomResult>{
+    const body={code,password,...this.joinEnvironment,clientType:'app',clientTag:CLIENT_TAG,clientProtocolVersion:7,clientCapabilities:VOXLINK_CAPABILITIES,idempotencyKey:randomUUID()}
+    for(let attempt=0;;attempt++){
+      signal.throwIfAborted()
+      try{return await this.api.post(this.baseURL(),'/room/join',body,undefined,signal) as JoinRoomResult}
+      catch(error){signal.throwIfAborted();if(!(error instanceof APIError)||!['NETWORK','NETWORK_ERROR','CDN_ERROR','RATE_LIMITED'].includes(error.code)||attempt>=JOIN_RETRY_BACKOFF_MS.length)throw error;this.netLog('warn',`加入暂时失败 (${error.code})，将进行第 ${attempt+2}/3 次尝试`);await delay(JOIN_RETRY_BACKOFF_MS[attempt],undefined,{signal})}
+    }
+  }
   constructor(private options:AppOptions={}){this.settingsPath=options.settingsPath??defaultSettingsPath();this.settings=options.settings??loadSettings(this.settingsPath);this.api=options.api??new ApiClient();this.engine=new ConnEngine({api:this.api,baseURL:()=>this.baseURL(),allowRelay:()=>this.settings.allowRelay,rejoin:()=>this.rejoin(),emit:(event,data)=>this.emit(event,data),netLog:(level,message)=>this.netLog(level,message)})}
   private async rejoin():Promise<void>{
     if(this.rejoining||!this.engine.canRetry()||this.engine.isHost)return
     this.rejoining=true
     const epoch=this.operation,code=this.engine.code,old=this.engine.session,oldToken=this.engine.token
     try{
-      const result=await this.api.post(this.baseURL(),'/room/join',{code,password:this.joinPassword,clientType:'app',clientProtocolVersion:7,clientCapabilities:['relay','punchAuthV1','ice_restart','continuous_retry'],idempotencyKey:randomUUID()}) as JoinRoomResult
+      const result=await this.requestJoin(code,this.joinPassword,this.operationController.signal)
       if(epoch!==this.operation||this.engine.session!==old||!this.engine.canRetry()){
         void this.api.post(this.baseURL(),'/room/leave',{code,token:result.clientToken,isHost:false}).catch(()=>{});return
       }
@@ -471,17 +517,17 @@ export class VoxlinkApp {
   async getCategories():Promise<Record<string,string>>{return await this.api.get(this.baseURL(),'/categories',{}) as Record<string,string>}
   async listRooms(query:{page?:number;size?:number;category?:string;loader?:string;search?:string}):Promise<{rooms:LobbyRoom[];total:number;page:number;size:number}>{const page=Math.max(1,query.page??1),size=Math.min(100,Math.max(1,query.size??20));return await this.api.get(this.baseURL(),'/room/list',{...query,page,size}) as {rooms:LobbyRoom[];total:number;page:number;size:number}}
   async roomInfo(code:string):Promise<Data>{return await this.api.get(this.baseURL(),'/room/info',{code}) as Data}
-  private begin():number{if(this.pending||this.engine.session)throw new APIError('SESSION_ACTIVE','请先退出当前房间');this.pending=true;return ++this.operation}
+  private begin():number{if(this.pending||this.engine.session)throw new APIError('SESSION_ACTIVE','请先退出当前房间');this.operationController.abort();this.operationController=new AbortController();this.pending=true;return ++this.operation}
   private async accept(epoch:number,code:string,token:string,isHost:boolean,room:RoomInfo,clientId=''):Promise<void>{
     if(epoch!==this.operation){void this.api.post(this.baseURL(),'/room/leave',{code,token,isHost}).catch(()=>{});throw new Error('操作已取消')}
     this.room=room;this.state=isHost?'hosting':'in_room';const session=new VoxlinkSession({api:this.api,baseURL:()=>this.baseURL(),emit:(e,d)=>this.emit(e,d),netLog:(l,m)=>this.netLog(l,m)},{code,token,isHost});this.engine.clientID=clientId;this.engine.setState(this.state,code,token,isHost,room,session)
-    session.on('engineSignal',signal=>{if(this.engine.session!==session)return;if (isHost && signal.type==='mods_request') this.emit('mods:request',signal.data); else this.engine.onSignal(signal.type,signal.from,signal.data)});session.on('roomInfo',info=>{if(this.engine.session===session&&this.room){if(Number.isFinite(info?.currentPlayers))this.room.currentPlayers=info.currentPlayers;if(info?.name)this.room.name=info.name;this.emit('session:state',{state:this.state,room:this.room})}})
+    session.on('engineSignal',signal=>{if(this.engine.session!==session||!this.engine.acceptSignal(signal.type,signal.from))return;if (isHost && signal.type==='mods_request') this.emit('mods:request',signal.data); else this.engine.onSignal(signal.type,signal.from,signal.data)});session.on('roomInfo',info=>{if(this.engine.session===session&&this.room){if(Number.isFinite(info?.currentPlayers))this.room.currentPlayers=info.currentPlayers;if(info?.name)this.room.name=info.name;this.emit('session:state',{state:this.state,room:this.room})}})
     this.engine.beginFallbackTimer();this.emit('session:state',{state:this.state,room});void session.run().finally(()=>{if(this.engine.session===session){this.engine.teardown();this.engine.session=null;this.state='closed';this.room=null;this.emit('session:state',{state:'closed'})}})
     // Server injects join_request after room/join; no client-originated duplicate.
   }
-  async createRoom(req:CreateRoomParams):Promise<CreateRoomResult>{const epoch=this.begin();try{const name=normalizeVoxlinkRoomName(req.name);await probeHostPort(req.hostPort);if(epoch!==this.operation)throw new Error('操作已取消');const result=await this.api.post(this.baseURL(),'/room/create',{...req,name,maxPlayers:20,natType:'unknown',clientType:'app',clientTag:CLIENT_TAG,client_tag:CLIENT_TAG,clientProtocolVersion:7,clientCapabilities:['relay','punchAuthV1','modSyncV1','ice_restart','continuous_retry'],idempotencyKey:randomUUID()}) as CreateRoomResult;const room:RoomInfo={...result,maxPlayers:20,currentPlayers:1,hasPassword:!!req.password,category:req.category??'',gameVersion:req.gameVersion??'',loader:req.loader??'',clientType:'app',clientTag:CLIENT_TAG,isHost:true};await this.accept(epoch,result.code,result.hostToken,true,room);return result}finally{if(epoch===this.operation)this.pending=false}}
-  async joinRoom(req:JoinRoomParams):Promise<JoinRoomResult>{const epoch=this.begin();this.joinPassword=req.password??'';try{const code=req.code.trim().toUpperCase();if(!validateRoomCode(code))throw new APIError('INVALID_PARAMS','请输入有效的六位房间码');const result=await this.api.post(this.baseURL(),'/room/join',{code,password:req.password,clientType:'app',clientProtocolVersion:7,clientCapabilities:['relay','punchAuthV1','ice_restart','continuous_retry'],idempotencyKey:randomUUID()}) as JoinRoomResult;result.room={...result.room,code,isHost:false};await this.accept(epoch,code,result.clientToken,false,result.room,result.clientId);return result}finally{if(epoch===this.operation)this.pending=false}}
-  async leaveRoom():Promise<{left:boolean}>{this.operation++;this.pending=false;const session=this.engine.session,credentials={code:this.engine.code,token:this.engine.token,isHost:this.engine.isHost};this.engine.session=null;session?.stop();this.engine.teardown();this.engine.setState('idle','','',false,null,null);this.state='idle';this.room=null;this.emit('session:state',{state:'idle'});if(session)void this.api.post(this.baseURL(),'/room/leave',credentials).catch(()=>{});return{left:!!session}}
+  async createRoom(req:CreateRoomParams):Promise<CreateRoomResult>{const epoch=this.begin();try{const name=normalizeVoxlinkRoomName(req.name);await probeHostPort(req.hostPort);if(epoch!==this.operation)throw new Error('操作已取消');const result=await this.api.post(this.baseURL(),'/room/create',{...req,name,maxPlayers:20,natType:'unknown',clientType:'app',clientTag:CLIENT_TAG,client_tag:CLIENT_TAG,clientProtocolVersion:7,clientCapabilities:VOXLINK_CAPABILITIES,idempotencyKey:randomUUID()},undefined,this.operationController.signal) as CreateRoomResult;const room:RoomInfo={...result,maxPlayers:20,currentPlayers:1,hasPassword:!!req.password,category:req.category??'',gameVersion:req.gameVersion??'',loader:req.loader??'',clientType:'app',clientTag:CLIENT_TAG,isHost:true};await this.accept(epoch,result.code,result.hostToken,true,room);return result}finally{if(epoch===this.operation)this.pending=false}}
+  async joinRoom(req:JoinRoomParams):Promise<JoinRoomResult>{const epoch=this.begin();this.joinPassword=req.password??'';this.joinEnvironment={loader:req.loader,gameVersion:req.gameVersion};try{const code=req.code.trim().toUpperCase();if(!validateRoomCode(code))throw new APIError('INVALID_PARAMS','请输入有效的六位房间码');const result=await this.requestJoin(code,req.password,this.operationController.signal);result.room={...result.room,code,isHost:false};await this.accept(epoch,code,result.clientToken,false,result.room,result.clientId);return result}finally{if(epoch===this.operation)this.pending=false}}
+  async leaveRoom(reason='用户退出房间'):Promise<{left:boolean}>{this.netLog('info','退出房间：'+reason.slice(0,100));this.operation++;this.operationController.abort();this.pending=false;const session=this.engine.session,credentials={code:this.engine.code,token:this.engine.token,isHost:this.engine.isHost};this.engine.session=null;session?.stop();this.engine.teardown();this.engine.setState('idle','','',false,null,null);this.state='idle';this.room=null;this.emit('session:state',{state:'idle'});if(session)void this.api.post(this.baseURL(),'/room/leave',credentials).catch(()=>{});return{left:!!session}}
   getSessionStateJSON():AppState{return{state:this.state,room:this.room,code:this.engine.code,token:this.engine.token,isHost:this.engine.isHost}}
   async sendRoomUpdate(value:{name?:string;category?:string;visible?:boolean;password?:string}):Promise<void>{if(!this.engine.session||!this.engine.isHost)throw new Error('只有房主可以修改房间');await this.api.post(this.baseURL(),'/room/update',{...value,code:this.engine.code,token:this.engine.token,isHost:true})}
   async getRoomMods(code:string):Promise<Data>{return await this.api.post(this.baseURL(),'/room/mods',{code}) as Data}

@@ -86,7 +86,8 @@ async function main() {
   const zip = path.join(root, 'release', `KAMUCL-${version}-windows-x64.zip`)
   const source = path.join(root, 'release', `KAMUCL-${version}-source.zip`)
   const unpacked = path.join(root, 'release', `KAMUCL-${version}-windows-x64-unpacked.zip`)
-  const packages = [exe, zip, unpacked, source]
+  const mac = ['arm64', 'x64'].flatMap(arch => ['dmg', 'zip'].map(ext => path.join(root, 'release', `KAMUCL-${version}-mac-${arch}.${ext}`)))
+  const packages = [exe, zip, unpacked, source, ...mac]
   for (const f of packages) {
     if (!fs.existsSync(f)) {
       console.error(`缺少构建产物：${f}（先运行打包）`)

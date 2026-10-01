@@ -16,7 +16,8 @@ function checkLicenses({ release = false } = {}) {
   const digest = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(root, model.file), 'utf8').replace(/\r\n/g, '\n')).digest('hex')
   if (digest !== model.normalizedSha256) throw new Error('Vendored skin model changed: review provenance')
   for (const file of provenance.voxlink.files) if (!fs.readFileSync(path.join(root, 'src/main/core/voxlink', file), 'utf8').includes('SPDX-License-Identifier: LGPL-3.0-only')) throw new Error('Missing LGPL marker: ' + file)
-  for (const file of ['licenses/skinview3d.txt', 'licenses/skinview-utils.txt']) if (!fs.existsSync(path.join(root, file))) throw new Error('Missing MIT skin license: ' + file)
+  for (const file of ['licenses/skinview3d.txt', 'licenses/skinview-utils.txt', 'licenses/ws.txt', 'licenses/minecraft-data.txt']) if (!fs.existsSync(path.join(root, file))) throw new Error('Missing MIT license: ' + file)
+  for (const file of provenance.voxlink.sharedFiles || []) if (!fs.readFileSync(path.join(root,file),'utf8').includes('SPDX-License-Identifier: LGPL-3.0-only')) throw new Error('Missing LGPL marker: '+file)
   return status
 }
 module.exports = { checkLicenses }

@@ -7,6 +7,7 @@ import { communityExactFile, communityFiles } from './community'
 import { withFileJob } from './fileJobs'
 import { modHash, replaceModFiles } from './modTransaction'
 import { assertInstanceIdle } from './instanceCenter'
+import { rememberModIdentity } from './modState'
 
 export async function recordingModVersions(kind: RecordingKind, mc: string, loader: LoaderName): Promise<CommunityFile[]> {
   if (!Object.hasOwn(RECORDING_PROJECTS, kind) || !['fabric', 'quilt', 'forge', 'neoforge'].includes(loader) || typeof mc !== 'string' || mc.length > 100) throw new Error('请选择游戏版本、加载器和录像模组')
@@ -43,5 +44,6 @@ export async function installRecordingMods(dir: string, files: CommunityFile[], 
       else needed.push(f)
     }
     if (needed.length) await replaceModFiles(dir, needed.map(f => ({ name: f.fileName, sha1: f.sha1!, url: f.url, size: f.size })), () => assertInstanceIdle(path.dirname(dir)), signal, progress)
+    for (const f of files) if(f.source && f.projectId && f.sha1) rememberModIdentity(dir,f.sha1,`${f.source}:${f.projectId}`)
   })
 }

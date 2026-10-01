@@ -1,4 +1,10 @@
 import { registerRecordingsIpc } from './core/recordingsIpc'
+import { registerSkinEditorIpc } from './core/skinEditorIpc'
+import { registerModFavoritesIpc } from './core/modFavorites'
+import { registerSupplementalModsIpc } from './core/supplementalMods'
+import { registerMemoryOrganizerIpc } from './core/memoryOrganizer'
+import { registerProjectionsIpc } from './core/projectionsIpc'
+import { registerMascotsIpc } from './core/mascots'
 import { activeLaunchStates, rememberLaunchState } from './core/launchUiState'
 import { startNativeFileDrag } from './core/nativeFileDrag'
 import { dragResourceFilesSync } from './core/resourceDragPaths'
@@ -97,6 +103,12 @@ function errText(err: unknown): string {
 }
 
 export function registerIpc(getWin: () => BrowserWindow | null): void {
+  registerSkinEditorIpc(getWin)
+  registerModFavoritesIpc()
+  registerSupplementalModsIpc(getWin)
+  registerMemoryOrganizerIpc()
+  registerProjectionsIpc(getWin)
+  registerMascotsIpc()
   registerInstanceCenterIpc(getWin)
   registerRecordingsIpc(getWin)
   ipcMain.handle("recordings:modVersions", (_e, kind, mc, loader) => recordingModVersions(kind, mc, loader))

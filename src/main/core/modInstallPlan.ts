@@ -58,7 +58,9 @@ export async function dependencyGraph(roots: CommunityFile[], target: InstalledV
     for (const dep of file.dependencies ?? []) {
       if (!dep.required) continue
       if (!file.source || (!dep.projectId && !dep.fileId)) throw new Error(`无法定位 ${file.fileName} 的必要前置，请手动安装`)
-      const next = dep.fileId ? await repo.exact(file.source, dep.projectId, dep.fileId) : (await repo.files(file.source, dep.projectId!, target))[0]
+      const selected = roots.find(root => root.source === file.source && (dep.projectId ? root.projectId === dep.projectId : root.fileId === dep.fileId))
+      if (selected && dep.fileId && selected.fileId !== dep.fileId) throw new Error(`前置版本冲突：${dep.projectId || dep.fileId}`)
+      const next = selected || (dep.fileId ? await repo.exact(file.source, dep.projectId, dep.fileId) : (await repo.files(file.source, dep.projectId!, target))[0])
       if (!next) throw new Error(`前置 ${dep.projectId} 没有兼容版本`)
       await visit(next)
     }

@@ -1,4 +1,4 @@
-// VoxLink launcher-integration.md section 1, upstream 721c7fae (read-only reference).
+// VoxLink RelatedLinksScreen.java, upstream c475faa98cca16d4a2eeef4422c862c36091e1fc.
 export const VOXLINK_LINKS = [
   {
     "label": "官网",

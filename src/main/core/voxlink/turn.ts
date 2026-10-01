@@ -16,7 +16,7 @@ const header = (type: number) => Buffer.from([0x56, 0x4c, 1, type])
 function isPacket(p: Buffer, type: number, length: number): boolean {
   return p.length >= length && p[0] === 0x56 && p[1] === 0x4c && p[2] === 1 && p[3] === type
 }
-export interface TurnNode { id: string; name?: string; host: string; port: number }
+export interface TurnNode { id: string; name?: string; host: string; port: number; stdTurnPort?: number }
 export interface TurnAllocation { sessionId: string; host: string; port: number; hostTicket: string; guestTicket: string; expire: number }
 export function validTurnEndpoint(host: unknown, port: unknown): boolean {
   return typeof host === 'string' && !!host && host.length <= 253 && typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65535

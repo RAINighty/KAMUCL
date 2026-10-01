@@ -13,6 +13,8 @@ import {
 import { store, toast } from '../store'
 import { renderCape, renderSkinFront } from '../skin-render'
 import SkinViewer3D from '../components/SkinViewer3D.vue'
+import SkinEditor from '../components/SkinEditor.vue'
+const editorOpen = ref(false)
 import type { CapeInfo, ProfileSkins, SkinHistoryEntry, SkinVariant } from '@shared/types'
 
 /** 仅微软正版账号可用 */
@@ -341,8 +343,10 @@ watch(
 
 <template>
   <div data-ui="SkinsView:79bfa9f178a8" class="page skins-page">
+    <SkinEditor v-if="editorOpen" :current="currentSkin?.dataUrl" :variant="currentVariant" @close="editorOpen=false" @uploaded="loadAll" />
     <div data-ui="SkinsView:483ce0fd91a6" class="page-head">
       <h1 data-ui="SkinsView:b30aa0d910d4" class="page-title">皮肤与披风</h1>
+      <button class="btn btn-gold" @click="editorOpen=true">绘制皮肤</button>
       <p data-ui="SkinsView:dc0d51be1910" class="page-sub">
         {{ isExternal ? `查看 ${store.selectedAccount?.providerName ?? '外置皮肤站'} 的角色材质` : '管理微软正版账号的皮肤与披风' }}
       </p>

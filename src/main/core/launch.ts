@@ -618,9 +618,16 @@ async function launchOwned(
   // Xmx 按真实物理内存钳制：配置文件可能被手改或从大内存机器迁移过来，
   // 超出物理内存的分配会让 JVM 起不来或系统整卡死。
   const totalMemMB = Math.floor(os.totalmem() / 1024 / 1024)
-  const mem = settings.memoryAuto
+  if(process.platform==='win32' && settings.memoryOrganizeBeforeLaunch===true){
+    emit({stage:'prepare',progress:0,text:'整理可回收工作集'})
+    try { const result=await (await import('./memoryOrganizer')).organizeMemory();sendLog(`内存整理：可用 ${result.beforeMB} → ${result.afterMB} MB；处理 ${result.processed}，跳过 ${result.skipped}；${Object.keys(result.failures).join('；') || '完成'}`) }
+    catch(e){sendLog('内存整理失败，继续正常启动：'+String(e))}
+  }
+  const availableMemMB = Math.floor(os.freemem()/1024/1024)
+  let mem = settings.memoryAuto
     ? autoMemoryMB(totalMemMB)
     : Math.min(Math.max(512, settings.memoryMB || 4096), totalMemMB)
+  if(settings.memoryAuto&&process.platform==='win32'&&settings.memoryOrganizeBeforeLaunch===true)mem=Math.min(mem,Math.max(512,availableMemMB-1024))
   // forge ignoreList 需精确匹配 -cp 上的原版客户端 jar 文件名：实例自定义命名时
   // ${version_name}.jar 与实际 clientJar 不一致，原版 jar 会被模块系统当作自动模块
   // 与 fml 合成的 minecraft 模块重复导出包（ResolutionException 闪退），补写真实文件名

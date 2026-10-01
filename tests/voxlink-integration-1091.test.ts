@@ -6,7 +6,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import net from 'node:net'
 import dgram from 'node:dgram'
-import { once } from 'node:events'
+import { once, EventEmitter } from 'node:events'
 import { buildModManifests, diffMods, scanModHashes, safeModEntry } from '../src/main/core/voxlink/modsync'
 import { predict, generateTargetPorts } from '../src/main/core/voxlink/punchPolicy'
 import { TurnSession } from '../src/main/core/voxlink/turn'
@@ -109,21 +109,22 @@ test('VoxLink links match contract; upstream regression and confidence range pro
 })
 
 test('WS is preferred for sends, reconnect re-polls identity, duplicate push is ignored and stop releases pending work', async t => {
-  const Original = globalThis.WebSocket, created: FakeWs[] = [], frames: any[] = []
-  class FakeWs extends EventTarget {
+  const created: FakeWs[] = [], frames: any[] = []
+  class FakeWs extends EventEmitter {
     static OPEN = 1; readyState = 0
-    constructor(_url: URL) { super(); created.push(this); queueMicrotask(() => { this.readyState = 1; this.dispatchEvent(new Event('open')) }) }
-    send(raw: string) { const frame = JSON.parse(raw); frames.push(frame); queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ id: frame.id, success: true, data: frame.route === '/signal/poll' ? { s: [], ts: Date.now() } : {} }) }))) }
-    close() { if (this.readyState === 3) return; this.readyState = 3; this.dispatchEvent(new Event('close')) }
+    constructor(_url: URL) { super(); created.push(this); queueMicrotask(() => { this.readyState = 1; this.emit('open') }) }
+    send(raw: string) { const frame = JSON.parse(raw); frames.push(frame); queueMicrotask(() => this.emit('message', Buffer.from(JSON.stringify({ id: frame.id, success: true, data: frame.route === '/signal/poll' ? { s: [], ts: Date.now() } : {} })))) }
+    ping() {this.emit('pong')}
+    terminate(){this.close()}
+    close() { if (this.readyState === 3) return; this.readyState = 3; this.emit('close') }
   }
-  globalThis.WebSocket = FakeWs as any; t.after(() => { globalThis.WebSocket = Original })
-  const session = new VoxlinkSession({ api: { do: async () => { throw new Error('HTTP should not be needed') } } as unknown as ApiClient, baseURL: () => 'https://fixture.example', emit: () => {}, netLog: () => {} }, { code: 'ABCDEF', token: 'test', isHost: true })
+  const session = new VoxlinkSession({ api: { do: async () => { throw new Error('HTTP should not be needed') } } as unknown as ApiClient, baseURL: () => 'https://fixture.example', emit: () => {}, netLog: () => {} }, { code: 'ABCDEF', token: 'test', isHost: true },url=>new FakeWs(url) as any)
   t.after(() => session.stop())
   let received = 0; session.on('engineSignal', () => received++)
   await session.request('/signal/send', { type: 'fixture', to: 'guest', data: {} })
   assert(frames.some(f => f.route === '/signal/send' && f.body.isHost === true))
   const packet = JSON.stringify({ id: 0, push: 'signals', data: { s: [{ id: 9, type: 'mods_request', from: 'guest', data: { scope: 'all' }, timestamp: Date.now() }] } })
-  for (let i = 0; i < 2; i++) created[0].dispatchEvent(new MessageEvent('message', { data: packet }))
+  for (let i = 0; i < 2; i++) created[0].emit('message',Buffer.from(packet))
   assert.equal(received, 1)
   created[0].close(); await new Promise(r => setTimeout(r, 20))
   assert.equal(created.length, 2); assert(frames.filter(f => f.route === '/signal/poll').length >= 2)

@@ -10,7 +10,7 @@ for(const [i,name] of ['26.3 Fabric 生存世界','Mecha Craftaleon 客户端 v1
 for(const folder of [games,other])for(const id of fs.readdirSync(path.join(folder,'versions'))){
   for(const rel of ['mods','resourcepacks','shaderpacks']){const dir=path.join(folder,'versions',id,rel);fs.mkdirSync(dir,{recursive:true});for(const name of ['Fabric API','Long display name for a resource with several words and 中文名称','Replay recording tools']){const zip=new(require('adm-zip'))();zip.addFile('fabric.mod.json',Buffer.from(JSON.stringify({schemaVersion:1,id:name.replace(/[^a-z]/gi,'').toLowerCase(),version:'1.0.0',name})));zip.addFile('pack.mcmeta',Buffer.from(JSON.stringify({pack:{pack_format:15,description:name}})));zip.writeZip(path.join(dir,name+(rel==='mods'?'.jar':'.zip')))}}
 }
-const exe=path.join(root,`KAMUCL-${version}.exe`);if(!process.env.KAMUCL_GUI_DEV)fs.copyFileSync(`release/KAMUCL-${version}.exe`,exe);
+const exe=process.env.KAMUCL_GUI_APP||path.join(root,`KAMUCL-${version}.exe`);if(!process.env.KAMUCL_GUI_DEV&&!process.env.KAMUCL_GUI_APP)fs.copyFileSync(`release/KAMUCL-${version}.exe`,exe);
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
  const server=net.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));
@@ -40,6 +40,8 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   const click=async selector=>evaluate('document.querySelector('+JSON.stringify(selector)+')?.click()');
   const type=async (selector,value)=>evaluate('(()=>{const e=document.querySelector('+JSON.stringify(selector)+');e.value='+JSON.stringify(value)+';e.dispatchEvent(new Event("input",{bubbles:true}))})()');
   const nav=async id=>{if(['mods','packs','shaders','recordings','bridge','servers'].includes(id)&&!await evaluate('!!document.querySelector("[data-nav='+id+']")?.getClientRects().length'))await click('[data-nav=resources]');await click('[data-nav='+id+']');await wait(350)};
+  if(process.env.KAMUCL_EXTENSION_GUI)await require('./verify-extension-ui.cjs')({call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version});
+  if(process.env.KAMUCL_EXTENSION_ONLY){if(process.platform==='darwin')await main('setTimeout(()=>testElectron.app.quit(),250)');mainWs.close();await wait(100);await evaluate("window.kamucl.send('window:close')");for(let i=0;i<50&&child.exitCode===null;i++)await wait(100);assert.equal(child.exitCode,0);return}
   const issues=[];const checkLayout=async name=>{
     const result=await evaluate('(()=>{const c=document.querySelector(".content");return {width:innerWidth,scroll:c.scrollWidth,client:c.clientWidth,over:[...c.querySelectorAll("button,input,select,h1,h3,.fm-row,.result-card")].filter(e=>e.getClientRects().length&&e.getBoundingClientRect().right>innerWidth+3).map(e=>e.className).slice(0,8)}})()');
     if(result.scroll>result.client+3||result.over.length)issues.push({name,...result});

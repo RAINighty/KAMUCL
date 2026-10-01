@@ -44,7 +44,7 @@ export class ApiClient {
       return envelope.data ?? null
     } catch (error) { if (error instanceof APIError) throw error; throw new APIError('NETWORK', (error as Error).message) }
   }
-  async post(base: string, route: string, body: unknown, target?: unknown): Promise<unknown> { const result = await this.do(base, 'POST', route, {}, body); if (target && result) Object.assign(target, result); return result }
-  async get(base: string, route: string, query: Record<string, QueryValue | QueryValue[]>, target?: unknown): Promise<unknown> { const result = await this.do(base, 'GET', route, query, null); if (target && result) Object.assign(target, result); return result }
+  async post(base: string, route: string, body: unknown, target?: unknown, signal?: AbortSignal): Promise<unknown> { const result = await this.do(base, 'POST', route, {}, body, signal); if (target && result) Object.assign(target, result); return result }
+  async get(base: string, route: string, query: Record<string, QueryValue | QueryValue[]>, target?: unknown, signal?: AbortSignal): Promise<unknown> { const result = await this.do(base, 'GET', route, query, null, signal); if (target && result) Object.assign(target, result); return result }
 }
 export const newAPIClient = () => new ApiClient()

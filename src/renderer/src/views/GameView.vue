@@ -40,6 +40,8 @@ import ConfirmModal from '../components/ConfirmModal.vue'
 import IconPickerModal from '../components/IconPickerModal.vue'
 import SelectMenu from '../components/SelectMenu.vue'
 import RecordingModPicker from '../components/RecordingModPicker.vue'
+import FavoriteModsPicker from '../components/FavoriteModsPicker.vue'
+const favoritesReady = ref(true)
 import ThumbnailPickerModal from '../components/ThumbnailPickerModal.vue'
 import type {
   FabricApiVersion,
@@ -403,6 +405,7 @@ const modal = reactive({
   loadingApi: false,
   apiError: '',
   recordingMod: undefined as InstallOptions['recordingMod'],
+  favoriteMods: undefined as InstallOptions['favoriteMods'],
   instanceName: '',
   instanceEdited: false
 })
@@ -446,6 +449,8 @@ function openInstall(v: RemoteVersion) {  modal.open = true
   modal.loadingApi = false
   modal.apiError = ''
   modal.recordingMod = undefined
+  modal.favoriteMods = undefined
+  favoritesReady.value = true
   modal.instanceName = ''
   modal.instanceEdited = false
 }
@@ -504,7 +509,7 @@ const canConfirm = computed(
     (modal.loader === '' || !!modal.loaderVersion) &&
     (modal.loader !== 'fabric' || !modal.apiOn ||
       (!modal.loadingApi && !modal.apiError && !!modal.apiVersion)) &&
-    (!modal.recordingMod || (!!modal.loader && !!modal.recordingMod.fileId)) &&
+    favoritesReady.value && (!modal.recordingMod || (!!modal.loader && !!modal.recordingMod.fileId)) &&
     !instanceError.value
 )
 
@@ -515,6 +520,7 @@ async function confirmInstall() {
     ? {
         loader: modal.loader,
         recordingMod: modal.recordingMod,
+        favoriteMods: modal.favoriteMods,
         loaderVersion: modal.loaderVersion || undefined,
         fabricApi:
           modal.loader === 'fabric' && modal.apiOn && modal.apiVersion
@@ -1473,6 +1479,7 @@ async function confirmIsolation() {
           </template>
 
           <RecordingModPicker v-model="modal.recordingMod" :mc="modal.version?.id || ''" :loader="modal.loader" />
+          <FavoriteModsPicker v-model="modal.favoriteMods" :mc="modal.version?.id || ''" :loader="modal.loader" @ready="favoritesReady=$event" />
 
           <!-- 实例名（所有实例均可自定义；纯净版默认 MC 版本号，加载器实例按规则生成） -->
           <p class="modal-label">实例名</p>

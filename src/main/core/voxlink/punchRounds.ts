@@ -7,6 +7,7 @@ export const PREDICTION_OFF_CAP = 50 // ConnectionManager.java: PREDICTION_OFF_C
 export const BACKOFF_DELAYS_MS = [1000, 2000, 4000] as const // ConnectionManager.java: BACKOFF_DELAYS_MS
 export const PROFILE_SWITCH_COOLDOWN_MS = 20000 // ConnectionManager.java: switchPunchProfile
 export class PunchRounds {
+  constructor(private log:(message:string)=>void=()=>{}){}
   cycle = 0; round = 0; attempt = 1; receivedEver = false; predictionOffCount = 0
   profile: PunchProfile = PROFILES.DEFAULT
   params: PunchParams | undefined
@@ -23,7 +24,10 @@ export class PunchRounds {
     if (!this.round) this.switchProfile(recommendProfile(local, remote))
   }
   private switchProfile(next: PunchProfile): void {
-    if (next === this.profile || this.switchedAt && Date.now() - this.switchedAt < PROFILE_SWITCH_COOLDOWN_MS) return
+    if (next === this.profile) return
+    if(this.switchedAt&&Date.now()-this.switchedAt<PROFILE_SWITCH_COOLDOWN_MS){this.log(`模板切换被 20 秒节流：目标 ${next.name}，保留 ${this.profile.name}，剩余 ${PROFILE_SWITCH_COOLDOWN_MS-(Date.now()-this.switchedAt)} ms`);return}
+    const differences=Object.fromEntries(Object.entries(next).filter(([key,value])=>JSON.stringify(value)!==JSON.stringify(PROFILES.DEFAULT[key as keyof PunchProfile])))
+    this.log(`模板切换：${this.profile.name} → ${next.name}；相对 DEFAULT 的全部差异：${JSON.stringify(differences)}`)
     this.profile = next; this.switchedAt = Date.now()
   }
   record(result: PunchResult): FailureReason {

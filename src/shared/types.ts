@@ -160,6 +160,7 @@ export interface IsolationMigrationPlan {
 export type LoaderName = 'forge' | 'fabric' | 'quilt' | 'neoforge'
 
 export interface InstallOptions {
+  favoriteMods?: import('./modFavorites').FavoriteSelection[]
   recordingMod?: { kind: import("./recordings").RecordingKind; fileId: string }
   loader?: LoaderName
   loaderVersion?: string
@@ -379,6 +380,8 @@ export interface Settings {
   memoryMB: number
   /** 自动分配内存（推荐）：开启后按物理内存 25% 自动计算（2-8GB），忽略 memoryMB 手动值 */
   memoryAuto?: boolean
+  /** Windows only; default off. One working set pass per accepted launch. */
+  memoryOrganizeBeforeLaunch?: boolean
   jvmArgs: string
   resolution: GameResolution
   mirror: 'official' | 'bmclapi'

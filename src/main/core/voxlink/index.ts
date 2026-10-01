@@ -18,6 +18,7 @@ import { ConnectionLog } from './connectionLog'
 import { saveSettings } from './settings'
 import { ModSyncService } from './modsyncService'
 import type { InstanceTarget } from '../../../shared/instanceCenter'
+import { registerTicketIpc } from './ticketsIpc'
 const modSync = new ModSyncService(vapp)
 const connectionLog = new ConnectionLog(() => vapp().baseURL(), () => !!vapp().settings.uploadDiagnostics, () => [vapp().engine.token])
 let app: VoxlinkApp | null = null
@@ -58,6 +59,7 @@ function snapshot(): unknown {
 }
 
 export function registerVoxlinkIpc(ipcMain: IpcMain): void {
+  registerTicketIpc(ipcMain,()=>vapp().baseURL())
   modSync.register(ipcMain)
   ipcMain.handle('voxlink:start', async (_e, payload: { mode?: 'host' | 'join'; code?: string; roomName?: string; isPublic?: boolean; category?: string; hostPort?: number; loader?: string; gameVersion?: string; target?: InstanceTarget }) => {
     if(requestPending)throw new Error('正在处理联机请求，请先取消')
@@ -67,7 +69,9 @@ export function registerVoxlinkIpc(ipcMain: IpcMain): void {
     a.emit = (ev, data) => forwardEvent(ev, data)
     a.netLog = (level, msg) => { connectionLog.record(level, msg); push('log', { level, msg }) }
     if (payload.mode === 'join') {
-      const r = await a.joinRoom({ code: String(payload.code ?? '').trim() })
+      const context=payload.target?await modSync.context(payload.target):undefined
+      if(generation!==requestGeneration)throw new Error('操作已取消')
+      const r = await a.joinRoom({ code: String(payload.code ?? '').trim(), loader:context?.loader, gameVersion:context?.mcVersion })
       connectionLog.start(r.room.code, false)
       push('state', snapshot())
       return { ok: true, ...r }
@@ -99,11 +103,11 @@ export function registerVoxlinkIpc(ipcMain: IpcMain): void {
     } finally {if(generation===requestGeneration)requestPending=false}
   })
 
-  ipcMain.handle('voxlink:stop', async () => {
+  ipcMain.handle('voxlink:stop', async (_e,reason?:string) => {
     requestGeneration++;requestPending=false
     modSync.stop()
+    try { await vapp().leaveRoom(typeof reason==='string'?reason:'用户退出房间') } catch { /* 已经不在房间 */ }
     void connectionLog.stop()
-    try { await vapp().leaveRoom() } catch { /* 已经不在房间 */ }
     push('state', snapshot())
     return snapshot()
   })
@@ -130,7 +134,7 @@ export function registerVoxlinkIpc(ipcMain: IpcMain): void {
 /** 应用退出时停掉会话（gracefulClose 里调用）。 */
 export async function stopVoxlinkOnQuit(): Promise<void> {
   modSync.stop()
-  await connectionLog.stop(true)
   if (!app) return
-  try { await app.leaveRoom() } catch { /* 忽略 */ }
+  try { await app.leaveRoom('启动器关闭') } catch { /* 忽略 */ }
+  await connectionLog.stop(true)
 }

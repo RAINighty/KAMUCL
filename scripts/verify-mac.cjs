@@ -81,7 +81,18 @@ async function main(){
  fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,binary,mainUI:true,macUI,skin:{facePixels,shirtPixels},nativeMaterial,url:page.url},null,2));ws.close()
  console.log('PASS native macOS '+arch+' packaged app '+version)
 }
-main().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{
+main().finally(async()=>{
  const ended=new Promise(resolve=>{if(child.exitCode!==null)resolve();else child.once('exit',resolve)})
  child.kill('SIGTERM');fixture.kill('SIGTERM');await ended;fs.closeSync(log)
-})
+}).then(()=>{
+ // The existing native workflow calls this script for both the APP and mounted DMG.
+ // Keep the common-feature checks here so they cannot be omitted by a workflow step.
+ execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{
+  env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_TEST_THEME:'black-orange'},
+  stdio:'inherit',timeout:180000
+ })
+ const extensionProof=path.join(proof,'extensions');fs.mkdirSync(extensionProof,{recursive:true})
+ fs.copyFileSync('out/extension-ui-black-orange.json',path.join(extensionProof,'results.json'))
+ for(const name of fs.readdirSync('release/ui-refinement-black-orange'))if(name.startsWith('extension-')&&name.endsWith('.png'))fs.copyFileSync(path.join('release/ui-refinement-black-orange',name),path.join(extensionProof,name))
+ console.log('PASS native macOS '+arch+' extension GUI '+version)
+}).catch(e=>{console.error(e);process.exitCode=1})
