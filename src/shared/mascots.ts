@@ -3,7 +3,36 @@ export interface MascotSound { muted:boolean; volume:number }
 export const DEFAULT_MASCOT_SOUND:Readonly<MascotSound>={muted:false,volume:.45}
 export interface MascotState {counts:Record<string,number>;order:string[];sound?:MascotSound}
 export interface MascotBatch {batchId:string;hits:string[];tieOrder?:string[]}
-export interface MascotHitRect {id:string;left:number;top:number;right:number;bottom:number}
+export interface MascotPoint {x:number;y:number}
+export interface MascotHitRect {id:string;left:number;top:number;right:number;bottom:number;polygon?:MascotPoint[];part?:string;depth?:number}
+/** Convex screen silhouette of one visible block part, independent of its pose. */
+export function mascotHull(points:readonly MascotPoint[]):MascotPoint[]{
+ const sorted=[...points].sort((a,b)=>a.x-b.x||a.y-b.y),cross=(a:MascotPoint,b:MascotPoint,c:MascotPoint)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)
+ const half=(list:MascotPoint[])=>{const out:MascotPoint[]=[];for(const point of list){while(out.length>1&&cross(out[out.length-2],out[out.length-1],point)<=0)out.pop();out.push(point)}return out}
+ if(sorted.length<3)return sorted
+ const lower=half(sorted),upper=half([...sorted].reverse());lower.pop();upper.pop();return [...lower,...upper]
+}
+export function mascotShapeContains(shape:MascotHitRect,x:number,y:number):boolean {
+ if(x<shape.left||x>shape.right||y<shape.top||y>shape.bottom)return false
+ if(!shape.polygon?.length)return true
+ let sign=0;const points=shape.polygon
+ for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length],cross=(b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);if(Math.abs(cross)<1e-7)continue;const next=Math.sign(cross);if(sign&&sign!==next)return false;sign=next}
+ return true
+}
+/** Only the nearest visible person's parts occupy a point. A covered person's
+ * silhouette is not occupied until the pointer reaches its exposed pixels. */
+export function mascotVisibleOccupants(shapes:readonly MascotHitRect[],x:number,y:number):Set<string>{
+ const depths=new Map<string,number>()
+ for(const shape of shapes)if(mascotShapeContains(shape,x,y))depths.set(shape.id,Math.min(depths.get(shape.id)??Infinity,shape.depth??0))
+ const nearest=Math.min(...depths.values())
+ // Equal-depth shapes remain co-visible, matching interval occlusion below.
+ return new Set([...depths].filter(([,depth])=>depth===nearest).map(([id])=>id))
+}
+/** Time-based easing and a travelled-distance step phase; exact settled positions. */
+export function mascotWalkFrame(from:number,to:number,elapsed:number,duration:number){
+ const progress=duration<=0?1:Math.min(1,Math.max(0,elapsed/duration)),ease=progress*progress*(3-2*progress),position=from+(to-from)*ease
+ return {position,progress,travelled:Math.abs(position-from),direction:Math.sign(to-from),walking:progress<1&&from!==to}
+}
 export function normalizeMascotSound(value?:Partial<MascotSound>):MascotSound {
  return {muted:value?.muted===true,volume:typeof value?.volume==='number'&&Number.isFinite(value.volume)?Math.min(1,Math.max(0,value.volume)):DEFAULT_MASCOT_SOUND.volume}
 }
@@ -22,24 +51,34 @@ export class MascotSweepGate {
   if(!Number.isFinite(x)||!Number.isFinite(y))return []
   const from=this.previous;this.previous={x,y}
   if(from&&from.x===x&&from.y===y)return []
-  const inside=(r:MascotHitRect,px:number,py:number)=>px>=r.left&&px<=r.right&&py>=r.top&&py<=r.bottom
-  const hits:Array<{id:string;t:number}>=[]
+  const inside=mascotShapeContains,hits=new Map<string,number>()
+  const occupied=mascotVisibleOccupants(rects,from?.x??x,from?.y??y)
+  const intervals=new Map<MascotHitRect,[number,number]|undefined>()
+  const computeInterval=(r:MascotHitRect):[number,number]|undefined=>{
+   const points=r.polygon?.length?r.polygon:[{x:r.left,y:r.top},{x:r.right,y:r.top},{x:r.right,y:r.bottom},{x:r.left,y:r.bottom}]
+   if(!from)return inside(r,x,y)?[0,0]:undefined
+   let start=0,end=1;const area=points.reduce((sum,a,i)=>{const b=points[(i+1)%points.length];return sum+a.x*b.y-b.x*a.y},0),orientation=area<0?-1:1
+   for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length],d0=orientation*((b.x-a.x)*(from.y-a.y)-(b.y-a.y)*(from.x-a.x)),d1=orientation*((b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x)),delta=d1-d0
+    if(Math.abs(delta)<1e-9){if(d0<0)return;continue}
+    const t=-d0/delta;if(delta>0)start=Math.max(start,t);else end=Math.min(end,t);if(start>end)return
+   }
+   return end>=0&&start<=1?[Math.max(0,start),Math.min(1,end)]:undefined
+  }
+  const interval=(r:MascotHitRect)=>{if(!intervals.has(r))intervals.set(r,computeInterval(r));return intervals.get(r)}
   for(const r of rects){
-   if(!from){if(inside(r,x,y)&&!this.occupied.has(r.id))hits.push({id:r.id,t:0});continue}
+   if(!from&&this.occupied.has(r.id)||from&&occupied.has(r.id))continue
    // Rebase the occupied set to current positions after a layout/sort animation.
    // A person walking under the pointer is already occupied, never a fresh entry.
-   if(inside(r,from.x,from.y))continue
-   let start=0,end=1,valid=true
-   for(const [a,b,low,high] of [[from.x,x,r.left,r.right],[from.y,y,r.top,r.bottom]]){
-    const delta=b-a
-    if(delta===0){if(a<low||a>high)valid=false;continue}
-    const t0=(low-a)/delta,t1=(high-a)/delta
-    start=Math.max(start,Math.min(t0,t1));end=Math.min(end,Math.max(t0,t1))
+   const range=interval(r);if(!range)continue
+   let spans=[range]
+   // During a passing manoeuvre, covered pixels of a farther person cannot hit.
+   for(const occluder of rects){if(occluder.id===r.id||(occluder.depth??0)>=(r.depth??0)||occluder.right<r.left||occluder.left>r.right||occluder.bottom<r.top||occluder.top>r.bottom)continue;const cover=interval(occluder);if(!cover)continue
+    spans=spans.flatMap(([a,b])=>cover[1]<a||cover[0]>b?[[a,b] as [number,number]]:[...(cover[0]>a?[[a,cover[0]-1e-7] as [number,number]]:[]),...(cover[1]<b?[[cover[1]+1e-7,b] as [number,number]]:[])])
    }
-   if(valid&&start<=end&&end>=0&&start<=1)hits.push({id:r.id,t:start})
+   const entry=spans[0]?.[0];if(entry!==undefined)hits.set(r.id,Math.min(hits.get(r.id)??Infinity,entry))
   }
-  this.occupied=new Set(rects.filter(r=>inside(r,x,y)).map(r=>r.id))
-  return hits.sort((a,b)=>a.t-b.t).map(h=>h.id)
+  this.occupied=mascotVisibleOccupants(rects,x,y)
+  return [...hits].sort((a,b)=>a[1]-b[1]).map(([id])=>id)
  }
  reset(){this.previous=undefined;this.occupied.clear()}
 }

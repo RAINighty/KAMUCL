@@ -1,15 +1,19 @@
 import type {MascotSound} from '@shared/mascots'
 
-/** Original, synthesized palm-pop: no downloaded or third-party audio samples. */
+/** Original palm slap: a dry broadband crack, short skin-like body, no sample library. */
 export function slapSamples(sampleRate:number):Float32Array {
- const samples=new Float32Array(Math.ceil(sampleRate*.075));let seed=0x6b616d75,low=0
+ const samples=new Float32Array(Math.ceil(sampleRate*.075));let seed=0x6b616d75,low=0,presence=0
+ const lowAlpha=Math.exp(-2*Math.PI*260/sampleRate),presenceAlpha=Math.exp(-2*Math.PI*5200/sampleRate)
  for(let i=0;i<samples.length;i++){
   seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5
   const t=i/sampleRate,noise=(seed>>>0)/0x80000000-1
-  low=low*.78+noise*.22
-  const attack=Math.min(1,t/.0015),decay=Math.exp(-t*75)
-  samples[i]=attack*decay*(noise*.52+low*.26+Math.sin(2*Math.PI*(240*t-750*t*t))*.22)
+  low=low*lowAlpha+noise*(1-lowAlpha);presence=presence*presenceAlpha+(noise-low)*(1-presenceAlpha)
+  const attack=Math.min(1,t/.0007),crack=(noise-low)*.62*Math.exp(-t*180),smack=presence*.45*Math.exp(-t*67)
+  const body=Math.sin(2*Math.PI*(150*t-400*t*t))*.07*Math.exp(-t*105)
+  samples[i]=attack*(crack+smack+body)
  }
+ const peak=samples.reduce((value,sample)=>Math.max(value,Math.abs(sample)),0)
+ if(peak>.92)for(let i=0;i<samples.length;i++)samples[i]*=.92/peak
  return samples
 }
 export class MascotAudio {
@@ -50,9 +54,11 @@ export class MascotAudio {
    if(!this.allowed())this.suspend(context)
   }catch{/* Audio device availability must not block interaction or persistence. */}
  }
- play(){
+ /** Returns the visual-clock delay to the very same scheduled contact sound. */
+ play(approachMs=0):number {
   const prefs=this.prefs(),context=this.context
-  if(!this.allowed()||prefs.muted||!prefs.volume||!context||context.state!=='running'||!this.buffer||!this.gain)return
+  const lead=Math.max(0,Math.min(150,approachMs))/1000
+  if(!this.allowed()||prefs.muted||!prefs.volume||!context||context.state!=='running'||!this.buffer||!this.gain)return lead*1000
   this.gain.gain.setTargetAtTime(prefs.volume*.75,context.currentTime,.004)
   const source=context.createBufferSource();source.buffer=this.buffer;source.playbackRate.value=1+(this.played%5-2)*.025;source.connect(this.gain)
   if(this.voices.size>=24){const oldest=this.voices.values().next().value;try{oldest?.stop()}catch{}}
@@ -60,8 +66,9 @@ export class MascotAudio {
   source.onended=()=>{source.disconnect();this.voices.delete(source);this.stats(this.played,this.voices.size)}
   // One sparse pointer event can cross all seven hips. Spread the pops into a
   // short roll instead of combining seven identical samples into one loud pop.
-  const start=Math.max(context.currentTime,Math.min(this.next,context.currentTime+.12))
+  const earliest=context.currentTime+lead,start=Math.max(earliest,Math.min(this.next,earliest+.12))
   this.next=start+.015;source.start(start);this.played++;this.stats(this.played,this.voices.size)
+  return (start-context.currentTime)*1000
  }
  update(){if(this.gain&&this.context)this.gain.gain.setTargetAtTime(this.prefs().muted?0:this.prefs().volume*.75,this.context.currentTime,.004)}
  pause(){this.paused=true;this.next=0;for(const source of this.voices){try{source.stop()}catch{}}if(this.context)this.suspend(this.context)}

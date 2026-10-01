@@ -634,6 +634,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
 
   // ---------------- 社区资源（同步 await 返回，错误 reject 给前端） ----------------
   ipcMain.handle(IPC.communitySearch, (_e, q: CommunityQuery) => community.communitySearchPage(q))
+  ipcMain.handle(IPC.communityProject, (_e, source: CommunitySource, projectId: string, kind: CommunityKind) => community.communityProject(source, projectId, kind))
   ipcMain.handle(
     IPC.communityFiles,
     (_e, source: CommunitySource, projectId: string, filter?: { mcVersion?: string; loader?: LoaderName | ''; kind?: CommunityKind }) =>

@@ -58,10 +58,18 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
     assert(ready,'Navigation did not select '+id+': '+JSON.stringify(state));await wait(350);
   };
   if(process.env.KAMUCL_EXTENSION_GUI){
-    const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version};
-    await require('./verify-extension-ui.cjs')(harness);
-    for(const [id,file] of [['palette','verify-skin-palette-ui.cjs'],['header','verify-mascot-header-ui.cjs'],['gallery','verify-gallery-favorites-ui.cjs']]){
-      if(!process.env.KAMUCL_117_MODULE||process.env.KAMUCL_117_MODULE===id)await require('./'+file)({...harness,screenshot:name=>harness.screenshot(name.startsWith('extension-')?name:'extension-117-'+name)});
+    const recordScreencast=async(name,action,duration=2200)=>{
+      const directory=path.resolve('out',name+'-'+(process.env.KAMUCL_TEST_THEME||'black-orange'));fs.mkdirSync(directory,{recursive:true});const frames=[],startedAt=Date.now();let nextAck=900000;
+      const listener=e=>{const message=JSON.parse(e.data);if(message.method!=='Page.screencastFrame')return;const frame=message.params,index=frames.length,file='frame-'+String(index).padStart(4,'0')+'.jpg';fs.writeFileSync(path.join(directory,file),Buffer.from(frame.data,'base64'));frames.push({file,receivedAt:Date.now(),...frame.metadata});ws.send(JSON.stringify({id:++nextAck,method:'Page.screencastFrameAck',params:{sessionId:frame.sessionId}}))};
+      ws.addEventListener('message',listener);
+      try{await call('Page.startScreencast',{format:'jpeg',quality:95,everyNthFrame:1});await wait(100);await action();await wait(duration)}finally{await call('Page.stopScreencast');ws.removeEventListener('message',listener)}
+      const intervals=frames.slice(1).map((frame,index)=>frame.timestamp-frames[index].timestamp),elapsed=frames.length>1?frames.at(-1).timestamp-frames[0].timestamp:0,result={version,directory,source:'actual Page.startScreencast full compositor frames, acknowledged immediately; no interpolated frames',startedAt:new Date(startedAt).toISOString(),frames,elapsed,fps:elapsed?(frames.length-1)/elapsed:0,intervals};fs.writeFileSync(path.join(directory,'recording.json'),JSON.stringify(result,null,2));return result;
+    };
+    const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version,recordScreencast};
+    if(!process.env.KAMUCL_SKIP_EXTENSION_BASE)await require('./verify-extension-ui.cjs')(harness);
+    const selectedModule=process.env.KAMUCL_UI_MODULE||process.env.KAMUCL_117_MODULE;
+    for(const [id,file] of [['skin118','verify-skin-editor-ui.cjs'],['palette','verify-skin-palette-ui.cjs'],['header','verify-mascot-header-ui.cjs'],['gallery','verify-gallery-favorites-ui.cjs'],['gallery118','verify-gallery-favorites-118-ui.cjs']]){
+      if(!selectedModule||selectedModule===id)await require('./'+file)({...harness,screenshot:name=>harness.screenshot(name.startsWith('extension-')?name:'extension-118-'+name)});
     }
   }
   const closeApp=async()=>{if(process.platform==='darwin')await main('setTimeout(()=>testElectron.app.quit(),500)');mainWs.close();await wait(100);if(process.platform!=='darwin')await evaluate("window.kamucl.send('window:close')");for(let i=0;i<100&&child.exitCode===null;i++)await wait(100);assert.equal(child.exitCode,0)};

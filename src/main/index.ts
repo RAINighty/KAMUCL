@@ -87,6 +87,8 @@ let win: BrowserWindow | null = null
 let skinEditorDirty=false
 let skinEditorPrefsPending=false
 const skinEditorPrefsOwners=new Set<string>()
+let skinEditorBusy=false
+const skinEditorBusyOwners=new Set<string>()
 let deferredPaletteClose=false, deferredPaletteQuit=false
 let mascotPending=false
 /** 内存压榨控制器：whenReady 时初始化；createWindow 的窗口事件经此转发（静默瘦身） */
@@ -126,11 +128,12 @@ function createWindow(startup?: Awaited<ReturnType<typeof createStartupSplash>>)
   skinEditorDirty=false
   skinEditorPrefsPending=false
   skinEditorPrefsOwners.clear()
+  skinEditorBusy=false; skinEditorBusyOwners.clear()
   deferredPaletteClose=false; deferredPaletteQuit=false
   mascotPending=false
   mainWindow.on('close',event=>{
     if (mainWindow.webContents.isDestroyed()) return
-    if (skinEditorDirty || skinEditorPrefsPending) { event.preventDefault(); deferredPaletteClose=skinEditorPrefsPending&&!skinEditorDirty; mainWindow.webContents.send('window:skinEditorClose'); return }
+    if (skinEditorDirty || skinEditorPrefsPending || skinEditorBusy) { event.preventDefault(); deferredPaletteClose=skinEditorPrefsPending&&!skinEditorDirty&&!skinEditorBusy; mainWindow.webContents.send('window:skinEditorClose'); return }
     if (mascotPending) { event.preventDefault(); mainWindow.webContents.send('window:mascotClose') }
   })
   mainWindow.once('closed', () => { if (win === mainWindow) win = null })
@@ -138,6 +141,7 @@ function createWindow(startup?: Awaited<ReturnType<typeof createStartupSplash>>)
     if(win!==mainWindow)return
     // A crashed renderer cannot acknowledge an editor close request.
     skinEditorDirty=false; skinEditorPrefsPending=false; skinEditorPrefsOwners.clear()
+    skinEditorBusy=false; skinEditorBusyOwners.clear()
     mascotPending=false; deferredPaletteClose=false; deferredPaletteQuit=false
   })
   // 静默瘦身钩子：最小化/隐藏触发工作集整理 + 渲染层瘦身广播；恢复不做处理（自然回涨）
@@ -230,8 +234,14 @@ app.whenReady().then(async () => {
   ipcMain.on('window:maximize', () => win && toggleMaximize(win))
   ipcMain.on('window:close', () => win?.close())
   ipcMain.handle('window:visibility', event => event.sender === win?.webContents && win.isVisible() && !win.isMinimized())
-  ipcMain.on('window:skinEditorQuit',event=>{if(event.sender===win?.webContents&&!skinEditorDirty&&!skinEditorPrefsPending)app.quit()})
+  ipcMain.on('window:skinEditorQuit',event=>{if(event.sender===win?.webContents&&!skinEditorDirty&&!skinEditorPrefsPending&&!skinEditorBusy)app.quit()})
   ipcMain.on('window:skinEditorDirty',(event,value)=>{if(event.sender===win?.webContents)skinEditorDirty=value===true})
+  ipcMain.on('window:skinEditorBusy',(event,value)=>{
+    if(event.sender!==win?.webContents)return
+    if(!value||typeof value.ownerId!=='string'||!/^[a-zA-Z0-9-]{1,64}$/.test(value.ownerId)||typeof value.pending!=='boolean')return
+    if(value.pending)skinEditorBusyOwners.add(value.ownerId);else skinEditorBusyOwners.delete(value.ownerId)
+    skinEditorBusy=skinEditorBusyOwners.size>0
+  })
   ipcMain.on('window:skinEditorPrefsPending',(event,value)=>{
     if(event.sender!==win?.webContents)return
     if(!value||typeof value.ownerId!=='string'||!/^[a-zA-Z0-9-]{1,64}$/.test(value.ownerId)||typeof value.pending!=='boolean')return
@@ -241,11 +251,11 @@ app.whenReady().then(async () => {
       const close=deferredPaletteClose, quit=deferredPaletteQuit
       deferredPaletteClose=false; deferredPaletteQuit=false
       // An editor removed by navigation has no close subscriber; finish its pending exit here.
-      if(!skinEditorDirty){if(quit)app.quit();else if(close)win?.close()}
+      if(!skinEditorDirty&&!skinEditorBusy){if(quit)app.quit();else if(close)win?.close()}
     }
   })
   ipcMain.on('window:mascotPending',(event,value)=>{if(event.sender===win?.webContents)mascotPending=value===true})
-  ipcMain.on('window:mascotQuit',event=>{if(event.sender===win?.webContents&&!mascotPending&&!skinEditorDirty&&!skinEditorPrefsPending)app.quit()})
+  ipcMain.on('window:mascotQuit',event=>{if(event.sender===win?.webContents&&!mascotPending&&!skinEditorDirty&&!skinEditorPrefsPending&&!skinEditorBusy)app.quit()})
 
   createWindow(startup)
   launcherLogInfo('main', '主窗口创建完成')
@@ -304,7 +314,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', event => {
-  if((skinEditorDirty||skinEditorPrefsPending)&&win&&!win.webContents.isDestroyed()){event.preventDefault();deferredPaletteQuit=skinEditorPrefsPending&&!skinEditorDirty;win.webContents.send('window:skinEditorClose',{quit:true});return}
+  if((skinEditorDirty||skinEditorPrefsPending||skinEditorBusy)&&win&&!win.webContents.isDestroyed()){event.preventDefault();deferredPaletteQuit=skinEditorPrefsPending&&!skinEditorDirty&&!skinEditorBusy;win.webContents.send('window:skinEditorClose',{quit:true});return}
   if(mascotPending&&win&&!win.webContents.isDestroyed()){event.preventDefault();win.webContents.send('window:mascotClose',{quit:true});return}
   // 仅清理联机相关子进程/监听器；不影响 Minecraft 生命周期。
   void stopDirectHost()

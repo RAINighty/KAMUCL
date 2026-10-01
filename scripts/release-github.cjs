@@ -81,6 +81,20 @@ async function api(method, url, token, body, isBinary = false) {
   throw lastErr
 }
 
+async function taggedCommit(token) {
+  const response = await api('GET', `https://api.github.com/repos/${REPO}/git/ref/tags/${tag}`, token)
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(`无法核对远端标签：HTTP ${response.status}`)
+  let object = (await response.json()).object
+  for (let depth = 0; object?.type === 'tag' && depth < 8; depth++) {
+    const annotated = await api('GET', `https://api.github.com/repos/${REPO}/git/tags/${object.sha}`, token)
+    if (!annotated.ok) throw new Error(`无法读取注释标签：HTTP ${annotated.status}`)
+    object = (await annotated.json()).object
+  }
+  if (object?.type !== 'commit') throw new Error('版本标签未指向提交')
+  return object.sha
+}
+
 async function main() {
   const exe = path.join(root, 'release', `KAMUCL-${version}.exe`)
   const zip = path.join(root, 'release', `KAMUCL-${version}-windows-x64.zip`)
@@ -113,19 +127,38 @@ async function main() {
     process.exit(1)
   }
 
+  // Bind both draft creation and publication to the reviewed master commit.
+  // GitHub may otherwise leave a published draft on an untagged-* reference.
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+  const masterResponse = await api('GET', `https://api.github.com/repos/${REPO}/branches/master`, token)
+  if (!masterResponse.ok || (await masterResponse.json()).commit?.sha !== commit) throw new Error('本地 HEAD 尚未同步到 origin/master，停止发布')
+  const existingTag = await taggedCommit(token)
+  if (existingTag && existingTag !== commit) throw new Error('版本标签已指向其他提交，保留远端标签并停止发布')
+  const binding = { tag_name: tag, target_commitish: commit, name: `KAMUCL ${tag}`, body, prerelease: false }
+
   // 已存在同 tag Release 则复用（幂等）
   let release = null
   const existing = await api('GET', `https://api.github.com/repos/${REPO}/releases/tags/${tag}`, token)
   if (existing.ok) {
     release = await existing.json()
     console.log(`Release ${tag} 已存在（id=${release.id}），直接补传资产`)
+  } else if (existing.status === 404) {
+    // The by-tag endpoint does not always expose drafts; recover the exact
+    // draft by id rather than creating a duplicate after an interrupted upload.
+    for (let page = 1; page <= 10 && !release; page++) {
+      const response = await api('GET', `https://api.github.com/repos/${REPO}/releases?per_page=100&page=${page}`, token)
+      if (!response.ok) throw new Error(`无法检查已有草稿：HTTP ${response.status}`)
+      const entries = await response.json()
+      release = entries.find(entry => entry.tag_name === tag) || null
+      if (entries.length < 100) break
+    }
   } else {
+    throw new Error(`无法检查已有 Release：HTTP ${existing.status}`)
+  }
+  if (!release) {
     const res = await api('POST', `https://api.github.com/repos/${REPO}/releases`, token, {
-      tag_name: tag,
-      name: `KAMUCL ${tag}`,
-      body,
+      ...binding,
       draft: true,
-      prerelease: false
     })
     if (!res.ok) {
       console.error(`创建 Release 失败：HTTP ${res.status} ${await res.text()}`)
@@ -138,10 +171,18 @@ async function main() {
   for (const file of [...packages, sumsFile]) {
     const name = path.basename(file)
     // 重传前先删同名人资产（幂等覆盖）
-    const assets = await (await api('GET', `https://api.github.com/repos/${REPO}/releases/${release.id}/assets`, token)).json()
+    const assetResponse = await api('GET', `https://api.github.com/repos/${REPO}/releases/${release.id}/assets`, token)
+    if (!assetResponse.ok) throw new Error(`无法检查远端附件：HTTP ${assetResponse.status}`)
+    const assets = await assetResponse.json()
+    const same = assets.find(a => a.name === name)
+    if (same?.size === fs.statSync(file).size && same.digest === `sha256:${sha256(file)}`) {
+      console.log(`  ✓ ${name} 已存在且摘要一致`)
+      continue
+    }
     for (const a of assets ?? []) {
       if (a.name === name) {
-        await api('DELETE', `https://api.github.com/repos/${REPO}/releases/assets/${a.id}`, token)
+        const removed = await api('DELETE', `https://api.github.com/repos/${REPO}/releases/assets/${a.id}`, token)
+        if (!removed.ok) throw new Error(`无法替换附件 ${name}：HTTP ${removed.status}`)
       }
     }
     console.log(`上传 ${name}（${(fs.statSync(file).size / 1048576).toFixed(1)} MB）…`)
@@ -161,10 +202,13 @@ async function main() {
       throw new Error('远端附件大小或 SHA256 不匹配：' + path.basename(file))
     }
   }
-  if (release.draft) {
-    const published = await api('PATCH', `https://api.github.com/repos/${REPO}/releases/${release.id}`, token, { draft: false })
-    if (!published.ok) throw new Error(`公开 Release 失败：HTTP ${published.status}`)
-  }
+  const published = await api('PATCH', `https://api.github.com/repos/${REPO}/releases/${release.id}`, token, { ...binding, draft: false })
+  if (!published.ok) throw new Error(`公开 Release 失败：HTTP ${published.status}`)
+  const publicResponse = await api('GET', `https://api.github.com/repos/${REPO}/releases/tags/${tag}`, token)
+  if (!publicResponse.ok) throw new Error(`公开标签无法读取：HTTP ${publicResponse.status}`)
+  const publicRelease = await publicResponse.json()
+  if (publicRelease.id !== release.id || publicRelease.draft || publicRelease.tag_name !== tag || publicRelease.target_commitish !== commit) throw new Error('公开 Release 与已验证标签或 master 提交不一致')
+  if (await taggedCommit(token) !== commit) throw new Error('公开版本标签未指向已验证 master 提交')
   console.log(`\n全部附件大小与 SHA256 已核对，发布完成：https://github.com/${REPO}/releases/tag/${tag}`)
 }
 

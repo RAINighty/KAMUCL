@@ -2,8 +2,8 @@ import { app, ipcMain } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { CommunityFile, InstallOptions, LoaderName } from '../../shared/types'
-import { favoriteKey, type ModFavorite } from '../../shared/modFavorites'
-import { communityFiles,withCommunitySignal } from './community'
+import { favoriteKey, linkFavoriteRecords, removeFavoriteRecords, type ModFavorite } from '../../shared/modFavorites'
+import { communityFiles, communityModProject, withCommunitySignal } from './community'
 import { modCatalog, identify } from './modManagement'
 import { resolveResourceDirectory } from './resourceDirectory'
 import { modIdentity, rememberModIdentity } from './modState'
@@ -35,6 +35,12 @@ export async function prepareInstallMods(mc:string,opts:InstallOptions,signal?:A
 export function registerModFavoritesIpc(){
   ipcMain.handle('mods:favorites',()=>modFavorites())
   ipcMain.handle('mods:favorite',(_e,value,on)=>setFavorite(value,on===true))
+  ipcMain.handle('mods:favoriteRemove',(_e,keys)=>write(removeFavoriteRecords(modFavorites(),keys)))
+  ipcMain.handle('mods:favoriteLink',async(_e,key,source,projectId)=>{
+    if(typeof key!=='string'||!modFavorites().some(f=>f.key===key))throw new Error('该收藏已被取消，请刷新列表')
+    const project=await communityModProject(source,projectId)
+    return write(linkFavoriteRecords(modFavorites(),key,project))
+  })
   ipcMain.handle('mods:favoriteVersions',(_e,s,p,mc,l)=>favoriteVersions(s,p,mc,l))
   ipcMain.handle('mods:favoriteLocal',async(_e,version,folder,name,on,link)=>{
     const dir=await resolveResourceDirectory(folder,version,'mods'),mods=await modCatalog(version,folder),mod=mods.find(m=>m.fileName===name)

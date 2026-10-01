@@ -2,7 +2,8 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{spawn,execFileSync}=require('node:child_process')
 const appPath=path.resolve(process.argv[2]),arch=process.argv[3],version=require('../package.json').version
 assert.equal(process.platform,'darwin');assert.equal(process.arch,arch)
-const exe=path.join(appPath,'Contents/MacOS/KAMUCL'),proof=path.resolve(`release/mac-proof-${arch}`)
+const stage=process.argv[4]||(appPath.split(path.sep).includes('dmg-mount')?'dmg':'app');assert(['app','dmg'].includes(stage),'proof stage must be app or dmg')
+const exe=path.join(appPath,'Contents/MacOS/KAMUCL'),proof=path.resolve(`release/mac-proof-${arch}-${stage}`)
 fs.mkdirSync(proof,{recursive:true})
 const binary=execFileSync('file',[exe],{encoding:'utf8'});assert(binary.includes(arch==='x64'?'x86_64':'arm64'))
 const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
@@ -119,7 +120,7 @@ async function main(){
    assert(nativeMaterial.difference>2,'native macOS window still opaque over changing desktop background')
  }
  await call('Runtime.evaluate',{expression:`window.kamucl.invoke('settings:set',{theme:'transparent'})`,awaitPromise:true})
- fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,binary,mainUI:true,macUI,skin:{facePixels,shirtPixels,capture:skinCapture},nativeMaterial,url:page.url},null,2));ws.close()
+ fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,stage,binary,mainUI:true,macUI,skin:{facePixels,shirtPixels,capture:skinCapture},nativeMaterial,url:page.url},null,2));ws.close()
  console.log('PASS native macOS '+arch+' packaged app '+version)
 }
 main().finally(async()=>{
@@ -129,15 +130,18 @@ main().finally(async()=>{
  // The existing native workflow calls this script for both the APP and mounted DMG.
  // Keep the common-feature checks here so they cannot be omitted by a workflow step.
  const extensionProof=path.join(proof,'extensions');fs.mkdirSync(extensionProof,{recursive:true})
- const proofNames=['extension-ui-black-orange.json','skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json','mascot-header-layout-live.json','mascot-header-visibility-live.json','mascot-header-persistence-live.json','gallery-favorites-motion-live.json','mascot-slap-117.wav','mascot-sweep-117.webm'],shots='release/ui-refinement-black-orange'
+ const requiredProofs=['extension-ui-black-orange.json','skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json','skin-editor-ui-black-orange.json','gallery-favorites-118-ui-black-orange.json']
+ const proofNames=[...requiredProofs,'mascot-header-layout-live.json','mascot-header-visibility-live.json','mascot-header-persistence-live.json','mascot-header-overlap-live.json','mascot-header-screencast-live.json','gallery-favorites-motion-live.json','mascot-slap-117.wav','mascot-sweep-117.webm','mascot-slap-118.wav','mascot-sweep-118.webm','mascot-motion-118.webm'],shots='release/ui-refinement-black-orange'
  const attemptStarted=Date.now(),fresh=file=>fs.existsSync(file)&&fs.statSync(file).mtimeMs>=attemptStarted
  let extensionError,complete=false
  try{
   execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{
    env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_TEST_THEME:'black-orange'},
-   stdio:'inherit',timeout:300000
+   stdio:'inherit',timeout:480000
   })
-  for(const name of proofNames.slice(0,4))assert(fresh(path.join('out',name)),'successful GUI run is missing current proof '+name)
+  for(const name of requiredProofs){const file=path.join('out',name);assert(fresh(file),'successful GUI run is missing current proof '+name);const result=JSON.parse(fs.readFileSync(file));assert.equal(result.version,version,'GUI proof must match this build: '+name);if('complete' in result)assert.equal(result.complete,true,'GUI proof must be complete: '+name)}
+  const frameManifest=path.join('out','mascot-118-frames-black-orange','frames.json');assert(fresh(frameManifest),'successful GUI run is missing current compositor frame manifest');assert.equal(JSON.parse(fs.readFileSync(frameManifest)).version,version,'compositor frames must match this build')
+  const recordingManifest=path.join('out','mascot-118-leader-screencast-black-orange','recording.json');assert(fresh(recordingManifest),'successful GUI run is missing current actual screencast');const recording=JSON.parse(fs.readFileSync(recordingManifest));assert.equal(recording.version,version);assert(recording.fps>=30,'actual recorded compositor rate is below 30 fps')
   complete=true
  }catch(error){extensionError=String(error);throw error}
  finally{
@@ -145,8 +149,12 @@ main().finally(async()=>{
   // screenshots in the uploaded artifact, not only in the ephemeral runner.
   const copied=[]
   for(const name of proofNames)if(fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name==='extension-ui-black-orange.json'?'results.json':name));copied.push(name)}
+  const frames=path.join('out','mascot-118-frames-black-orange'),frameProof=path.join(extensionProof,'mascot-118-frames-black-orange')
+  if(fs.existsSync(frames))for(const name of fs.readdirSync(frames))if((name==='frames.json'||/^frame-\d+\.png$/.test(name))&&fresh(path.join(frames,name))){fs.mkdirSync(frameProof,{recursive:true});fs.copyFileSync(path.join(frames,name),path.join(frameProof,name));copied.push('mascot-118-frames-black-orange/'+name)}
+  const recording=path.join('out','mascot-118-leader-screencast-black-orange'),recordingProof=path.join(extensionProof,'mascot-118-leader-screencast-black-orange')
+  if(fs.existsSync(recording))for(const name of fs.readdirSync(recording))if((name==='recording.json'||/^frame-\d+\.jpg$/.test(name))&&fresh(path.join(recording,name))){fs.mkdirSync(recordingProof,{recursive:true});fs.copyFileSync(path.join(recording,name),path.join(recordingProof,name));copied.push('mascot-118-leader-screencast-black-orange/'+name)}
   if(fs.existsSync(shots))for(const name of fs.readdirSync(shots))if(name.startsWith('extension-')&&name.endsWith('.png')&&fresh(path.join(shots,name))){fs.copyFileSync(path.join(shots,name),path.join(extensionProof,name));copied.push(name)}
-  fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({complete,error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
+  fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
  }
  console.log('PASS native macOS '+arch+' extension GUI '+version)
 }).catch(e=>{console.error(e);process.exitCode=1})

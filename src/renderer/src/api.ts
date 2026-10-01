@@ -9,6 +9,7 @@ import type {
   Account,
   CommunityFile,
   CommunityKind,
+  CommunityModProject,
   CommunityQuery,
   CommunitySearchPage,
   CommunitySource,
@@ -200,6 +201,9 @@ export const importWorld = (inputPath: string, options: WorldImportOptions) =>
 /** 搜索 Modrinth / CurseForge 社区资源 */
 export const communitySearch = (q: CommunityQuery) =>
   invoke<CommunitySearchPage>(IPC.communitySearch, q)
+/** Read verified MOD metadata independently of downloadable file versions. */
+export const communityProject = (source: CommunitySource, projectId: string) =>
+  invoke<CommunityModProject>(IPC.communityProject, source, projectId, 'mod')
 /** 项目文件版本列表（可按 mc 版本/加载器过滤） */
 export const communityFiles = (
   source: CommunitySource,

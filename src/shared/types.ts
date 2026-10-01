@@ -875,6 +875,7 @@ export const IPC = {
 
   // 社区资源
   communitySearch: 'community:search', // (q: CommunityQuery) => CommunitySearchPage
+  communityProject: 'community:project', // (source, projectId, kind: 'mod') => CommunityModProject  校验来源与项目类型
   communityFiles: 'community:files', // (source: 'modrinth'|'curseforge', projectId: string) => CommunityFile[]
   communityDownload: 'community:download', // (file: CommunityFile, target: { versionId: string; kind: CommunityKind }) => string  同步下载完成返回保存路径；kind=modpack 时下载后自动进入整合包安装流程
 
@@ -972,6 +973,20 @@ export interface CommunityResult {
   downloads: number
   updatedAt: string
   categories: string[]
+}
+
+/** An identity can open download/metadata without inventing absent search metrics. */
+export type CommunityProjectReference = Pick<CommunityResult, 'source' | 'projectId' | 'title'> & Partial<Pick<CommunityResult, 'slug' | 'originalTitle'>>
+export interface CommunityModProject extends CommunityProjectReference {
+  kind: 'mod'
+  description?: string
+  author?: string
+  license?: string
+  categories: string[]
+  downloads?: number
+  followers?: number
+  updatedAt?: string
+  webpage?: string
 }
 
 export interface DefaultResourcePack { id: string; name: string; size: number; enabled: boolean }

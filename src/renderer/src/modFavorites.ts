@@ -4,6 +4,13 @@ import { errText } from './api'
 import { toast } from './store'
 export const favorites = ref<ModFavorite[]>([])
 export const favoriteBusy = ref(new Set<string>())
+/** Keep exact rejection text beside the affected controls, including inside dialogs. */
+export const favoriteErrors = ref(new Map<string, string>())
+export function clearFavoriteErrors(keys: string[]): void {
+  const next = new Map(favoriteErrors.value)
+  for (const key of keys) next.delete(key)
+  favoriteErrors.value = next
+}
 let writeQueue: Promise<unknown> = Promise.resolve()
 let readGeneration = 0
 let writeGeneration = 0
@@ -25,9 +32,11 @@ export async function loadFavorites(propagateError = false): Promise<void> {
 }
 
 /** Every page writes through one queue; different projects cannot overwrite each other's snapshots. */
-async function mutateFavorite(key: string, request: () => Promise<ModFavorite[]>): Promise<boolean> {
-  if (favoriteBusy.value.has(key)) return false
-  favoriteBusy.value = new Set([...favoriteBusy.value, key])
+async function mutateFavorite(key: string | string[], request: () => Promise<ModFavorite[]>): Promise<boolean> {
+  const keys = [...new Set(Array.isArray(key) ? key : [key])]
+  if (!keys.length || keys.some(value => favoriteBusy.value.has(value))) return false
+  clearFavoriteErrors(keys)
+  favoriteBusy.value = new Set([...favoriteBusy.value, ...keys])
   const initialRead = activeRead
   const job = writeQueue.then(async () => {
     const loaded = await initialRead?.catch(() => undefined)
@@ -38,8 +47,13 @@ async function mutateFavorite(key: string, request: () => Promise<ModFavorite[]>
     return true
   })
   writeQueue = job.catch(() => {})
-  try { return await job } catch (e) { toast(errText(e), 'error'); return false }
-  finally { const next = new Set(favoriteBusy.value); next.delete(key); favoriteBusy.value = next }
+  try { return await job } catch (e) {
+    const message = errText(e), errors = new Map(favoriteErrors.value)
+    for (const key of keys) errors.set(key, message)
+    favoriteErrors.value = errors
+    toast(message, 'error'); return false
+  }
+  finally { const next = new Set(favoriteBusy.value); for (const value of keys) next.delete(value); favoriteBusy.value = next }
 }
 
 export function toggleProject(source: string, projectId: string, name: string): Promise<boolean> {
@@ -48,5 +62,18 @@ export function toggleProject(source: string, projectId: string, name: string): 
 }
 
 export function setLocalFavorite(key: string, version: string, folder: string, name: string, enabled: boolean, link?: {source: string; projectId: string}): Promise<boolean> {
-  return mutateFavorite(key, () => window.kamucl.invoke('mods:favoriteLocal', version, folder, name, enabled, link) as Promise<ModFavorite[]>)
+  const safeLink = link ? { source: link.source, projectId: link.projectId } : undefined
+  return mutateFavorite(key, () => window.kamucl.invoke('mods:favoriteLocal', version, folder, name, enabled, safeLink) as Promise<ModFavorite[]>)
+}
+
+export function removeFavorites(keys: string[]): Promise<boolean> {
+  // A ref/reactive array is a Proxy, which Electron cannot structured-clone.
+  // Snapshot plain primitive keys before enqueueing; later selection edits must
+  // not alter either the busy guards or the request eventually sent to main.
+  const safeKeys = [...new Set(keys)]
+  return mutateFavorite(safeKeys, () => window.kamucl.invoke('mods:favoriteRemove', safeKeys) as Promise<ModFavorite[]>)
+}
+
+export function linkFavorite(key: string, source: string, projectId: string): Promise<boolean> {
+  return mutateFavorite([key, source + ':' + projectId], () => window.kamucl.invoke('mods:favoriteLink', key, source, projectId) as Promise<ModFavorite[]>)
 }

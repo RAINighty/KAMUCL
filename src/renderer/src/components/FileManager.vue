@@ -15,11 +15,6 @@ import ConfirmModal from './ConfirmModal.vue'
 import DupCleanModal from './DupCleanModal.vue'
 import SelectMenu from './SelectMenu.vue'
 import type { FsEntry, ModUpdateReport } from '@shared/types'
-import { favorites, loadFavorites, setLocalFavorite } from '../modFavorites'
-const onlyFavorites=ref(false),favoriteBusy=ref(''),linkFile=ref(''),linkSource=ref('modrinth'),linkProject=ref('')
-function localFavorite(name:string){const m=catalog.value[name];return favorites.value.some(f=>f.key===m?.identity || (!!m?.sha1&&f.sha1===m.sha1))}
-async function toggleFavorite(name:string,link=false){const v=currentVersion.value;if(!v||favoriteBusy.value)return;favoriteBusy.value=name;try{const changed=await setLocalFavorite(catalog.value[name]?.identity||catalog.value[name]?.sha1||name,v.id,v.folder||activeFolder.value,name,link||!localFavorite(name),link?{source:linkSource.value,projectId:linkProject.value.trim()}:undefined);if(changed){linkFile.value='';await loadCatalog(loadGeneration)}}catch(e){toast(errText(e),'error')}finally{favoriteBusy.value=''}}
-onMounted(()=>void loadFavorites())
 
 function dragResource(event: DragEvent, entry: FsEntry) {
   event.preventDefault(); event.stopPropagation()
@@ -137,7 +132,7 @@ const localSearch=ref(''),modFilter=ref('all'),sortBy=ref('name'),catalog=ref<Re
 const keyword = computed(() => (localSearch.value||store.searchKeyword).trim().toLowerCase())
 const filtered = computed(() => {
  const rows=entries.value.filter(e=>(!keyword.value||(e.name+' '+(catalog.value[e.name]?.name||'')).toLowerCase().includes(keyword.value))&&(props.rel!=='mods'||modFilter.value==='all'||modFilter.value==='enabled'&&/\.jar$/i.test(e.name)||modFilter.value==='disabled'&&/\.jar\.disabled$/i.test(e.name)||modFilter.value==='locked'&&catalog.value[e.name]?.locked))
- return rows.filter(e=>!onlyFavorites.value||props.rel!=='mods'||localFavorite(e.name)).sort((a,b)=>sortBy.value==='date'?b.mtime-a.mtime:sortBy.value==='size'?b.size-a.size:a.name.localeCompare(b.name,'zh-CN',{numeric:true}))
+ return rows.sort((a,b)=>sortBy.value==='date'?b.mtime-a.mtime:sortBy.value==='size'?b.size-a.size:a.name.localeCompare(b.name,'zh-CN',{numeric:true}))
 })
 async function loadCatalog(generation:number){if(props.rel!=='mods')return;const v=currentVersion.value;if(!v)return;try{const list=await window.kamucl.invoke('mods:catalog',v.id,v.folder||activeFolder.value) as ManagedMod[];if(generation===loadGeneration){catalog.value=Object.fromEntries(list.map(m=>[m.fileName,m]));catalogError.value=''}}catch(e){if(generation===loadGeneration){catalog.value={};catalogError.value=errText(e)}}}
 function selectMod(name:string,checked:boolean){const s=new Set(selection.value);checked?s.add(name):s.delete(name);selection.value=s}
@@ -335,8 +330,6 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
 
 <template>
   <div class="page file-manager" :data-resource="props.rel" :class="{ 'resource-page': props.rel !== 'mods' }">
-    <label v-if="props.rel==='mods'" class="muted"><input v-model="onlyFavorites" type="checkbox">只看收藏</label>
-    <Teleport to="body"><div v-if="linkFile" class="modal-mask"><section class="modal" role="dialog" aria-modal="true" aria-label="关联收藏模组" style="padding:24px;width:min(480px,90vw)"><h3>关联来源项目</h3><p class="muted">{{linkFile}} · 填写来源项目 ID，关联后可查询兼容版本。</p><SelectMenu v-model="linkSource" :options="[{value:'modrinth',label:'Modrinth'},{value:'curseforge',label:'CurseForge'}]"/><input v-model="linkProject" placeholder="项目 ID" aria-label="来源项目 ID" style="width:100%;margin:16px 0"><button class="btn btn-gold" :disabled="!linkProject.trim()||!!favoriteBusy" @click="toggleFavorite(linkFile,true)">关联并收藏</button><button class="btn btn-ghost" :disabled="!!favoriteBusy" @click="linkFile=''">取消</button></section></div></Teleport>
     <header class="fm-head">
       <div data-ui="FileManager:9ace27a3aaa9" class="page-head fm-head-left"><h1 data-ui="FileManager:72e6bc71f100" class="page-title">{{ props.title }} <small v-if="currentVersion && !loading">{{ resourceCount }}</small></h1></div>
       <div data-ui="FileManager:7a94152a1114" class="fm-actions">
@@ -445,7 +438,7 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
               <path d="M14 2v6h6" />
             </svg>
           </span>
-          <span data-ui="FileManager:8c8c91106eaa" class="fm-name" tabindex="0" :title="e.name + ' · 按住拖到桌面或文件夹'" :draggable="!store.editMode && !batchBusy && !loading" @dragstart="dragResource($event, e)"><button v-if="isModEntry(e)" class="btn btn-ghost btn-sm" :aria-label="(localFavorite(e.name)?'取消收藏 ':'收藏 ')+e.name" :disabled="!!favoriteBusy" @click.stop="toggleFavorite(e.name)">{{localFavorite(e.name)?'★':'☆'}}</button>{{ readableName(e) }}<small data-ui="FileManager:a0d9b4c442aa" v-if="readableName(e)!==e.name" class="fm-internal">{{e.name}}</small><small v-else-if="catalog[e.name]?.name && catalog[e.name].name!==e.name" class="fm-internal">{{catalog[e.name].name}}</small><small v-if="isDisabledMod(e)||catalog[e.name]?.locked" class="fm-internal">{{ [isDisabledMod(e)?'已禁用':'',catalog[e.name]?.locked?'已锁定':''].filter(Boolean).join(' · ') }}</small><button v-if="localFavorite(e.name)&&catalog[e.name]?.identity?.startsWith('sha1:')" class="btn btn-ghost btn-sm" @click.stop="linkFile=e.name;linkProject=''">来源未关联 · 关联项目</button></span>
+          <span data-ui="FileManager:8c8c91106eaa" class="fm-name" tabindex="0" :title="e.name + ' · 按住拖到桌面或文件夹'" :draggable="!store.editMode && !batchBusy && !loading" @dragstart="dragResource($event, e)">{{ readableName(e) }}<small data-ui="FileManager:a0d9b4c442aa" v-if="readableName(e)!==e.name" class="fm-internal">{{e.name}}</small><small v-else-if="catalog[e.name]?.name && catalog[e.name].name!==e.name" class="fm-internal">{{catalog[e.name].name}}</small><small v-if="isDisabledMod(e)||catalog[e.name]?.locked" class="fm-internal">{{ [isDisabledMod(e)?'已禁用':'',catalog[e.name]?.locked?'已锁定':''].filter(Boolean).join(' · ') }}</small></span>
 
           <span data-ui="FileManager:558cc8ea9415" class="muted fm-meta">{{ e.isDir ? '文件夹' : fmtSize(e.size) }}</span>
           <span data-ui="FileManager:bf6ae194335f" class="muted fm-meta fm-date">{{ fmtDate(e.mtime) }}</span>

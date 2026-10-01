@@ -9,11 +9,14 @@ import { mcmodSearchUrl } from '@shared/communityLinks'
 import SelectMenu from '../components/SelectMenu.vue'
 import MarqueeText from '../components/MarqueeText.vue'
 import ModInstallDialog from '../components/ModInstallDialog.vue'
+import CommunityFavorites from '../components/CommunityFavorites.vue'
+import CommunityModDetails from '../components/CommunityModDetails.vue'
 import { favorites, favoriteBusy, loadFavorites, toggleProject } from '../modFavorites'
 onMounted(()=>void loadFavorites())
 import type {
   CommunityFile,
   CommunityKind,
+  CommunityProjectReference,
   CommunityResult,
   CommunitySource,
   LoaderName
@@ -31,13 +34,13 @@ const CF_KIND_SEGMENT: Record<CommunityKind, string> = {
 }
 
 /** 资源的源站网页链接（Modrinth/CurseForge） */
-function sourceUrl(r: CommunityResult): string {
+function sourceUrl(r: CommunityProjectReference, kind: CommunityKind = query.kind): string {
   if (r.source === 'modrinth') return `https://modrinth.com/project/${r.slug || r.projectId}`
-  return `https://www.curseforge.com/minecraft/${CF_KIND_SEGMENT[query.kind] ?? 'mc-mods'}/${r.slug || r.projectId}`
+  return `https://www.curseforge.com/minecraft/${CF_KIND_SEGMENT[kind] ?? 'mc-mods'}/${r.slug || r.projectId}`
 }
 
-function openMcmod(item: CommunityResult) {
-  const url = mcmodSearchUrl(item)
+function openMcmod(item: CommunityProjectReference) {
+  const url = mcmodSearchUrl({ ...item, slug: item.slug ?? '' })
   if (url) openExternal(url)
   else toast('该项目没有可用于检索的英文名称', 'error')
 }
@@ -48,6 +51,16 @@ function openExternal(url: string) {
 const currentInstance = selectedInstance
 const allTargets = ref<InstalledVersion[]>([])
 const modRequest = ref<{ target: InstalledVersion; input: { file: CommunityFile } } | null>(null)
+const detailProject = ref<CommunityProjectReference | null>(null)
+const communityTab = ref<'browse' | 'favorites'>('browse')
+const favoriteSearch = ref('')
+watch(communityTab, tab => { if (tab === 'browse') void nextTick(updateKindBlob) })
+function sectionKeyboard(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  communityTab.value = event.key === 'Home' ? 'browse' : event.key === 'End' ? 'favorites' : communityTab.value === 'browse' ? 'favorites' : 'browse'
+  void nextTick(() => document.querySelector<HTMLElement>(`[data-ui="community:${communityTab.value}"]`)?.focus())
+}
 
 // ---------------- 搜索条件 ----------------
 const PAGE_SIZE = 20
@@ -255,7 +268,7 @@ let moreObserver: IntersectionObserver | null = null
 onMounted(() => {
   moreObserver = new IntersectionObserver(
     (entries) => {
-      if (!usesPagination.value && entries.some((e) => e.isIntersecting) && hasMore.value && !loading.value && !loadingMore.value) {
+      if (communityTab.value === 'browse' && !usesPagination.value && entries.some((e) => e.isIntersecting) && hasMore.value && !loading.value && !loadingMore.value) {
         onLoadMore()
       }
     },
@@ -288,7 +301,7 @@ function useInstance(id: string) {
 
 /** 切换条件后自动重新搜索 */
 function onFilterChange() {
-  void doSearch(true)
+  if (communityTab.value === 'browse') void doSearch(true)
 }
 
 function onReset() {
@@ -311,8 +324,8 @@ watch(
   (kw) => {
     if (topSearchTimer) clearTimeout(topSearchTimer)
     topSearchTimer = setTimeout(() => {
-      query.keyword = kw.trim()
-      void doSearch(true)
+      if (communityTab.value === 'favorites') favoriteSearch.value = kw.trim()
+      else { query.keyword = kw.trim(); void doSearch(true) }
     }, 400)
   }
 )
@@ -320,7 +333,7 @@ watch(
 // ---------------- 列表展示 ----------------
 /** 图标加载失败的项目（显示首字母占位） */
 const brokenIcons = ref(new Set<string>())
-const itemKey = (r: CommunityResult) => `${r.source}:${r.projectId}`
+const itemKey = (r: CommunityProjectReference) => `${r.source}:${r.projectId}`
 const onIconError = (r: CommunityResult) => {
   brokenIcons.value = new Set([...brokenIcons.value, itemKey(r)])
 }
@@ -356,7 +369,7 @@ const releaseText: Record<CommunityFile['releaseType'], string> = {
 // ---------------- 下载模态框 ----------------
 const modal = reactive({
   open: false,
-  item: null as CommunityResult | null,
+  item: null as CommunityProjectReference | null,
   kind: 'mod' as CommunityKind,
   files: [] as CommunityFile[],
   loadingFiles: false,
@@ -379,7 +392,7 @@ watch(targetOptions, options => {
     modal.versionId = selected ? instanceKey(selected) : ''
   }
 })
-let fileGeneration = 0
+let fileGeneration = 0, openGeneration = 0
 async function loadFiles() {
   if (!modal.item) return
   const generation = ++fileGeneration, item = modal.item
@@ -394,27 +407,30 @@ async function loadFiles() {
   finally { if (generation === fileGeneration) modal.loadingFiles = false }
 }
 
-async function openDownload(item: CommunityResult) {
+async function openDownload(item: CommunityProjectReference, kind: CommunityKind = query.kind) {
+  const generation = ++openGeneration
+  fileGeneration++
   modal.open = true
   modal.item = item
-  modal.kind = query.kind
+  modal.kind = kind
   modal.files = []
   modal.loadingFiles = true
   modal.filesError = ''
   modal.fileId = ''
   modal.versionId = currentInstance.value ? instanceKey(currentInstance.value) : ''
   modal.mcVersion = query.mcVersion
-  modal.loader = supportsLoader.value ? query.loader : ''
+  modal.loader = usesCommunityLoader(kind) ? query.loader : ''
   modal.downloading = false
   try {
     const scanned = await getModTargets()
+    if (generation !== openGeneration || !modal.open) return
     allTargets.value = scanned.versions
     if (scanned.errors.length) toast('部分目录扫描失败：' + scanned.errors.join('；'), 'error')
     await loadFiles()
   } catch (e) {
-    modal.filesError = '获取文件列表失败：' + errText(e)
+    if (generation === openGeneration) modal.filesError = '获取文件列表失败：' + errText(e)
   } finally {
-    modal.loadingFiles = false
+    if (generation === openGeneration) modal.loadingFiles = false
   }
 }
 
@@ -465,11 +481,15 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
       <p data-ui="CommunityView:8ea54e89551b" class="page-sub">搜索并下载 Modrinth / CurseForge 上的 Mod、整合包、资源包、光影与数据包</p>
     </div>
 
+    <div class="community-sections" role="tablist" aria-label="社区资源分区" @keydown="sectionKeyboard"><button class="community-section" role="tab" data-ui="community:browse" :tabindex="communityTab === 'browse' ? 0 : -1" :aria-selected="communityTab === 'browse'" :class="{ active: communityTab === 'browse' }" @click="communityTab = 'browse'">找资源</button><button class="community-section" role="tab" data-ui="community:favorites" :tabindex="communityTab === 'favorites' ? 0 : -1" :aria-selected="communityTab === 'favorites'" :class="{ active: communityTab === 'favorites' }" @click="communityTab = 'favorites'">已收藏 MOD <span>{{ favorites.length }}</span></button></div>
+
       <div data-ui="CommunityView:f7acd66aeb10" class="filter-row instance-row">
         <label data-ui="CommunityView:34312978e030" class="instance-label">选择版本</label>
         <SelectMenu v-if="store.installed.length" class="filter-select instance-filter" aria-label="选择版本" :model-value="currentInstance ? instanceKey(currentInstance) : ''" placeholder="选择实例…" :options="store.installed.filter(x => !x.failed && !x.incomplete).map(v => ({value:instanceKey(v),label:versionLabel(v),description:[v.mcVersion,v.loader,v.folder].filter(Boolean).join(' · ')}))" @change="useInstance" />
         <button data-ui="CommunityView:49df26abb0c5" class="btn btn-ghost btn-sm" @click="useCurrentInstance">使用当前实例</button>
       </div>
+    <CommunityFavorites v-if="communityTab === 'favorites'" :keyword="favoriteSearch" @download="openDownload($event, 'mod')" @details="detailProject = $event" @browse="communityTab = 'browse'; query.kind = 'mod'; onFilterChange()" />
+    <template v-else>
     <!-- 搜索卡片 -->
     <div data-ui="CommunityView:5551ade589f2" class="card search-card">
       <div data-ui="CommunityView:cc7ad8d814fc" class="kind-capsules" ref="kindCapsules">
@@ -639,6 +659,7 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
       </nav>
     </div>
 
+    </template>
     <!-- 下载模态框 -->
     <Teleport to="body">
       <div data-ui="CommunityView:ef88acc39749" v-if="modal.open" class="modal-mask" @pointerdown.self="!modal.downloading && (modal.open = false)">
@@ -646,7 +667,7 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
           <h3 data-ui="CommunityView:7b81ed690844" class="modal-title"><MarqueeText :text="'下载 ' + modal.item?.title"/></h3>
           <div data-ui="CommunityView:a84b1e456827" v-if="modal.item" class="modal-links">
             <button v-if="modal.kind==='mod'" class="btn btn-ghost btn-sm" :disabled="favoriteBusy.has(itemKey(modal.item))" :aria-pressed="favorites.some(f=>f.key===itemKey(modal.item!))" @click="toggleProject(modal.item.source,modal.item.projectId,modal.item.title)">{{favorites.some(f=>f.key===modal.item!.source+':'+modal.item!.projectId)?'★ 已收藏':'☆ 收藏模组'}}</button>
-            <button data-ui="CommunityView:6fabba70cd3a" class="btn btn-ghost btn-sm" @click="openExternal(sourceUrl(modal.item))">
+            <button data-ui="CommunityView:6fabba70cd3a" class="btn btn-ghost btn-sm" @click="openExternal(sourceUrl(modal.item, modal.kind))">
               {{ modal.item.source === 'modrinth' ? 'Modrinth 源页面' : 'CurseForge 源页面' }}
             </button>
             <button data-ui="CommunityView:03eb0c52ad3e" class="btn btn-ghost btn-sm" @click="openMcmod(modal.item)">
@@ -705,10 +726,16 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
       </div>
     </Teleport>
     <ModInstallDialog v-if="modRequest" :target="modRequest.target" :input="modRequest.input" @close="modRequest = null" @installed="modRequest = null; modal.open = false"/>
+    <CommunityModDetails v-if="detailProject" :reference="detailProject" @close="detailProject = null" @download="detailProject = null; openDownload($event, 'mod')" />
   </div>
 </template>
 
 <style scoped>
+.community-sections { display:flex;align-items:center;gap:6px;padding:4px;background:var(--card-2);border:1px solid var(--border);border-radius:var(--radius-md);align-self:flex-start; }
+.community-section { display:flex;align-items:center;justify-content:center;gap:8px;min-height:36px;border:0;border-radius:var(--radius-sm);padding:0 16px;background:transparent;color:var(--text-dim);font:inherit;font-size:13px;cursor:pointer;transition:background 160ms,color 160ms; }
+.community-section.active { background:var(--accent-soft);color:var(--accent-2);font-weight:600; }
+.community-section span { display:grid;place-items:center;min-width:20px;height:20px;padding:0 5px;background:var(--card);border-radius:6px;font-size:11px;font-variant-numeric:tabular-nums; }
+.community-section:focus-visible { outline:2px solid var(--accent);outline-offset:2px; }
 .instance-row { align-items: baseline; }
 .instance-label { align-self: baseline; line-height: 1.4; white-space: nowrap; }
 .page {

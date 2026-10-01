@@ -2,7 +2,8 @@
 /** 图一固定布局下的个性化背景与启动卡图片管理。 */
 import { builtInLaunchImages } from '../launchImages'
 import ConfirmModal from './ConfirmModal.vue'
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, nextTick, ref, onMounted, onUnmounted } from 'vue'
+import { reorderGallery } from '@shared/galleryOrder'
 import { carouselImages, carouselKeys, activeCarouselKeys, carouselDuration, MAX_CAROUSEL_IMAGES } from '@shared/appearancePolicy'
 import { updateSettings } from '../settingsUpdates'
 import {
@@ -54,6 +55,9 @@ const activeSlides = computed(() => new Set(activeCarouselKeys(store.settings?.l
 const removeThumbnail = ref<string | null>(null)
 const removingThumbnail = ref(false)
 const brokenThumbnailPreviews = ref(new Set<string>())
+const draggingImage = ref('')
+const dropImage = ref('')
+const reorderAnnouncement = ref('')
 function setSlidesEnabled(keys: string[], enabled: boolean) {
   if (!store.settings) return
   const disabled = new Set(store.settings.launchThumbnail.disabled ?? [])
@@ -75,8 +79,33 @@ function moveImage(index: number, direction: number) {
   const next = slides.value.map(image => image.key)
   const target = index + direction
   if (target < 0 || target >= next.length) return
-  ;[next[index], next[target]] = [next[target], next[index]]
-  save({ launchThumbnail: { ...store.settings.launchThumbnail, order: next } })
+  reorderImage(next[index], next[target])
+}
+function reorderImage(from: string, to: string) {
+  if (!store.settings || from === to) return
+  const keys = slides.value.map(image => image.key)
+  if (!keys.includes(from) || !keys.includes(to)) return
+  const order = reorderGallery(keys, from, to)
+  save({ launchThumbnail: { ...store.settings.launchThumbnail, order } })
+  reorderAnnouncement.value = `${slides.value.find(image => image.key === from)?.title}已移到第 ${order.indexOf(from) + 1} 位`
+}
+function startImageDrag(event: DragEvent, key: string) {
+  draggingImage.value = key
+  if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-kamucl-gallery', key) }
+}
+function dropImageDrag(event: DragEvent, key: string) {
+  const from = draggingImage.value
+  if (from && event.dataTransfer?.getData('application/x-kamucl-gallery') === from) reorderImage(from, key)
+  draggingImage.value = ''; dropImage.value = ''
+}
+function reorderImageKeyboard(event: KeyboardEvent, key: string) {
+  const keys = slides.value.map(image => image.key), index = keys.indexOf(key)
+  const target = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : event.key === 'Home' ? 0 : event.key === 'End' ? keys.length - 1 : -1
+  if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  if (target < 0 || target >= keys.length) return
+  reorderImage(key, keys[target])
+  void nextTick(() => [...document.querySelectorAll<HTMLElement>('.carousel-drag-handle')].find(handle => handle.dataset.key === key)?.focus())
 }
 function setDuration(value: string, image?: string) {
   if (!store.settings) return
@@ -330,14 +359,14 @@ function setLaunchFit(fit: ImageFit) {
   </div></details>
 
   <!-- 首页启动卡全局缩略图 -->
-  <details class="card group layout-setting" data-section="thumbnail"><summary>首页启动卡图片 <small>内置插画、自定义图片与轮播</small></summary><div class="layout-setting-body">
+  <details class="card group layout-setting" data-section="thumbnail"><summary>首页启动卡图片 <span class="carousel-count">{{ activeSlides.size }} / {{ slides.length }} 已启用</span><small>内置插画、自定义图片与轮播</small></summary><div class="layout-setting-body">
     <div class="layout-head">
       <div>
         <h3 class="group-title group-title-tight">首页启动卡</h3>
         <p class="muted group-hint group-hint-flush">实例专属图片优先；否则按下面的勾选与顺序混合轮播。取消勾选会保留图片，全部关闭时使用主题底色。</p>
       </div>
-      <button data-ui="HomeLayoutEditor:033eef52e2e9" class="btn btn-ghost btn-sm" @click="resetThumbnail">恢复默认顺序并全选</button>
     </div>
+    <div class="carousel-primary-controls" data-ui="carousel:primary">
     <div class="bg-row">
       <span class="muted bg-label">图片管理</span>
       <button data-ui="HomeLayoutEditor:d9002bd65d2e" class="btn btn-ghost btn-sm" :disabled="importingThumbnail" @click="pickLaunchThumbnail">
@@ -361,24 +390,27 @@ function setLaunchFit(fit: ImageFit) {
         </button>
       </div>
     </div>
-    <div class="carousel-selection-actions">
+    <div class="bg-row carousel-default-time"><label data-ui="HomeLayoutEditor:dee929e66133" class="bg-label" for="carousel-default-duration">默认停留时间</label><input data-ui="HomeLayoutEditor:c51dd8fea2e7" id="carousel-default-duration" type="number" min="1" max="120" step="0.5" class="input num-input" :value="carouselDuration(store.settings?.launchThumbnail.intervalSeconds)" @change="setDuration(($event.target as HTMLInputElement).value)" /><span class="muted">秒 · 未单独设置的图片使用此时长</span></div>
+    </div>
+    <div class="carousel-selection-actions" role="group" aria-label="轮播批量操作" data-ui="carousel:bulk"><span class="muted">批量选择</span>
       <button class="btn btn-ghost btn-sm" @click="setSlidesEnabled(slides.map(image => image.key), true)">全选</button>
       <button class="btn btn-ghost btn-sm" @click="setSlidesEnabled(slides.map(image => image.key), false)">全不选</button>
       <button class="btn btn-ghost btn-sm" @click="setSlidesEnabled(builtInLaunchImages.map(image => image.key), false)">关闭内置图片</button>
+      <details class="carousel-maintenance"><summary class="btn btn-ghost btn-sm">更多操作</summary><div><button data-ui="HomeLayoutEditor:033eef52e2e9" class="btn btn-ghost btn-sm" @click="resetThumbnail">恢复默认顺序并全选</button></div></details>
       <span v-if="!activeSlides.size" class="muted" role="status">轮播已关闭，显示主题底色</span>
     </div>
+    <p class="carousel-reorder-hint muted">拖动左侧手柄排序；聚焦手柄后可用 ↑ ↓ 或 Home / End 调整。每张图片可单独启用和设置停留时间。</p>
+    <span class="sr-only" role="status" aria-live="polite">{{ reorderAnnouncement }}</span>
     <ol data-ui="HomeLayoutEditor:78dcf55b4b19" class="carousel-list launch-carousel-list" aria-label="启动卡轮播顺序">
-      <li data-ui="HomeLayoutEditor:c9fcdfd782bb" v-for="(image, index) in slides" :key="image.key" :class="{ disabled: !activeSlides.has(image.key) }">
+      <li data-ui="HomeLayoutEditor:c9fcdfd782bb" v-for="(image, index) in slides" :key="image.key" :data-carousel-key="image.key" :class="{ disabled: !activeSlides.has(image.key), dragging: draggingImage === image.key, 'drop-target': draggingImage && dropImage === image.key && draggingImage !== image.key }" @dragover.prevent="draggingImage && (dropImage = image.key)" @drop.prevent="dropImageDrag($event, image.key)">
+        <button class="icon-btn carousel-drag-handle" :data-key="image.key" draggable="true" :aria-label="`调整 ${image.title}的顺序，当前第 ${index + 1} 位`" title="拖动排序，或使用方向键" @dragstart="startImageDrag($event, image.key)" @dragend="draggingImage = ''; dropImage = ''" @keydown="reorderImageKeyboard($event, image.key)"><svg width="16" height="20" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true"><circle v-for="n in 6" :key="n" :cx="n % 2 ? 5 : 11" :cy="Math.ceil(n / 2) * 5" r="1.3" /></svg></button>
         <img v-if="!brokenThumbnailPreviews.has(image.key)" :src="image.src" :alt="image.title" @error="brokenThumbnailPreviews = new Set([...brokenThumbnailPreviews, image.key])" />
         <span v-else class="carousel-preview-missing" aria-label="图片不可用">图片不可用</span>
         <label class="carousel-enabled"><input type="checkbox" :checked="activeSlides.has(image.key)" :aria-label="`${image.title}参与轮播`" @change="setSlidesEnabled([image.key], ($event.target as HTMLInputElement).checked)" /><span :title="image.builtin ? image.title : image.key">{{ image.title }}<small>{{ image.builtin ? '内置图片' : '自定义图片' }}</small></span></label>
-        <label data-ui="HomeLayoutEditor:1b8a2f6bf653" class="slide-duration">停留 <input data-ui="HomeLayoutEditor:b820622679f5" type="number" min="1" max="120" step="0.5" :aria-label="`${image.title}停留秒数`" :value="carouselDuration(store.settings?.launchThumbnail.durations?.[image.key] ?? store.settings?.launchThumbnail.intervalSeconds)" @change="setDuration(($event.target as HTMLInputElement).value, image.key)" /> 秒</label>
-        <button data-ui="HomeLayoutEditor:2b6f46e2b899" class="btn btn-ghost btn-sm" :disabled="index === 0" title="向前移动" @click="moveImage(index, -1)">↑</button>
-        <button data-ui="HomeLayoutEditor:5dd6420ad302" class="btn btn-ghost btn-sm" :disabled="index === slides.length - 1" title="向后移动" @click="moveImage(index, 1)">↓</button>
-        <button data-ui="HomeLayoutEditor:ebd5db203bf7" v-if="!image.builtin" class="btn btn-ghost btn-sm" @click="removeThumbnail = image.key">移除文件</button>
+        <label data-ui="HomeLayoutEditor:1b8a2f6bf653" class="slide-duration">停留 <input data-ui="HomeLayoutEditor:b820622679f5" class="input" type="number" min="1" max="120" step="0.5" :aria-label="`${image.title}停留秒数`" :value="carouselDuration(store.settings?.launchThumbnail.durations?.[image.key] ?? store.settings?.launchThumbnail.intervalSeconds)" @change="setDuration(($event.target as HTMLInputElement).value, image.key)" /><span>秒</span></label>
+        <div class="carousel-row-actions"><button data-ui="HomeLayoutEditor:2b6f46e2b899" class="icon-btn" :disabled="index === 0" :aria-label="`${image.title}向前移动`" title="向前移动" @click="moveImage(index, -1)">↑</button><button data-ui="HomeLayoutEditor:5dd6420ad302" class="icon-btn" :disabled="index === slides.length - 1" :aria-label="`${image.title}向后移动`" title="向后移动" @click="moveImage(index, 1)">↓</button><button data-ui="HomeLayoutEditor:ebd5db203bf7" v-if="!image.builtin" class="icon-btn carousel-remove" :aria-label="`移除文件 ${image.title}`" title="移除文件" @click="removeThumbnail = image.key"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg></button></div>
       </li>
     </ol>
-    <div class="bg-row"><label data-ui="HomeLayoutEditor:dee929e66133" for="carousel-default-duration">默认停留时间</label><input data-ui="HomeLayoutEditor:c51dd8fea2e7" id="carousel-default-duration" type="number" min="1" max="120" step="0.5" class="input num-input" :value="carouselDuration(store.settings?.launchThumbnail.intervalSeconds)" @change="setDuration(($event.target as HTMLInputElement).value)" /><span class="muted">秒 · 用于内置轮播及未单独设置的图片</span></div>
   </div></details>
   <ConfirmModal :open="!!removeThumbnail" title="移除自定义启动卡图片" message="将删除 KAMUCL 管理的图片副本，原文件不受影响。若只想暂停轮播，请取消参与勾选。" confirm-text="移除文件" :busy="removingThumbnail" @confirm="deleteThumbnail" @cancel="removeThumbnail = null" />
 </template>
@@ -500,6 +532,19 @@ function setLaunchFit(fit: ImageFit) {
 .group+.group{margin-top:0}
 .carousel-selection-actions { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px; }
 .carousel-selection-actions .muted { font-size:12px; }
+.carousel-count { padding:3px 8px;border-radius:6px;font-size:11px;font-weight:500;background:var(--accent-soft);color:var(--accent-2);white-space:nowrap; }
+.carousel-primary-controls { display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 20px; }
+.carousel-primary-controls>.bg-row:first-child { grid-column:1 / -1; }
+.carousel-primary-controls .bg-label { flex:0 0 84px; }
+.carousel-default-time { flex-wrap:wrap; }
+.carousel-default-time .num-input { width:72px; }
+.carousel-default-time .muted { font-size:11px;line-height:1.5; }
+.carousel-selection-actions { padding-top:12px;border-top:1px solid var(--border); }
+.carousel-maintenance { margin-left:auto;position:relative; }
+.carousel-maintenance summary { list-style:none; }
+.carousel-maintenance summary::-webkit-details-marker { display:none; }
+.carousel-maintenance>div { position:absolute;top:calc(100% + 5px);right:0;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow);z-index:5;white-space:nowrap; }
+@media(max-width:900px) { .carousel-primary-controls{grid-template-columns:minmax(0,1fr)} }
 .carousel-enabled { display:flex;align-items:center;gap:8px;min-width:140px;flex:1;cursor:pointer; }
 .carousel-enabled span { min-width:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere; }
 .carousel-enabled small { display:block;color:var(--text-dim);font-size:11px; }
@@ -518,6 +563,27 @@ function setLaunchFit(fit: ImageFit) {
 .layout-setting .layout-head h3 { display:none; }
 .layout-setting .image-preview { height:90px;max-width:320px; }
 .layout-setting .bg-row { margin:8px 0;gap:8px; }
-.layout-setting .carousel-list { grid-template-columns:minmax(0,1fr);max-height:220px;overflow:auto; }
+.layout-setting .carousel-list { grid-template-columns:minmax(0,1fr); }
+.carousel-reorder-hint { font-size:var(--text-xs);line-height:1.65;margin:12px 0 6px; }
+.launch-carousel-list { max-height:none;overflow:visible; }
+.launch-carousel-list li { flex-wrap:nowrap;gap:12px;background:var(--card-2);transition:border-color 160ms,background 160ms; }
+.launch-carousel-list li.dragging { opacity:.55; }
+.launch-carousel-list li.drop-target { border-color:var(--accent);background:var(--accent-soft); }
+.launch-carousel-list .carousel-drag-handle { flex:none;cursor:grab;color:var(--text-dim);min-width:28px; }
+.carousel-drag-handle:active { cursor:grabbing; }
+.launch-carousel-list .carousel-enabled { min-width:0;gap:12px; }
+.carousel-enabled input { appearance:none;width:18px;height:18px;border:1px solid var(--border);border-radius:5px;background:var(--card);cursor:pointer;display:grid;place-content:center; }
+.carousel-enabled input:checked { border-color:var(--accent);background:var(--accent); }
+.carousel-enabled input:checked::after { content:'';width:8px;height:4px;border:solid var(--on-accent,#fff);border-width:0 0 2px 2px;transform:rotate(-45deg) translateY(-1px); }
+.carousel-enabled input:focus-visible { outline:2px solid var(--accent);outline-offset:3px; }
+.launch-carousel-list .carousel-enabled span { font-size:var(--text-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.launch-carousel-list .slide-duration { flex:none;color:var(--text-dim);gap:6px; }
+.slide-duration input.input { width:74px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font:inherit;font-variant-numeric:tabular-nums; }
+.carousel-row-actions { display:flex;align-items:center;gap:2px;flex:none; }
+.launch-carousel-list .carousel-row-actions button { min-width:28px; }
+.carousel-remove { color:var(--text-dim); }
+.carousel-remove:hover { color:var(--danger); }
+.sr-only { position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap; }
+@media(max-width:760px) { .launch-carousel-list li{flex-wrap:wrap;gap:8px}.launch-carousel-list .carousel-enabled{flex:1;min-width:150px}.launch-carousel-list .slide-duration{margin-left:40px}.carousel-row-actions{margin-left:auto} }
 @media(max-width:600px) { .layout-setting>summary{flex-wrap:wrap;gap:4px 12px}.layout-setting>summary small{flex-basis:80%} }
 </style>

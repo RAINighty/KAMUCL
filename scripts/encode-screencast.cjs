@@ -1,0 +1,16 @@
+// Encode real compositor frames with their original timing; never interpolate.
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),crypto=require('node:crypto'),{execFileSync}=require('node:child_process')
+const directory=path.resolve(process.argv[2]),ffmpeg=path.resolve(process.argv[3]),file=path.join(directory,'recording.json'),proof=JSON.parse(fs.readFileSync(file))
+assert(proof.frames.length>1&&proof.frames.every(f=>/^frame-\d{4}\.jpg$/.test(f.file)))
+const lines=['ffconcat version 1.0']
+for(let i=0;i<proof.frames.length;i++){
+ const frame=proof.frames[i],next=proof.frames[i+1],duration=next?next.timestamp-frame.timestamp:1/proof.fps
+ assert(duration>0&&duration<1,'capture timing must be continuous')
+ assert(fs.existsSync(path.join(directory,frame.file)))
+ lines.push("file '"+frame.file+"'",'duration '+duration.toFixed(6))
+}
+fs.writeFileSync(path.join(directory,'frames.ffconcat'),lines.join('\n')+'\n')
+const output=path.join(directory,'recording.mp4')
+execFileSync(ffmpeg,['-y','-f','concat','-safe','1','-i','frames.ffconcat','-vf','pad=ceil(iw/2)*2:ceil(ih/2)*2','-fps_mode','vfr','-c:v','libx264','-preset','fast','-crf','20','-pix_fmt','yuv420p','-an','recording.mp4'],{cwd:directory,stdio:'pipe'})
+proof.video={file:'recording.mp4',sha256:crypto.createHash('sha256').update(fs.readFileSync(output)).digest('hex'),source:'original captured JPEG frames, variable frame timestamps, no interpolation or generated frames',audio:'separate actual mixer recording; this video has no audio'}
+fs.writeFileSync(file,JSON.stringify(proof,null,2));console.log(JSON.stringify({output,fps:proof.fps,frames:proof.frames.length,sha256:proof.video.sha256}))

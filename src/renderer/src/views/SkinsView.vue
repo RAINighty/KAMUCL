@@ -345,11 +345,11 @@ watch(
   <div data-ui="SkinsView:79bfa9f178a8" class="page skins-page">
     <SkinEditor v-if="editorOpen" :current="currentSkin?.dataUrl" :variant="currentVariant" @close="editorOpen=false" @uploaded="loadAll" />
     <div data-ui="SkinsView:483ce0fd91a6" class="page-head">
-      <h1 data-ui="SkinsView:b30aa0d910d4" class="page-title">皮肤与披风</h1>
-      <button class="btn btn-gold" @click="editorOpen=true">绘制皮肤</button>
+      <div class="skin-page-heading"><h1 data-ui="SkinsView:b30aa0d910d4" class="page-title">皮肤与披风</h1>
       <p data-ui="SkinsView:dc0d51be1910" class="page-sub">
         {{ isExternal ? `查看 ${store.selectedAccount?.providerName ?? '外置皮肤站'} 的角色材质` : '管理微软正版账号的皮肤与披风' }}
-      </p>
+      </p></div>
+      <button class="btn btn-gold skin-editor-entry" @click="editorOpen=true">绘制皮肤</button>
     </div>
 
     <!-- 非微软账号：整页引导 -->
@@ -1086,6 +1086,9 @@ watch(
 /* Content-sized right column, with history across both columns. */
 .skins-page { display:grid; grid-template-columns:minmax(260px,2fr) minmax(300px,3fr); align-items:start; gap:16px; }
 .skins-page > :is(.page-head,.status-strip,.need-ms) { grid-column:1/-1; }
+.skins-page > .page-head { flex-direction:row; align-items:center; justify-content:space-between; gap:12px; }
+.skin-page-heading { min-width:0; }.skin-page-heading .page-sub { margin:4px 0 0; }
+.skin-editor-entry { flex:none; width:auto; padding:8px 14px; min-height:36px; }
 .skins-page .row-main,.skins-page .row-sub { display:contents; }
 .skins-page .pane-preview { grid-column:1; grid-row:2; width:100%; max-width:100%; min-height:0; }
 .skins-page .pane-preview .viewer3d { min-height:320px; }

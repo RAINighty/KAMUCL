@@ -6,7 +6,7 @@ module.exports = async ({ evaluate, call, main, nav, wait, root, screenshot, ver
   const field = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).value`)
   const hex = () => field('.palette-hex')
   const clean = () => evaluate(`document.querySelector('.skin-editor header p').textContent.includes('已保存')`)
-  const layer = async value => { await evaluate(`(()=>{const e=document.querySelectorAll('.skin-editor aside select')[2];e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('change',{bubbles:true}))})()`); await wait(50) }
+  const layer = async value => { await evaluate(`(()=>{const e=document.querySelector('.skin-editor [aria-label=皮肤图层]');e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('change',{bubbles:true}))})()`); await wait(50) }
   const output = path.join(root, 'palette-opacity.png')
   const paint = async () => {
     await evaluate(`(()=>{document.activeElement.blur();document.querySelector('.skin-editor').scrollTop=0})()`)

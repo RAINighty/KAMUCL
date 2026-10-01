@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path')
 module.exports=async function verifyMascotHeader(h){
- const {call,evaluate,main,click,nav,screenshot,wait,profile,version}=h
+ const {call,evaluate,main,click,nav,screenshot,wait,profile,version,recordScreencast}=h
  const proof={version,checks:[],layouts:[],audio:{},hardwareListening:'not performed'}
  // Hosted macOS runners can enable reduced motion globally. Exercise normal
  // walking/recoil explicitly before the independent reduced-motion regression.
@@ -40,7 +40,7 @@ module.exports=async function verifyMascotHeader(h){
   Original.prototype.resume=function(){if(this.__mascotTap)proof.audioLifecycleCalls.push({method:'resume',...audioState(this),stack:new Error().stack?.slice(0,650)});return resume.call(this)};
   Original.prototype.suspend=function(){if(this.__mascotTap)proof.audioLifecycleCalls.push({method:'suspend',...audioState(this),stack:new Error().stack?.slice(0,650)});return suspend.call(this)};
   AudioNode.prototype.connect=function(destination,...rest){if(this.context.__mascotTap&&destination===this.context.destination)connect.call(this,this.context.__mascotTap);return connect.call(this,destination,...rest)};
-  AudioBufferSourceNode.prototype.start=function(...args){if(this.context.__mascotTap&&this.buffer){const samples=this.buffer.getChannelData(0);let peak=0,power=0;for(const value of samples){peak=Math.max(peak,Math.abs(value));power+=value*value}proof.events.push({when:args[0]||0,time:this.context.currentTime,duration:this.buffer.duration,peak,rms:Math.sqrt(power/samples.length),rate:this.playbackRate.value});if(!proof.samples)proof.samples={sampleRate:this.buffer.sampleRate,values:Array.from(samples)};proof.active++;proof.peakVoices=Math.max(proof.peakVoices,proof.active);this.addEventListener('ended',()=>proof.active--,{once:true})}return start.apply(this,args)};
+  AudioBufferSourceNode.prototype.start=function(...args){if(this.context.__mascotTap&&this.buffer){const samples=this.buffer.getChannelData(0);let peak=0,power=0;for(const value of samples){peak=Math.max(peak,Math.abs(value));power+=value*value}proof.events.push({when:args[0]||0,time:this.context.currentTime,wallTime:performance.now(),duration:this.buffer.duration,peak,rms:Math.sqrt(power/samples.length),rate:this.playbackRate.value});if(!proof.samples)proof.samples={sampleRate:this.buffer.sampleRate,values:Array.from(samples)};proof.active++;proof.peakVoices=Math.max(proof.peakVoices,proof.active);this.addEventListener('ended',()=>proof.active--,{once:true})}return start.apply(this,args)};
   Original.prototype.close=function(){if(this.__mascotTap)proof.closed++;return close.call(this)};
  })()`)
  const trustedClick=async selector=>{const r=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,x:r.x,y:r.y});await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,x:r.x,y:r.y})}
@@ -51,12 +51,20 @@ module.exports=async function verifyMascotHeader(h){
  assert.equal(await evaluate('getComputedStyle(document.querySelector(".topbar")).height'),'72px')
  proof.motion={normal:await evaluate(`({systemReduced:matchMedia('(prefers-reduced-motion: reduce)').matches,stageReduced:document.querySelector('.mascot-stage').classList.contains('reduced'),draws:window.__mascotSoundProof.draws})`)};assert.equal(proof.motion.normal.systemReduced,false);assert.equal(proof.motion.normal.stageReduced,false)
  const before=await evaluate("window.kamucl.invoke('mascots:state')")
- const geometry=await evaluate(`(()=>{const host=document.querySelector('.figure-strip').getBoundingClientRect(),r=[...document.querySelectorAll('.mascot-hit')].map(e=>{const r=e.getBoundingClientRect();return{id:e.dataset.hit,left:r.left,right:r.right,y:r.y+r.height/2}}).sort((a,b)=>a.left-b.left);return{left:host.left+1,right:host.right-1,y:r[0].y,ids:r.map(r=>r.id)}})()`)
- const move=async(x,y)=>call('Input.dispatchMouseEvent',{type:'mouseMoved',button:'none',x,y})
+ const geometry=await evaluate(`(()=>{const host=document.querySelector('.figure-strip').getBoundingClientRect(),r=JSON.parse(document.querySelector('.mascot-stage').dataset.silhouettes).filter(r=>r.part==='head').sort((a,b)=>a.left-b.left);return{left:host.left+1,right:host.right-1,y:host.top+(r[0].top+r[0].bottom)/2,ids:r.map(r=>r.id)}})()`)
+ let pointerPoint;const move=async(x,y)=>{await call('Input.dispatchMouseEvent',{type:'mouseMoved',button:'none',x,y});pointerPoint={x,y}}
  await move(geometry.left,geometry.y);await move(geometry.right,geometry.y);await wait(50)
  const first=await evaluate('window.__mascotSoundProof.events.length');assert.equal(first,7,'one sparse sweep must start seven real sample sources')
- assert.equal(await evaluate('document.querySelectorAll(".slap-burst").length'),7,'seven independent visual feedback nodes')
+ assert.equal(await evaluate('document.querySelectorAll(".mascot-feedback").length'),7,'seven independent pelvis feedback pools')
  await move(geometry.left,geometry.y);await wait(50);assert.equal(await evaluate('window.__mascotSoundProof.events.length'),14,'reverse sweep during recoil must stay responsive')
+ const feedbackSnapshot=()=>evaluate(`(()=>{const stage=document.querySelector('.mascot-stage');return{now:performance.now(),renderMs:Number(stage.dataset.renderMs),lastSweepMs:Number(stage.dataset.sweepMs),maxSweepMs:Number(stage.dataset.maxSweepMs),focusedId:document.activeElement?.dataset.hit||null,labels:[...stage.querySelectorAll('.mascot-label')].map(e=>({id:e.dataset.label,opacity:Number(getComputedStyle(e).opacity),targetOpacity:Number(e.style.opacity),text:e.textContent})),poses:JSON.parse(stage.dataset.poses),parts:JSON.parse(stage.dataset.silhouettes),feedback:[...stage.querySelectorAll('.mascot-feedback')].map(e=>({id:e.dataset.feedback,x:parseFloat(e.style.left),y:parseFloat(e.style.top),target:e.dataset.target,contacts:JSON.parse(e.dataset.contacts||'[]'),palms:[...e.querySelectorAll('.pixel-palm')].map(e=>({opacity:Number(e.style.opacity),contact:Number(e.dataset.contact)})),prints:[...e.querySelectorAll('.palm-print')].map(e=>({opacity:Number(e.style.opacity),contact:Number(e.dataset.contact)}))}))}})()`)
+ let reverseFeedback;for(let i=0;i<25;i++){reverseFeedback=await feedbackSnapshot();if(reverseFeedback.feedback.every(e=>e.contacts.length===2&&e.prints.filter(p=>p.opacity>0).length===2))break;await wait(16)}
+ assert(reverseFeedback.feedback.every(e=>e.contacts.length===2&&e.prints.filter(p=>p.opacity>0).length===2),'rapid reverse keeps both independently landed handprints, rather than restarting the first hand')
+ for(const feedback of reverseFeedback.feedback){const pose=reverseFeedback.poses.find(p=>p.id===feedback.id);assert.equal(feedback.target,'pelvis');assert(Math.abs(feedback.x-pose.butt.x)<1&&Math.abs(feedback.y-pose.butt.y)<1);assert(pose.headForward[2]>.7&&pose.bodyForward[2]<0,'actual face looks at the viewer while torso faces back');assert(Math.abs(pose.footY-1.6)<1e-5,'actual foot vertices remain grounded')}
+ proof.reverseFeedback=reverseFeedback
+ const reverseSounds=await evaluate('window.__mascotSoundProof.events.slice(0,14)')
+ for(let i=0;i<14;i++){const id=i<7?geometry.ids[i]:[...geometry.ids].reverse()[i-7],contact=reverseFeedback.feedback.find(f=>f.id===id).contacts[i<7?0:1],event=reverseSounds[i];assert(Math.abs(contact-(event.wallTime+(event.when-event.time)*1000))<12,'actual scheduled audio contact and independent palm landing share the same timeline')}
+ proof.contactTimeline={source:'intercepted real AudioBufferSourceNode.start time versus rendered independent hand/print contact times',events:reverseSounds}
  await wait(600)
  let state=await awaitCounts('two full sweeps',Object.fromEntries(geometry.ids.map(id=>[id,(before.counts[id]||0)+2])))
  for(const id of geometry.ids)assert.equal(state.counts[id],(before.counts[id]||0)+2,id+' two full sweeps')
@@ -68,7 +76,87 @@ module.exports=async function verifyMascotHeader(h){
  assert.equal((await evaluate("window.kamucl.invoke('mascots:state')")).order[0],'qiqi')
  const afterKeyboard=await evaluate("window.kamucl.invoke('mascots:state')");await wait(500);assert.deepEqual((await evaluate("window.kamucl.invoke('mascots:state')")).counts,afterKeyboard.counts)
  proof.checks.push('keyboard equivalence, delayed stable sorting, no stationary reorder counts')
- await screenshot('extension-117-mascot-header')
+ await screenshot('extension-118-mascot-header')
+ // Real compositor frames include the WebGL figures AND the DOM palm/print layers.
+ // Capture a long-distance leader walk, with real intermediate poses and saved counts.
+ const videoDir=path.resolve('out/mascot-118-frames-'+(process.env.KAMUCL_TEST_THEME||'black-orange'));fs.mkdirSync(videoDir,{recursive:true})
+ const leaderBefore=await evaluate("window.kamucl.invoke('mascots:state')"),baseline=await feedbackSnapshot(),leader=baseline.poses.reduce((a,b)=>a.position>b.position?a:b).id,leaderCount=Math.max(...Object.values(leaderBefore.counts))+1
+ assert.equal(baseline.poses.find(p=>p.id===leader).position,6,'the screencast leader begins at the actual rightmost slot')
+ assert.equal(typeof recordScreencast,'function','real compositor screencast helper is required, without reconstructed frames')
+ const frames=[];let pngCaptureFlight
+ const screencast=await recordScreencast('mascot-118-leader-screencast',async()=>{
+  for(let i=leaderBefore.counts[leader]||0;i<leaderCount;i++)await trustedClick('[data-hit='+leader+']')
+  pngCaptureFlight=(async()=>{for(let i=0;i<16;i++){const live=await feedbackSnapshot(),capture=await call('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false}),name='frame-'+String(i).padStart(3,'0')+'.png';fs.writeFileSync(path.join(videoDir,name),Buffer.from(capture.data,'base64'));frames.push({name,wallTime:Date.now(),...live});await wait(70)}})()
+ },2200)
+ await pngCaptureFlight
+ proof.screencast={...screencast,trigger:'trusted CDP mouse press/release on one actual rightmost character; enough independent hits to become leader',leader,countsBefore:leaderBefore.counts,targetCount:leaderCount,minimumFps:30,frameRatePassed:screencast.fps>=30,hardwareListening:'not performed'}
+ fs.writeFileSync('out/mascot-header-screencast-live.json',JSON.stringify(proof.screencast,null,2))
+ assert(screencast.fps>=30,'actual compositor screencast must reach at least 30 fps; received '+screencast.fps.toFixed(2)+' fps, preserve original timestamps and investigate the capturer')
+ fs.writeFileSync(path.join(videoDir,'frames.json'),JSON.stringify({version,source:'actual visible Page.captureScreenshot compositor frames; no reconstructed rendering',baseline,frames},null,2))
+ const walkingFrames=frames.filter(frame=>frame.poses.some(p=>p.id===leader&&p.walking));assert(walkingFrames.length>=2,'real intermediate walk frames must exist')
+ assert(new Set(walkingFrames.map(frame=>frame.poses.find(p=>p.id===leader).phase.toFixed(2))).size>=2,'the leg step phase advances with travelled distance')
+ for(const frame of frames)for(const pose of frame.poses){assert(Math.abs(pose.footY-1.6)<1e-5&&pose.headForward[2]>.7,'walking remains grounded with actual faces visible');const label=frame.labels.find(l=>l.id===pose.id);assert.equal(label.targetOpacity,pose.walking?0:1,'all visual labels fade during walking and restore on landing')}
+ const leaderExpected={...leaderBefore.counts,[leader]:leaderCount};await awaitCounts('new leader walking keeps counts and persistence exact',leaderExpected)
+ let settled;for(let i=0;i<40;i++){settled=await feedbackSnapshot();const pose=settled.poses.find(p=>p.id===leader);if(!pose.walking&&pose.position===0&&settled.labels.every(l=>l.opacity===1))break;await wait(60)}assert.equal(settled.poses.find(p=>p.id===leader).position,0,'most slapped character finishes at the LEFT first position');assert.equal((await evaluate("window.kamucl.invoke('mascots:state')")).order[0],leader);assert(settled.labels.every(l=>l.opacity===1),'all labels are restored after the walk settles')
+ proof.animation={frameDirectory:videoDir,frames:frames.map(frame=>({name:frame.name,wallTime:frame.wallTime,poses:frame.poses,feedback:frame.feedback,labels:frame.labels,focusedId:frame.focusedId})),settled,hardwareListening:'not performed'}
+ // Exercise the covered-to-exposed boundary on REAL rendered walking geometry.
+ // Atomic PointerEvent input is intentionally non-trusted: its same-frame
+ // coordinates isolate the geometry contract from CDP round-trip movement.
+ // The ordinary seven-person forward/reverse sweeps above remain trusted CDP.
+ const findWalkingOverlap=function(){
+  const stage=document.querySelector('.mascot-stage'),strip=document.querySelector('.figure-strip'),bounds=strip.getBoundingClientRect(),parts=JSON.parse(stage.dataset.silhouettes),poses=JSON.parse(stage.dataset.poses)
+  if(!poses.some(p=>p.walking))return null
+  const contains=(r,x,y)=>{if(x<r.left||x>r.right||y<r.top||y>r.bottom)return false;let sign=0;for(let i=0;i<r.polygon.length;i++){const a=r.polygon[i],b=r.polygon[(i+1)%r.polygon.length],v=(b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);if(Math.abs(v)<1e-7)continue;if(sign&&sign!==Math.sign(v))return false;sign=Math.sign(v)}return true}
+  const visible=(x,y)=>{const depths=new Map();for(const p of parts)if(contains(p,x,y))depths.set(p.id,Math.min(depths.get(p.id)??Infinity,p.depth??0));const nearest=Math.min(...depths.values());return[...depths].filter(([,depth])=>depth===nearest).map(([id])=>id)}
+  const range=(p,y)=>{const xs=[];for(let i=0;i<p.polygon.length;i++){const a=p.polygon[i],b=p.polygon[(i+1)%p.polygon.length];if(y>=Math.min(a.y,b.y)&&y<=Math.max(a.y,b.y)){if(Math.abs(a.y-b.y)<1e-7){xs.push(a.x,b.x)}else xs.push(a.x+(b.x-a.x)*(y-a.y)/(b.y-a.y))}}return xs.length?{...p,left:Math.min(...xs),right:Math.max(...xs)}:null}
+  for(let y=3;y<strip.clientHeight-15;y+=.75){
+   const ranges=parts.filter(p=>y>p.top&&y<p.bottom).map(p=>range(p,y)).filter(Boolean)
+   for(const near of ranges)for(const far of ranges){
+    if(near.id===far.id||near.depth>=far.depth)continue
+    const left=Math.max(near.left,far.left),right=Math.min(near.right,far.right),nearRight=Math.max(...ranges.filter(p=>p.id===near.id).map(p=>p.right)),farRight=Math.max(...ranges.filter(p=>p.id===far.id).map(p=>p.right))
+    if(right-left<2||far.right-nearRight<3)continue
+    const start=(left+right)/2,end=nearRight+Math.min(2,(far.right-nearRight)/2),exit=farRight+1.5
+    if(exit>=strip.clientWidth-1)continue
+    if(visible(start,y).join()!==near.id||visible(end,y).join()!==far.id||visible(exit,y).length)continue
+    let clean=true;for(let x=start;x<=exit;x+=.35)if(visible(x,y).some(id=>id!==near.id&&id!==far.id)){clean=false;break}if(!clean)continue
+    return{near:near.id,far:far.id,start:{x:bounds.left+start,y:bounds.top+y},end:{x:bounds.left+end,y:bounds.top+y},exit:{x:bounds.left+exit,y:bounds.top+y},parts,poses,time:performance.now(),strip:{left:bounds.left,top:bounds.top},visible:{start:visible(start,y),end:visible(end,y),exit:visible(exit,y)}}
+   }
+  }
+  return null
+ }
+ const overlapBefore=await evaluate("window.kamucl.invoke('mascots:state')"),overlapLeader=settled.poses.reduce((a,b)=>a.position>b.position?a:b).id,overlapLeaderCount=Math.max(...Object.values(overlapBefore.counts))+1
+ for(let i=overlapBefore.counts[overlapLeader]||0;i<overlapLeaderCount;i++)await click('[data-hit='+overlapLeader+']')
+ const atomic=await evaluate(`(async()=>{const find=${findWalkingOverlap.toString()},stage=document.querySelector('.mascot-stage'),strip=document.querySelector('.figure-strip'),local=()=>Object.fromEntries([...stage.querySelectorAll('.mascot-hit')].map(e=>[e.dataset.hit,Number(e.getAttribute('aria-label').match(/累计 (\\d+) 次/)?.[1])])),samples=[];let candidate;for(let i=0;i<100;i++){await new Promise(resolve=>requestAnimationFrame(resolve));candidate=find();samples.push({time:performance.now(),walking:JSON.parse(stage.dataset.poses).filter(p=>p.walking).map(p=>({id:p.id,position:p.position})),found:!!candidate});if(candidate)break}if(!candidate)return{candidate:null,samples};const events=[];strip.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerType:'mouse'}));const before=local();for(const [label,point] of [['first',candidate.start],['visibleEdge',candidate.end],['afterExit',candidate.exit],['reentry',candidate.end]]){const event=new PointerEvent('pointermove',{bubbles:true,pointerType:'mouse',clientX:point.x,clientY:point.y});strip.dispatchEvent(event);await Promise.resolve();events.push({label,point,isTrusted:event.isTrusted,counts:local(),sources:window.__mascotSoundProof.events.length,time:performance.now()})}return{candidate,samples,before,events}})()`)
+ proof.walkingOverlap={source:'actual live WebGL walking silhouettes; atomic browser-dispatched PointerEvent input (isTrusted=false)',atomic,trusted:{status:'not attempted',samples:[]}}
+ fs.writeFileSync('out/mascot-header-overlap-live.json',JSON.stringify(proof.walkingOverlap,null,2))
+ assert(atomic.candidate,'a real walking pass must expose a farther silhouette edge')
+ const expectedOverlap={...atomic.before};for(const step of atomic.events){if(step.label==='first')expectedOverlap[atomic.candidate.near]++;if(step.label==='visibleEdge'||step.label==='reentry')expectedOverlap[atomic.candidate.far]++;assert.equal(step.isTrusted,false);assert.deepEqual(step.counts,expectedOverlap,'walking overlap '+step.label+' has exact visible-person counts')}
+ await awaitCounts('covered walking person becomes hittable at its exposed edge and on reentry',expectedOverlap)
+ // Attempt trusted CDP input as well. Both endpoints must remain valid in the
+ // post-input live frame; a moving edge that invalidates a coordinate is recorded
+ // as inconclusive, never counted as a successful trusted boundary regression.
+ for(let i=0;i<3;i++){
+  const candidate=await evaluate(`(${findWalkingOverlap.toString()})()`);if(!candidate){proof.walkingOverlap.trusted.samples.push({reason:'no remaining live walking overlap'});break}
+  const base=await persistenceSnapshot();await evaluate("document.querySelector('.figure-strip').dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerType:'mouse'}))")
+  await move(candidate.start.x,candidate.start.y)
+  const first=await evaluate(`(()=>{const find=${findWalkingOverlap.toString()},live=find(),stage=document.querySelector('.mascot-stage');return{live,counts:Object.fromEntries([...stage.querySelectorAll('.mascot-hit')].map(e=>[e.dataset.hit,Number(e.getAttribute('aria-label').match(/累计 (\\d+) 次/)?.[1])]))}})()`)
+  await move(candidate.end.x,candidate.end.y)
+  const after=await feedbackSnapshot(),sample={candidate,base,first,after};proof.walkingOverlap.trusted.samples.push(sample)
+  const visibleAt=(parts,point,strip)=>{const x=point.x-strip.left,y=point.y-strip.top,depths=new Map();for(const p of parts){if(x<p.left||x>p.right||y<p.top||y>p.bottom)continue;let sign=0,inside=true;for(let j=0;j<p.polygon.length;j++){const a=p.polygon[j],b=p.polygon[(j+1)%p.polygon.length],v=(b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);if(Math.abs(v)<1e-7)continue;if(sign&&sign!==Math.sign(v)){inside=false;break}sign=Math.sign(v)}if(inside)depths.set(p.id,Math.min(depths.get(p.id)??Infinity,p.depth??0))}const nearest=Math.min(...depths.values());return[...depths].filter(([,d])=>d===nearest).map(([id])=>id)}
+  const firstParts=first.live?.parts,valid=firstParts&&visibleAt(firstParts,candidate.start,candidate.strip).join()===candidate.near&&visibleAt(firstParts,candidate.end,candidate.strip).join()===candidate.far&&visibleAt(after.parts,candidate.start,candidate.strip).join()===candidate.near&&visibleAt(after.parts,candidate.end,candidate.strip).join()===candidate.far
+  sample.validEndpoints=!!valid;fs.writeFileSync('out/mascot-header-overlap-live.json',JSON.stringify(proof.walkingOverlap,null,2))
+  if(valid){const expected={...Object.fromEntries(base.local.buttons.map(b=>[b.id,b.count]))};expected[candidate.near]++;assert.deepEqual(first.counts,expected,'trusted overlap begins on the near visible person');expected[candidate.far]++;await awaitCounts('trusted CDP crossing a still-valid walking exposed edge',expected);proof.walkingOverlap.trusted.status='passed';break}
+  sample.reason='actual motion invalidated one endpoint between CDP round trips';await wait(30)
+ }
+ if(proof.walkingOverlap.trusted.status!=='passed')proof.walkingOverlap.trusted.status='inconclusive: no CDP trial retained both endpoint visibility contracts'
+ fs.writeFileSync('out/mascot-header-overlap-live.json',JSON.stringify(proof.walkingOverlap,null,2));proof.checks.push('real walking silhouettes: non-trusted same-frame covered/exposed/exit/reentry counts; trusted CDP boundary status separately recorded')
+ let overlapSettled;for(let i=0;i<50;i++){overlapSettled=await feedbackSnapshot();if(!overlapSettled.poses.some(p=>p.walking))break;await wait(50)}assert(!overlapSettled.poses.some(p=>p.walking),'walking overlap fixture settles before independent full-body band sweeps')
+ const bodySweeps=[]
+ for(const part of ['rightArm','leftLeg']){
+  const band=await evaluate(`(()=>{const strip=document.querySelector('.figure-strip').getBoundingClientRect(),parts=JSON.parse(document.querySelector('.mascot-stage').dataset.silhouettes),p=parts.find(p=>p.part===${JSON.stringify(part)});return{left:strip.left+1,right:strip.right-1,y:strip.top+(${JSON.stringify(part)}==='leftLeg'?p.bottom-.7:(p.top+p.bottom)/2)}})()`),beforeBand=await evaluate("window.kamucl.invoke('mascots:state')")
+  if(pointerPoint)await move(pointerPoint.x,-5);await move(band.left,band.y);await move(band.right,band.y);const expected=Object.fromEntries(Object.entries(beforeBand.counts).map(([id,count])=>[id,count+1]));await awaitCounts('whole-person '+part+' sparse sweep',expected);bodySweeps.push({part,band,live:await feedbackSnapshot()})
+ }
+ proof.bodySweeps=bodySweeps
  for(const [w,hh,zoom] of [[960,620,1],[980,720,1.5],[1360,860,1]]){
   await main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/renderer/index.html'));w.setSize(${w},${hh});w.webContents.setZoomFactor(${zoom});w.show();w.focus();testElectron.app.focus({steal:true});return true})()`);await call('Page.bringToFront')
   let layout,stable=0,previous='',samples=[]
@@ -80,18 +168,18 @@ module.exports=async function verifyMascotHeader(h){
    layout=await evaluate(`(()=>{const host=document.querySelector('.mascot-stage'),bar=document.querySelector('.topbar').getBoundingClientRect(),stage=host.getBoundingClientRect(),stripElement=document.querySelector('.figure-strip'),strip=stripElement.getBoundingClientRect(),canvas=stripElement.querySelector('canvas'),canvasRect=canvas.getBoundingClientRect(),buttons=[...document.querySelectorAll('.mascot-hit')].map(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return{id:e.dataset.hit,x:r.x,y:r.y,width:r.width,height:r.height,leftStyle:e.style.left,topStyle:e.style.top,visible:s.visibility==='visible'&&r.width>0&&r.height>0}}),controls=[...document.querySelectorAll('.top-actions button,.top-back')].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return{label:e.getAttribute('aria-label')||e.title||e.textContent,left:r.left,right:r.right,top:r.top,bottom:r.bottom}});return{viewport:{width:innerWidth,height:innerHeight,devicePixelRatio,visualWidth:visualViewport?.width,visualHeight:visualViewport?.height},documentHidden:document.hidden,visibilityState:document.visibilityState,stageHidden:host.classList.contains('hidden'),draws:window.__mascotSoundProof.draws,bar:{left:bar.left,right:bar.right,top:bar.top,bottom:bar.bottom,height:bar.height},stage:{left:stage.left,right:stage.right,top:stage.top,bottom:stage.bottom},strip:{left:strip.left,right:strip.right,top:strip.top,bottom:strip.bottom,clientWidth:stripElement.clientWidth,clientHeight:stripElement.clientHeight},canvas:{left:canvasRect.left,right:canvasRect.right,top:canvasRect.top,bottom:canvasRect.bottom,clientWidth:canvas.clientWidth,clientHeight:canvas.clientHeight,width:canvas.width,height:canvas.height},modelBounds:host.dataset.modelBounds?JSON.parse(host.dataset.modelBounds):null,buttons,controls}})()`)
    layout={width:w,height:hh,zoom,native,...layout};const b=layout.modelBounds
    const matched=native.isVisible&&!native.isMinimized&&!layout.stageHidden&&Math.abs(layout.viewport.width-native.contentBounds.width/native.zoom)<2&&Math.abs(layout.viewport.height-native.contentBounds.height/native.zoom)<2&&b?.models.length===7&&b.width===layout.strip.clientWidth&&b.height===layout.strip.clientHeight-12&&layout.canvas.clientWidth===b.width&&layout.canvas.clientHeight===b.height
-   const signature=JSON.stringify({viewport:layout.viewport,bar:layout.bar,strip:layout.strip,canvas:layout.canvas,buttons:layout.buttons,modelBounds:b,nativeBounds:native.bounds})
+   const signature=JSON.stringify({viewport:layout.viewport,bar:layout.bar,strip:layout.strip,canvas:layout.canvas,modelBoundsSize:b?{width:b.width,height:b.height}:null,nativeBounds:native.bounds})
    stable=matched&&signature===previous?stable+1:0;previous=signature;samples.push({sample:i,matched,stable,native,viewport:layout.viewport,documentHidden:layout.documentHidden,stageHidden:layout.stageHidden,strip:layout.strip,canvas:layout.canvas,modelBoundsSize:b?{width:b.width,height:b.height}:null,draws:layout.draws})
    fs.writeFileSync('out/mascot-header-layout-live.json',JSON.stringify({...layout,readinessSamples:samples},null,2))
    if(stable>=1)break
   }
-  layout.readinessSamples=samples;await screenshot('extension-117-mascot-'+w+'-'+zoom)
+  layout.readinessSamples=samples;await screenshot('extension-118-mascot-'+w+'-'+zoom)
   try{
    assert(stable>=1,'resize/zoom must reach a visible, stable viewport and matching rendered canvas/model bounds')
    assert([68,72].includes(layout.bar.height),'preserve the existing 68/72px responsive header height');assert.equal(layout.buttons.length,7)
    const bounds=layout.modelBounds;assert.equal(bounds.models.length,7);for(const model of bounds.models){assert(model.top>=2,model.id+' full head has at least 2px canvas margin');assert(model.bottom<=bounds.height,model.id+' full feet remain inside canvas');assert(model.left>=0&&model.right<=bounds.width,model.id+' full model stays inside canvas')}
    layout.models=bounds.models
-   for(const b of layout.buttons){assert(b.visible&&b.width>=10&&b.height>=10,b.id+' visible hip button');assert(b.x>=layout.strip.left-1&&b.x+b.width<=layout.strip.right+1,b.id+' stays in single header row');assert(b.y>=layout.bar.top&&b.y+b.height<=layout.bar.bottom,b.id+' stays in header height');for(const c of layout.controls)assert(!(b.x<c.right&&b.x+b.width>c.left&&b.y<c.bottom&&b.y+b.height>c.top),b.id+' avoids window/action controls')}
+   for(const b of layout.buttons){assert(b.visible&&b.width>=10&&b.height>=10,b.id+' visible whole-person keyboard button');assert(b.x>=layout.strip.left-1&&b.x+b.width<=layout.strip.right+1,b.id+' stays in single header row');assert(b.y>=layout.bar.top&&b.y+b.height<=layout.bar.bottom,b.id+' stays in header height');for(const c of layout.controls)assert(!(b.x<c.right&&b.x+b.width>c.left&&b.y<c.bottom&&b.y+b.height>c.top),b.id+' avoids window/action controls')}
   }catch(error){console.error('Mascot header layout diagnostics',JSON.stringify(layout,null,2));throw error}
   proof.layouts.push(layout)
  }
@@ -158,7 +246,7 @@ module.exports=async function verifyMascotHeader(h){
  proof.checks.push('real main IPC retry idempotence and changed-batch rejection')
  const recording=await evaluate(`(async()=>{const proof=window.__mascotSoundProof,all=[];for(const recorder of proof.recorders){if(recorder.state!=='inactive')await new Promise(resolve=>{recorder.addEventListener('stop',resolve,{once:true});recorder.stop()});if(recorder.__chunks.length){const blob=new Blob(recorder.__chunks,{type:'audio/webm'});all.push(Array.from(new Uint8Array(await blob.arrayBuffer())))}}if(all[0]){const decoder=new window.__mascotOriginalAudioContext(),decoded=await decoder.decodeAudioData(new Uint8Array(all[0]).buffer);let peak=0,power=0;for(let c=0;c<decoded.numberOfChannels;c++)for(const value of decoded.getChannelData(c)){peak=Math.max(peak,Math.abs(value));power+=value*value}proof.output={peak,rms:Math.sqrt(power/(decoded.length*decoded.numberOfChannels)),samples:decoded.length,sampleRate:decoded.sampleRate};await decoder.close()}return all})()`)
    if(recording[0]){fs.writeFileSync('out/mascot-sweep-117.webm',Buffer.from(recording[0]));proof.audio.recording='only the stage compressor output, no microphone or system capture';proof.audio.output=await evaluate('window.__mascotSoundProof.output');assert(proof.audio.output.peak>0&&proof.audio.output.peak<.999,'actual recorded mixer output is nonzero and unclipped')}
- proof.audio.lifecycleCalls=await evaluate('window.__mascotSoundProof.audioLifecycleCalls');proof.audio.stateTransitions=await evaluate('window.__mascotSoundProof.audioStateTransitions');proof.finalState=afterBatch;fs.writeFileSync('out/mascot-header-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify(proof,null,2));console.log('1.1.7 Minecraft header mascot GUI checks passed')
+ proof.audio.lifecycleCalls=await evaluate('window.__mascotSoundProof.audioLifecycleCalls');proof.audio.stateTransitions=await evaluate('window.__mascotSoundProof.audioStateTransitions');proof.finalState=afterBatch;fs.writeFileSync('out/mascot-header-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify(proof,null,2));console.log(version+' Minecraft header mascot GUI checks passed')
  await evaluate('(()=>{const h=window.__mascotHooks;window.AudioContext=h.Original;AudioBufferSourceNode.prototype.start=h.start;AudioNode.prototype.connect=h.connect;h.Original.prototype.close=h.close;h.Original.prototype.resume=h.resume;h.Original.prototype.suspend=h.suspend;HTMLCanvasElement.prototype.getContext=h.getContext;WebGL2RenderingContext.prototype.drawElements=h.draw})()')
  await main("testElectron.ipcMain.removeHandler('mascots:batch');testElectron.ipcMain.handle('mascots:batch',mascotProofBatchBase);testElectron.ipcMain.removeListener('window:mascotPending',mascotProofPendingListener)")
  await nav('home')
