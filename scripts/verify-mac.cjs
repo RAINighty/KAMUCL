@@ -32,14 +32,41 @@ async function main(){
  await wait(3000)
  const screenshot=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(proof,'main.png'),Buffer.from(screenshot.data,'base64'))
  // Inspect rendered default-skin pixels; a live WebGL context alone would miss the old faceless fallback.
- await call('Runtime.evaluate',{expression:`document.querySelector('.viewer3d')?.scrollIntoView({block:'center'})`});await wait(1000)
- const skinBounds=await call('Runtime.evaluate',{expression:`(()=>{const c=document.querySelector('.viewer3d canvas');const r=c?.getBoundingClientRect(),v=window.visualViewport;return r?{bounds:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{width:v?.width||innerWidth,height:v?.height||innerHeight,offsetLeft:v?.offsetLeft||0,offsetTop:v?.offsetTop||0,innerWidth,innerHeight,devicePixelRatio}}:null})()`,returnByValue:true})
- assert(skinBounds.result.value,'skin WebGL canvas missing')
- const sharp=require('sharp'),{bounds,viewport}=skinBounds.result.value
+ const measureSkin=async()=>{
+  const result=await call('Runtime.evaluate',{expression:`(()=>{const c=document.querySelector('.viewer3d canvas');const r=c?.getBoundingClientRect(),v=window.visualViewport,content=document.querySelector('.content');return r?{bounds:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{width:v?.width||innerWidth,height:v?.height||innerHeight,offsetLeft:v?.offsetLeft||0,offsetTop:v?.offsetTop||0,innerWidth,innerHeight,devicePixelRatio},documentHidden:document.hidden,visibilityState:document.visibilityState,scroll:content?{top:content.scrollTop,height:content.clientHeight,scrollHeight:content.scrollHeight}:null}:null})()`,returnByValue:true})
+  return result.result.value
+ }
+ const skinReadiness={source:'real scrollIntoView and repeated viewport/canvas measurements before and after the complete visible frame',samples:[],captures:[]}
+ let skinBounds,skinShot,previous='',stable=0
+ const signature=value=>JSON.stringify({bounds:value?.bounds,viewport:value?.viewport})
+ try{
+  for(let captureAttempt=0;captureAttempt<3;captureAttempt++){
+   previous='';stable=0
+   for(let i=0;i<30;i++){
+    // Native first-launch resizing can finish after the initial screenshot and
+    // move the responsive account card below the viewport. Re-scroll using the
+    // actual current layout rather than relying on one earlier scroll request.
+    await call('Runtime.evaluate',{expression:`document.querySelector('.viewer3d')?.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`});await wait(160)
+    skinBounds=await measureSkin();const b=skinBounds?.bounds,v=skinBounds?.viewport
+    const visible=!!b&&b.width>0&&b.height>0&&b.x>=v.offsetLeft&&b.y>=v.offsetTop&&b.x+b.width<=v.offsetLeft+v.width&&b.y+b.height<=v.offsetTop+v.height
+    const current=signature(skinBounds);stable=visible&&current===previous?stable+1:0;previous=current
+    skinReadiness.samples.push({captureAttempt,sample:i,visible,stable,...skinBounds});fs.writeFileSync(path.join(proof,'default-skin-readiness.json'),JSON.stringify(skinReadiness,null,2))
+    if(stable>=1)break
+   }
+   assert(stable>=1,'skin canvas never reached a fully visible stable viewport')
+   skinShot=await call('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false})
+   fs.writeFileSync(path.join(proof,'default-skin-frame.png'),Buffer.from(skinShot.data,'base64'))
+   const after=await measureSkin(),matched=signature(after)===signature(skinBounds)
+   skinReadiness.captures.push({captureAttempt,before:skinBounds,after,matched});fs.writeFileSync(path.join(proof,'default-skin-readiness.json'),JSON.stringify(skinReadiness,null,2))
+   if(matched)break
+   skinShot=undefined
+  }
+  assert(skinShot,'skin viewport/canvas changed during every screenshot attempt')
+ }catch(error){console.error('Default skin capture readiness diagnostics',JSON.stringify(skinReadiness,null,2));throw error}
+ const sharp=require('sharp'),{bounds,viewport}=skinBounds
  // A separately clipped CDP screenshot can return a black GPU surface on macOS
  // despite the visible WebGL texture being present in the complete compositor
  // frame. Capture the current full visible frame, then crop its actual pixels.
- const skinShot=await call('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false})
  const skinFrame=Buffer.from(skinShot.data,'base64');fs.writeFileSync(path.join(proof,'default-skin-frame.png'),skinFrame)
  const frameMeta=await sharp(skinFrame).metadata(),frameWidth=frameMeta.width,frameHeight=frameMeta.height
  assert(frameWidth>0&&frameHeight>0&&viewport.width>0&&viewport.height>0,'skin capture dimensions invalid')
@@ -47,7 +74,7 @@ async function main(){
  const raw={left:Math.floor((bounds.x-viewport.offsetLeft)*scaleX),top:Math.floor((bounds.y-viewport.offsetTop)*scaleY),right:Math.ceil((bounds.x+bounds.width-viewport.offsetLeft)*scaleX),bottom:Math.ceil((bounds.y+bounds.height-viewport.offsetTop)*scaleY)}
  const left=Math.max(0,Math.min(frameWidth,raw.left)),top=Math.max(0,Math.min(frameHeight,raw.top)),right=Math.max(left,Math.min(frameWidth,raw.right)),bottom=Math.max(top,Math.min(frameHeight,raw.bottom))
  const crop={left,top,width:right-left,height:bottom-top}
- const skinCapture={source:'Page.captureScreenshot full visible compositor frame, cropped with sharp',frame:'default-skin-frame.png',bounds,viewport,frameSize:{width:frameWidth,height:frameHeight},scale:{x:scaleX,y:scaleY},rawCrop:raw,crop,clamped:raw.left!==left||raw.top!==top||raw.right!==right||raw.bottom!==bottom}
+ const skinCapture={source:'Page.captureScreenshot full visible compositor frame, cropped with sharp',frame:'default-skin-frame.png',readiness:'default-skin-readiness.json',bounds,viewport,frameSize:{width:frameWidth,height:frameHeight},scale:{x:scaleX,y:scaleY},rawCrop:raw,crop,clamped:raw.left!==left||raw.top!==top||raw.right!==right||raw.bottom!==bottom}
  fs.writeFileSync(path.join(proof,'default-skin-capture.json'),JSON.stringify(skinCapture,null,2))
  assert(crop.width>0&&crop.height>0,'skin canvas is outside the captured visible frame')
  const croppedSkin=await sharp(skinFrame).extract(crop).png().toBuffer();fs.writeFileSync(path.join(proof,'default-skin.png'),croppedSkin)
