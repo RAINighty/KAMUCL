@@ -103,13 +103,13 @@ async function main() {
   const mac = ['arm64', 'x64'].flatMap(arch => ['dmg', 'zip'].map(ext => path.join(root, 'release', `KAMUCL-${version}-mac-${arch}.${ext}`)))
   const handoff = path.join(root, 'release', `KAMUCL-${version}-handoff.zip`)
   const packages = [exe, zip, unpacked, source, ...mac, handoff]
-  const history = path.join(root, 'release', `KAMUCL-${version}-validation-history.zip`)
-  if (fs.existsSync(history)) packages.push(history)
+  packages.push(...require('./release-history-assets.cjs')(path.join(root, 'release'), version))
   for (const f of packages) {
     if (!fs.existsSync(f)) {
       console.error(`缺少构建产物：${f}（先运行打包）`)
       process.exit(1)
     }
+    if (fs.statSync(f).size >= 2_000_000_000) throw new Error('附件超过保守的单文件大小上限：' + path.basename(f))
   }
   const sums = packages.map(file => `${sha256(file)}  ${path.basename(file)}`).join('\n') + '\n'
   const sumsFile = path.join(root, 'release', 'SHA256SUMS.txt')
