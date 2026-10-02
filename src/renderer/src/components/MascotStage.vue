@@ -16,7 +16,7 @@ const {reduced,hidden,decorativeActive}=useMotion(),host=ref<HTMLElement>(),view
 const ready=ref(false),supported=ref(true),closing=ref(false),menu=ref(false),confirmReset=ref(false),persistError=ref(''),busy=ref(false)
 const state=ref<MascotState>({counts:{},order:MASCOTS.map(m=>m.id),sound:normalizeMascotSound()})
 const sound=computed(()=>normalizeMascotSound(state.value.sound)),interaction=new KamuInteraction()
-const audio=new MascotAudio(()=>sound.value,(played,voices)=>{if(host.value){host.value.dataset.soundsPlayed=String(played);host.value.dataset.activeSounds=String(voices)}},()=>!hidden.value)
+const audio=new MascotAudio(()=>sound.value,(played,voices)=>{if(host.value){host.value.dataset.soundsPlayed=String(played);host.value.dataset.activeSounds=String(voices)}},()=>!hidden.value,event=>{data('audioPreparation',event.phase);data('audioPrepareStartedAt',String(event.startedAt));data('audioPrepareAt',String(event.at));data('audioPrepareTime',String(event.audioTime))})
 let gl:WebGLRenderer|undefined,software:MascotSoftwareRenderer|undefined,batchRenderer:MascotBatchRenderer|undefined,scene:Scene,camera:OrthographicCamera,player:PreviewPlayer|undefined,waist:Group,pelvis:Object3D
 const textures:Texture[]=[],feet:Array<{mesh:Mesh;corners:Vector3[]}>=[],parts:Mesh[]=[],point=new Vector3(),projected=new Vector3()
 let feedbackElement:HTMLElement|undefined,palmElement:SVGElement|undefined,printElement:SVGElement|undefined

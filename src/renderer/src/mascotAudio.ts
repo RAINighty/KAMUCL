@@ -16,12 +16,14 @@ export function slapSamples(sampleRate:number):Float32Array {
  if(peak>.92)for(let i=0;i<samples.length;i++)samples[i]*=.92/peak
  return samples
 }
+export type MascotAudioPreparation={phase:'pending'|'ended'|'cancelled'|'timeout'|'failed';startedAt:number;at:number;audioTime:number;zeroGain:number}
 export class MascotAudio {
  private context?:AudioContext;private buffer?:AudioBuffer;private gain?:GainNode
  private primer?:ConstantSourceNode;private primed=false
+ private bufferPrepared=false;private preparing?:Promise<void>;private finishPreparation?:((phase:MascotAudioPreparation['phase'])=>void)
  private voices=new Set<AudioBufferSourceNode>();private next=0;private played=0;private closed=false;private paused=false
  private suspending?:Promise<void>
- constructor(private prefs:()=>MascotSound,private stats:(played:number,voices:number)=>void,private active:()=>boolean=()=>true){}
+ constructor(private prefs:()=>MascotSound,private stats:(played:number,voices:number)=>void,private active:()=>boolean=()=>true,private preparationStats:(event:MascotAudioPreparation)=>void=()=>{}){}
  private allowed(){return!this.closed&&!this.paused&&this.active()}
  private stateChanged=()=>{if(this.context?.state==='running'&&!this.allowed())this.suspend(this.context)}
  private stopPrimer(){
@@ -36,6 +38,32 @@ export class MascotAudio {
   source.offset.value=0;source.connect(this.gain);this.primer=source
   source.onended=()=>{source.disconnect();if(this.primer===source)this.primer=undefined}
   try{source.start(when);source.stop(when+.05);this.primed=true}catch(error){this.stopPrimer();throw error}
+ }
+ private prepareBuffer(context:AudioContext):Promise<void>{
+  if(this.preparing)return this.preparing
+  if(this.bufferPrepared||!this.buffer||!this.allowed()||context.state!=='running')return Promise.resolve()
+  const source=context.createBufferSource(),zeroGain=context.createGain(),startedAt=performance.now()
+  // Exercise the same real sample and first-contact resampling path, but through
+  // an independent, permanently zero output. It is never a contact or a voice.
+  source.buffer=this.buffer;source.playbackRate.value=.95;zeroGain.gain.value=0
+  Object.defineProperty(source,'kamuclInitialization',{value:Object.freeze({role:'silent-slap-buffer',zeroGain})})
+  source.connect(zeroGain);zeroGain.connect(context.destination)
+  const operation=new Promise<void>(resolve=>{
+   let done=false,timer:ReturnType<typeof setTimeout>|undefined
+   const finish=(phase:MascotAudioPreparation['phase'])=>{
+    if(done)return;done=true;clearTimeout(timer);source.onended=null
+    if(phase!=='ended')try{source.stop()}catch{}
+    source.disconnect();zeroGain.disconnect();this.finishPreparation=undefined
+    this.preparationStats({phase,startedAt,at:performance.now(),audioTime:context.currentTime,zeroGain:zeroGain.gain.value});resolve()
+   }
+   this.finishPreparation=finish;source.onended=()=>finish('ended')
+   this.preparationStats({phase:'pending',startedAt,at:startedAt,audioTime:context.currentTime,zeroGain:zeroGain.gain.value})
+   // Natural audio completion is the only success condition; this is a device
+   // failure bound, not a fixed wait pretending initialization succeeded.
+   timer=setTimeout(()=>finish('timeout'),1500)
+   try{source.start(context.currentTime);this.bufferPrepared=true}catch{finish('failed')}
+  }).finally(()=>{if(this.preparing===operation)this.preparing=undefined})
+  this.preparing=operation;return operation
  }
  private suspend(context:AudioContext){
   if(context.state==='closed'||this.suspending)return
@@ -66,14 +94,14 @@ export class MascotAudio {
    if(!this.allowed()){this.suspend(context);return}
    if(context.state==='suspended')await context.resume()
    if(!this.allowed())this.suspend(context)
-   else this.primeOutput(context)
+   else{this.primeOutput(context);await this.prepareBuffer(context);if(!this.allowed())this.suspend(context)}
   }catch{/* Audio device availability must not block interaction or persistence. */}
  }
  /** Returns the visual-clock delay to the very same scheduled contact sound. */
  play(approachMs=0):number {
   const prefs=this.prefs(),context=this.context
   const lead=Math.max(0,Math.min(150,approachMs))/1000
-  if(!this.allowed()||prefs.muted||!prefs.volume||!context||context.state!=='running'||!this.buffer||!this.gain)return lead*1000
+  if(!this.allowed()||this.preparing||prefs.muted||!prefs.volume||!context||context.state!=='running'||!this.buffer||!this.gain)return lead*1000
   this.gain.gain.setTargetAtTime(prefs.volume*.75,context.currentTime,.004)
   const source=context.createBufferSource();source.buffer=this.buffer;source.playbackRate.value=1+(this.played%5-2)*.025;source.connect(this.gain)
   if(this.voices.size>=24){const oldest=this.voices.values().next().value;try{oldest?.stop()}catch{}}
@@ -86,6 +114,6 @@ export class MascotAudio {
   return (start-context.currentTime)*1000
  }
  update(){if(this.gain&&this.context)this.gain.gain.setTargetAtTime(this.prefs().muted?0:this.prefs().volume*.75,this.context.currentTime,.004)}
- pause(){this.paused=true;this.next=0;this.stopPrimer();for(const source of this.voices){try{source.stop()}catch{}}if(this.context)this.suspend(this.context)}
+ pause(){this.paused=true;this.next=0;this.stopPrimer();this.finishPreparation?.('cancelled');for(const source of this.voices){try{source.stop()}catch{}}if(this.context)this.suspend(this.context)}
  async dispose(){this.closed=true;this.pause();const context=this.context;await context?.close().catch(()=>{});context?.removeEventListener('statechange',this.stateChanged);this.context=undefined;this.buffer=undefined;this.gain=undefined}
 }
