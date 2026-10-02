@@ -210,3 +210,4 @@ module.exports.captureRequest = captureRequest
 module.exports.captureStatistics = captureStatistics
 module.exports.stopOwnedHelper = stopOwnedHelper
 module.exports.verifyPixels = verifyPixels
+module.exports.nativeVideoSnapshot = nativeVideoSnapshot
