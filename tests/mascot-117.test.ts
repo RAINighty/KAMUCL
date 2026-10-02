@@ -23,7 +23,7 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
   b.onResolve({filter:/^(@shared\/|\.\.\/)/},args=>({path:args.path,external:true}))
   b.onLoad({filter:/\.vue$/},async args=>{const {descriptor}=parse(await fs.readFile(args.path,'utf8'));return{contents:compileScript(descriptor,{id:args.path}).content,loader:'ts',resolveDir:path.dirname(args.path)}})
  }}]}).then(bundle=>bundle.outputFiles[0].text)
- const state=deferred<any>(),unlock=deferred<void>(),notices:string[]=[],images:any[]=[],events:any[]=[],hidden=vue.ref(false),counts={unlocks:0,audioDisposed:0,rendererCreated:0,rendererDisposed:0,contextLost:0,attached:0,removed:0,rigs:0,frames:0,unsubscribed:0,compile:0,draw:0,fences:0,deleted:0,checks:0,flush:0,focus:0,software:0,rasters:0,softwareDisposed:0}
+ const state=deferred<any>(),unlock=deferred<void>(),notices:string[]=[],images:any[]=[],events:any[]=[],plays:number[]=[],hidden=vue.ref(false),counts={unlocks:0,audioDisposed:0,rendererCreated:0,rendererDisposed:0,contextLost:0,attached:0,removed:0,rigs:0,frames:0,unsubscribed:0,compile:0,draw:0,fences:0,deleted:0,checks:0,flush:0,focus:0,software:0,rasters:0,softwareDisposed:0}
  let now=100,fenceStatus=0,lost=false,nextFrame=0,nextTimer=0,softwareFails=options.softwareFails
  const frames=new Map<number,(time:number)=>void>(),timers=new Map<number,{callback:()=>void;at:number}>(),listeners=new Map<string,(event:any)=>void>()
  const context={SYNC_GPU_COMMANDS_COMPLETE:1,ALREADY_SIGNALED:2,CONDITION_SATISFIED:3,WAIT_FAILED:4,TIMEOUT_EXPIRED:0,getExtension:()=>null,getParameter:()=> 'lifecycle fixture native GPU',isContextLost:()=>lost,fenceSync:()=>{counts.fences++;return{}},deleteSync:()=>counts.deleted++,clientWaitSync:(_sync:any,flags:number,timeout:number)=>{assert.equal(flags,0);assert.equal(timeout,0,'readiness must not synchronously wait');counts.checks++;return fenceStatus},flush:()=>counts.flush++}
@@ -37,7 +37,7 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
   dispose(){counts.rendererDisposed++}forceContextLoss(){counts.contextLost++}
  }
  class ImageFixture{onload:any=null;onerror:any=null;src='';constructor(){images.push(this)}}
- class AudioFixture{unlock(){counts.unlocks++;return unlock.promise}dispose(){counts.audioDisposed++;return Promise.resolve()}pause(){}play(){}update(){}}
+ class AudioFixture{unlock(){counts.unlocks++;return unlock.promise}dispose(){counts.audioDisposed++;return Promise.resolve()}pause(){}play(){plays.push(now)}update(){}}
  const nodeRequire=createRequire(path.resolve('package.json')),mod={exports:{} as any}
  const requireFixture=(name:string):any=>{
   if(name==='vue')return{...vue,onMounted:(callback:any)=>mounted=callback,onUnmounted:(callback:any)=>unmounted=callback}
@@ -57,9 +57,10 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
  const windowFixture={kamucl:{invoke:()=>state.promise,on:()=>()=>counts.unsubscribed++,send:()=>{}}}
  new Function('require','module','exports','window','Image','requestAnimationFrame','cancelAnimationFrame','performance','setTimeout','clearTimeout',await mascotSetupBundle)(requireFixture,mod,mod.exports,windowFixture,ImageFixture,(callback:any)=>{counts.frames++;frames.set(++nextFrame,callback);return nextFrame},(id:number)=>frames.delete(id),{now:()=>now},(callback:any,delay:number)=>{timers.set(++nextTimer,{callback,at:now+delay});return nextTimer},(id:number)=>timers.delete(id))
  const scope=vue.effectScope(),setup=scope.run(()=>mod.exports.default.setup({focusOnReady:true},{expose:()=>{},emit:(...event:any[])=>events.push(event)}))
- setup.host.value={dataset:{},querySelector:()=>null};setup.viewport.value={prepend:()=>counts.attached++}
+ const palmStyles=new Map<string,string>(),printStyles=new Map<string,string>(),feedback={dataset:{},style:{setProperty:()=>{}},querySelector:(selector:string)=>({style:{setProperty:(key:string,value:string)=>(selector==='.pixel-palm'?palmStyles:printStyles).set(key,value)}})}
+ setup.host.value={dataset:{},querySelector:()=>feedback};setup.viewport.value={prepend:()=>counts.attached++}
  setup.hit.value={focus:()=>counts.focus++}
- return{state,unlock,counts,images,notices,setup,events,hidden,context,frames,timers,listeners,setSoftwareFailure:(value:boolean)=>softwareFails=value,mount:()=>mounted(),unmount:()=>{unmounted();setup.host.value=undefined;setup.viewport.value=undefined;scope.stop()},signal:(status=context.CONDITION_SATISFIED)=>fenceStatus=status,lose:()=>{lost=true;listeners.get('webglcontextlost')?.({preventDefault:()=>{}})},runFrame:(elapsed=16)=>{now+=elapsed;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(now)},expire:()=>{now+=3001;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback()}}}
+ return{state,unlock,counts,images,notices,setup,events,plays,palmStyles,printStyles,hidden,context,frames,timers,listeners,clock:()=>now,setSoftwareFailure:(value:boolean)=>softwareFails=value,mount:()=>mounted(),unmount:()=>{unmounted();setup.host.value=undefined;setup.viewport.value=undefined;scope.stop()},signal:(status=context.CONDITION_SATISFIED)=>fenceStatus=status,lose:()=>{lost=true;listeners.get('webglcontextlost')?.({preventDefault:()=>{}})},runFrame:(elapsed=16,rafTimestamp?:number)=>{now+=elapsed;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(rafTimestamp??now)},expire:()=>{now+=3001;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback()}}}
 }
 test('real mascot setup cannot allocate after unmount overtakes state or audio initialization',async()=>{
  for(const gate of ['state','audio']){
@@ -143,6 +144,45 @@ test('failed CPU fallback remains visibly unavailable and can recover without in
   f.runFrame();f.signal(f.context.WAIT_FAILED);f.runFrame();assert.equal(f.setup.supported.value,false);assert.equal(f.setup.ready.value,false);assert.equal(f.setup.host.value.dataset.gpuReadyStatus,'failed');assert.match(f.setup.persistError.value,/software unavailable/);assert.equal(f.counts.focus,0);assert.equal(f.frames.size,0);assert.equal(f.timers.size,0)
   f.setSoftwareFailure(false);f.setup.retryPreview();assert.equal(f.setup.supported.value,true);assert.equal(f.setup.ready.value,false);assert.equal(f.counts.rasters,0)
   f.runFrame();await vue.nextTick();assert.equal(f.counts.rasters,1);assert.equal(f.setup.ready.value,true);assert.equal(f.counts.focus,1);assert.equal(f.setup.persistError.value,'')
+ }finally{f.unmount()}
+})
+
+test('visible contact, palm and sound use actual callback time despite delayed rAF timestamp delivery',async()=>{
+ const f=await mountedMascotModel()
+ try{
+  f.signal();f.runFrame();f.runFrame(400)
+  const shadow=new KamuInteraction(),acceptedAt=f.clock()
+  for(let i=0;i<10;i++){f.setup.slap();assert(shadow.accept(acceptedAt))}
+  // Native Intel evidence: an old timestamp arrives 65ms late, followed by a
+  // nearly current callback. Timestamp time advances ~150ms while wall time
+  // between source calls was only 85.7ms. Replay that delivery pattern.
+  const delivery=[[33,1],[33,1],[33,1],[72,41],[6,16],[83,65],[14,13],[21,1],[50,1],[33,1]]
+  let contacts=0,lastContact=-1000,previousTimestamp=0
+  for(let i=0;i<160&&shadow.busy;i++){
+   const [elapsed,lag]=delivery[i%delivery.length],actual=f.clock()+elapsed,timestamp=actual-lag
+   assert(timestamp>previousTimestamp);previousTimestamp=timestamp
+   const expected=shadow.advance(actual,false,50),before=f.plays.length
+   f.runFrame(elapsed,timestamp)
+   assert.equal(Number(f.setup.host.value.dataset.renderNow),actual);assert.equal(Number(f.setup.host.value.dataset.rafTimestamp),timestamp,'keep host-supplied timing as an independent observation')
+   assert.equal(f.plays.length-before,expected.contacts.length);assert(expected.contacts.length<=1)
+   for(const contact of expected.contacts){lastContact=contact;contacts++;assert.equal(f.plays.at(-1),actual,'contact source starts on this same actual callback clock')}
+   const opacity=expected.palm>=0?1-Math.max(0,(expected.palm-.5)*2):0
+   assert(Math.abs(Number(f.palmStyles.get('opacity'))-opacity)<1e-10,'presented palm advances on actual contact clock')
+   const print=actual-lastContact<500?.72*(1-(actual-lastContact)/500):0
+   assert(Math.abs(Number(f.printStyles.get('opacity'))-print)<1e-10)
+   assert.equal(Number(f.setup.host.value.dataset.contacts),contacts)
+  }
+  assert.equal(shadow.busy,false);assert.equal(f.plays.length,10);assert.equal(f.setup.state.value.counts.kamu,10)
+  const intervals=f.plays.slice(1).map((at,index)=>at-f.plays[index]);assert(intervals.every(interval=>interval>=100),'visible 50ms frame budget preserves at least 100ms between actual contacts: '+intervals.join(','))
+ }finally{f.unmount()}
+})
+
+test('hidden close still drains all accepted contacts unbounded without hidden sound or visible-frame fabrication',async()=>{
+ const f=await mountedMascotModel()
+ try{
+  f.signal();f.runFrame();for(let i=0;i<10;i++)f.setup.slap()
+  f.hidden.value=true;const draws=f.counts.draw;await f.setup.flush()
+  assert.equal(f.setup.state.value.counts.kamu,10);assert.equal(f.plays.length,0);assert.equal(f.counts.draw,draws);assert.equal(f.frames.size,0);assert.equal(f.setup.busy.value,false)
  }finally{f.unmount()}
 })
 

@@ -89,9 +89,12 @@ function soundChanged(value:Partial<{muted:boolean;volume:number}>){state.value.
 async function resetCounts(){try{await flush();state.value=await window.kamucl.invoke('mascots:reset',true,'kamu') as MascotState;confirmReset.value=false;menu.value=false;await nextTick(()=>menuButton.value?.focus())}catch(error){toast(errText(error),'error')}}
 function closeMenu(){menu.value=false;confirmReset.value=false;void nextTick(()=>menuButton.value?.focus())}
 function wake(){if(!disposed&&!hidden.value&&player&&!frame)frame=requestAnimationFrame(render)}
-function render(now:number){
+function render(rafTimestamp:number){
+ const now=performance.now()
  frame=0;if(disposed||hidden.value||!player)return
- const started=performance.now(),pose=interaction.advance(now,reduced.value,50);recordContacts(pose.contacts,now);busy.value=interaction.busy
+ // Host delivery may lag behind the rAF timestamp and recover on the next frame.
+ // Phase, contact playback and feedback use the same actual callback clock.
+ const started=now,pose=interaction.advance(now,reduced.value,50);recordContacts(pose.contacts,now);busy.value=interaction.busy
  const activation=ready.value?Math.min(1,(now-activated)/(reduced.value?100:380)):0,ease=activation*activation*(3-2*activation)
  const idle=ready.value&&decorativeActive.value?Math.sin(now*.002)*.016:0,pop=Math.max(0,1-(now-lastContact)/210)*Math.sin(Math.min(1,Math.max(0,(now-lastContact)/210))*Math.PI)
  const waistAngle=Math.sin(pose.yaw/2)*.28+pop*.12,headAngle=-waistAngle+idle,armAngle=-.04+pop*.15,scale=.75+ease*.25
@@ -119,6 +122,7 @@ function render(now:number){
  style(palmElement,'opacity',t>=0&&!reduced.value?String(1-retreat):'0');style(palmElement,'transform',`translate(${(1-approach)*12+retreat*4}px,${-(1-approach)*12-retreat*4}px) rotate(${(1-approach)*-35+retreat*15}deg)`)
  style(printElement,'opacity',now-lastContact<500?String(.72*(1-(now-lastContact)/500)):'0')
  data('phase',interaction.phase);data('queue',String(interaction.queued));data('contacts',String(contactsTotal));data('bodyYaw',String(pose.yaw));data('activation',String(activation));data('renderDrawCalls',String(modelChanged?(software?.info.render.calls??gl?.info.render.calls??0):0));data('rasterFrames',String(software?.info.frames??0));data('canvasUploads',String(software?.info.totalUploads??0))
+ data('rafTimestamp',String(rafTimestamp));data('renderNow',String(now))
  // A real callback observation is separate from raster work or canvas uploads.
  // Keep this observation even when exact pixels are unchanged.
  if(host.value)host.value.dataset.renderMs=String(performance.now()-started)
