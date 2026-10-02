@@ -98,7 +98,10 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
         await require('./'+file)({...harness,screenshot:name=>harness.screenshot(name.startsWith('extension-')?name:'extension-118-'+name)});
         // Full header module returns only after restoring its recorder/audio graph
         // and draw hooks. Compare the untouched native graph in this same window.
-        if(version==='1.1.9'&&id==='header')await require('./verify-kamu-motion-diagnostic-119.cjs')({...harness,motionDiagnosticInvocation:'after-header'});
+        if(version==='1.1.9'&&id==='header'){
+          await require('./verify-kamu-motion-diagnostic-119.cjs')({...harness,motionDiagnosticInvocation:'after-header'});
+          if(process.platform==='darwin')await require('./verify-kamu-native-compositor-119.cjs')(harness);
+        }
       }
     }
   }
