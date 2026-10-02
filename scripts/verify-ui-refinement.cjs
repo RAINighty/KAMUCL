@@ -42,7 +42,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
     await wait(250);fs.writeFileSync('out/native-gui-focus-live.json',JSON.stringify({source:'actual disposable macOS NSApp activation and BrowserWindow focus; no system preferences changed',...nativeFocus},null,2));
   }
   assert.equal(await evaluate('document.documentElement.dataset.theme'),process.env.KAMUCL_TEST_THEME||'black-orange','requested theme must actually apply');
-  const screenshot=async name=>{await wait(220);fs.writeFileSync(path.join(shotDir,name+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'))};
+  const screenshot=async name=>{await wait(220);fs.writeFileSync(path.join(shotDir,name+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));if(process.env.KAMUCL_STABLE_NAV_PROOF==='1'&&/gallery-118-themed-rows|community-118-favorites/.test(name)){await wait(1800);const state=await evaluate("({now:performance.now(),view:document.querySelector('.nav-item.active')?.dataset.nav,transitions:document.querySelector('nav')?.getAnimations({subtree:true}).filter(a=>a.playState==='running').map(a=>({state:a.playState,currentTime:a.currentTime})),items:[...document.querySelectorAll('.nav-item')].map(e=>({text:e.innerText,box:{top:e.getBoundingClientRect().top,bottom:e.getBoundingClientRect().bottom},opacity:getComputedStyle(e).opacity}))})");fs.writeFileSync(path.join(shotDir,name+'-settled.json'),JSON.stringify(state,null,2));fs.writeFileSync(path.join(shotDir,name+'-settled.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'))}};
   const click=async selector=>{
     let state;
     for(let i=0;i<50;i++){
