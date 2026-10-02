@@ -337,8 +337,30 @@ module.exports=async function verifyMascotHeader(h){
  proof.lifecycle.hidden=proof.lifecycle.hiddenSamples.at(-1);fs.writeFileSync('out/mascot-header-visibility-live.json',JSON.stringify(proof.lifecycle,null,2))
  assert.equal(proof.lifecycle.hidden.native.isVisible,false,'the main BrowserWindow is genuinely hidden');assert.equal(proof.lifecycle.hidden.renderer.nativeVisibility,false,'trusted native visibility IPC reports hidden');assert.equal(proof.lifecycle.hidden.renderer.stageHidden,true,'native hide reaches the stage lifecycle even when Page Visibility lags');assert(proof.lifecycle.hidden.renderer.audioStates.length>0&&proof.lifecycle.hidden.renderer.audioStates.every(state=>state==='suspended'),'hidden stage suspends its actual owned AudioContext')
  const hiddenDraws=proof.lifecycle.hidden.renderer.draws;await wait(220);proof.lifecycle.hiddenSettled=await visibilitySnapshot();proof.lifecycle.audioLifecycleCalls=await evaluate('window.__mascotSoundProof.audioLifecycleCalls');proof.lifecycle.audioStateTransitions=await evaluate('window.__mascotSoundProof.audioStateTransitions');fs.writeFileSync('out/mascot-header-visibility-live.json',JSON.stringify(proof.lifecycle,null,2));assert.equal(proof.lifecycle.hiddenSettled.renderer.draws,hiddenDraws,'hidden stage performs no draw calls');assert.equal(proof.lifecycle.hiddenSettled.renderer.activeSources,0,'hidden stage leaves no live sound sources');assert(proof.lifecycle.hiddenSettled.renderer.audioStates.every(state=>state==='suspended'),'hidden audio remains suspended after delayed resume or browser state changes')
- await main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/renderer/index.html'));w.show();w.focus()})()`);await call('Emulation.setFocusEmulationEnabled',{enabled:true});await wait(300)
- proof.lifecycle.restored=await visibilitySnapshot();fs.writeFileSync('out/mascot-header-visibility-live.json',JSON.stringify(proof.lifecycle,null,2));assert.equal(proof.lifecycle.restored.native.isVisible,true);assert.equal(proof.lifecycle.restored.renderer.nativeVisibility,true);assert.equal(proof.lifecycle.restored.renderer.stageHidden,false);assert(proof.lifecycle.restored.renderer.draws>hiddenDraws,'foreground resumes actual WebGL draws');assert(proof.lifecycle.restored.renderer.audioStates.every(state=>state==='running'),'foreground resumes the owned AudioContext')
+ await main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/renderer/index.html'));if(process.platform==='darwin')testElectron.app.focus({steal:true});w.show();w.focus()})()`);await call('Emulation.setFocusEmulationEnabled',{enabled:true})
+ // Native audio resume is asynchronous. Observe its real completion instead of
+ // treating one snapshot 300ms after show as a permanent failure. This does not
+ // change context state, replay input, or relax the hidden/pending-resume guards.
+ const restoreStarted=Date.now(),restoreDeadline=restoreStarted+5000
+ proof.lifecycle.restoreWait={source:'bounded observation after actual native app/window activation; real AudioContext state and fresh lifecycle traces, no synthetic state',maximumMs:5000,startedAt:new Date(restoreStarted).toISOString(),samples:[],ready:false,timedOut:false}
+ while(Date.now()<restoreDeadline){
+  const remaining=restoreDeadline-Date.now();let timer
+  const sample=await Promise.race([
+   Promise.all([visibilitySnapshot(),nativeFocus(false),evaluate('({hasFocus:document.hasFocus(),now:performance.now(),audioLifecycleCalls:window.__mascotSoundProof.audioLifecycleCalls,audioStateTransitions:window.__mascotSoundProof.audioStateTransitions})')]).then(([snapshot,foreground,audio])=>({...snapshot,foreground,...audio,elapsedMs:Date.now()-restoreStarted})),
+   new Promise(resolve=>{timer=setTimeout(()=>resolve(null),remaining)})
+  ]).finally(()=>clearTimeout(timer))
+  if(!sample)break
+  const foreground=sample.foreground
+  sample.ready=sample.elapsedMs<=5000&&sample.native.isVisible&&!sample.native.isMinimized&&sample.renderer.nativeVisibility===true&&!sample.renderer.stageHidden&&foreground.windowFocused&&foreground.focusedWindowId===foreground.windowId&&foreground.windowVisible&&!foreground.windowMinimized&&foreground.appHidden!==true&&sample.hasFocus&&sample.renderer.draws>hiddenDraws&&sample.renderer.audioStates.length>0&&sample.renderer.audioStates.every(state=>state==='running')
+  proof.lifecycle.restoreWait.samples.push(sample);proof.lifecycle.restoreWait.ready=sample.ready
+  proof.lifecycle.restored=sample;proof.lifecycle.audioLifecycleCalls=sample.audioLifecycleCalls;proof.lifecycle.audioStateTransitions=sample.audioStateTransitions
+  fs.writeFileSync('out/mascot-header-visibility-live.json',JSON.stringify(proof.lifecycle,null,2))
+  if(sample.ready)break
+  await wait(Math.max(0,Math.min(50,restoreDeadline-Date.now())))
+ }
+ proof.lifecycle.restoreWait.elapsedMs=Date.now()-restoreStarted;proof.lifecycle.restoreWait.timedOut=!proof.lifecycle.restoreWait.ready
+ fs.writeFileSync('out/mascot-header-visibility-live.json',JSON.stringify(proof.lifecycle,null,2))
+ assert(proof.lifecycle.restoreWait.ready,'within 5 seconds actual native foreground must resume owned stage rendering and its running AudioContext; original observed states retained')
  proof.checks.push('real native hide via controlled IPC pauses actual rendering and audio, raw Page Visibility recorded, foreground resumes, reduced-motion idle pauses and remains interactive')
  const voices=await evaluate('window.__mascotSoundProof.peakVoices');assert(voices>=7,'sources must overlap without cutting off the preceding slap')
  const events=await evaluate('window.__mascotSoundProof.events');assert(events.every(e=>e.peak>0&&e.peak<1&&e.rms>0))

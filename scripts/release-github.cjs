@@ -6,7 +6,7 @@
  * 3. 上传并验证全部附件后公开 Release
  *
  * 认证优先级：GITHUB_TOKEN 环境变量 → gh CLI → git 凭据管理器（推送用的凭据）。
- * 用法：node scripts/release-github.cjs [--dry-run]
+ * 用法：node scripts/release-github.cjs [--dry-run] [--notes-file reviewed.md]
  */
 const fs = require('node:fs')
 require('./check-licenses.cjs').checkLicenses({ release: true })
@@ -114,7 +114,11 @@ async function main() {
   fs.writeFileSync(sumsFile, sums, 'utf-8')
   console.log('SHA256SUMS.txt:\n' + sums)
 
-  const body = latestNoteBody()
+  const notesIndex = process.argv.indexOf('--notes-file')
+  const notesPath = notesIndex < 0 ? null : process.argv[notesIndex + 1]
+  if (notesIndex >= 0 && (!notesPath || notesPath.startsWith('--'))) throw new Error('--notes-file 需要已审阅的 Markdown 文件')
+  const body = notesPath ? fs.readFileSync(path.resolve(root, notesPath), 'utf8') : latestNoteBody()
+  if (!body.trim()) throw new Error('Release 说明为空，停止发布')
   if (dryRun) {
     console.log('--- dry run，Release body ---')
     console.log(body)
