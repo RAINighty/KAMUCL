@@ -8,6 +8,7 @@ import {toast} from '../store'
 import {PreviewPlayer} from '../skinModel'
 import {MascotAudio} from '../mascotAudio'
 import {createMascotAtlas,MascotBatchRenderer} from '../mascotBatch'
+import {MascotSoftwareRenderer} from '../mascotSoftware'
 
 const emit=defineEmits<{close:[];softwareRenderer:[software:boolean]}>(),{reduced,hidden,decorativeActive}=useMotion()
 const props=defineProps<{focusOnReady?:boolean}>()
@@ -22,6 +23,8 @@ const rigs=new Map<string,Rig>(),walks=new Map<string,{from:number;to:number;sta
 const APPROACH_MS=80,PALM_MS=150,PRINT_MS=500
 let gl:WebGLRenderer|undefined,scene:Scene,camera:OrthographicCamera,resize:ResizeObserver|undefined,frame=0,closed=false,slot=20,height=60,width=400,scale=1,hiddenAt=0,softwareRenderer=false
 let batchRenderer:MascotBatchRenderer|undefined
+let software:MascotSoftwareRenderer|undefined
+const hasRenderer=()=>!!gl||!!software
 const parentRotation=new Quaternion(),faceRotation=new Quaternion(),faceEuler=new Euler(),scratch=new Vector3()
 let rectangles:MascotHitRect[]=[],displayOrder=MASCOTS.map(m=>m.id) as string[]
 let sortTimer:ReturnType<typeof setTimeout>|undefined,saveTimer:ReturnType<typeof setTimeout>|undefined,retryTimer:ReturnType<typeof setTimeout>|undefined,retryDelay=800
@@ -86,15 +89,15 @@ async function resetCounts(){
  catch(error){toast(errText(error),'error')}
 }
 function fit(){
- if(!gl||!strip.value)return
+ if(!hasRenderer()||!strip.value)return
  width=Math.max(1,strip.value.clientWidth);height=Math.max(1,strip.value.clientHeight-12)
- gl.setSize(width,height);const worldWidth=34*width/height
+ gl?.setSize(width,height);software?.setSize(width,height,Math.min(devicePixelRatio||1,2));const worldWidth=34*width/height
  camera.left=-worldWidth/2;camera.right=worldWidth/2;camera.top=34;camera.bottom=0;camera.updateProjectionMatrix();camera.updateMatrixWorld(true)
  slot=worldWidth/7;scale=Math.min(1,slot/20);gate.reset();wake()
 }
-function wake(){if(!closed&&!hidden.value&&gl&&!frame)frame=requestAnimationFrame(render)}
+function wake(){if(!closed&&!hidden.value&&hasRenderer()&&!frame)frame=requestAnimationFrame(render)}
 function render(now:number){
- frame=0;if(closed||hidden.value||!gl)return
+ frame=0;if(closed||hidden.value||!hasRenderer())return
  const renderStarted=performance.now()
  const reacting=[...palms.values()].some(queue=>queue.some(palm=>now-palm.contact<PRINT_MS)),walking=!reduced.value&&[...walks.values()].some(walk=>now-walk.start<walk.duration)
  // Follow the compositor cadence: a fixed 32ms cutoff loses legitimate ticks
@@ -137,16 +140,20 @@ function render(now:number){
   const headForward=scratch.set(0,0,1).transformDirection(player.skin.head.matrixWorld).toArray(),bodyForward=scratch.set(0,0,1).transformDirection(player.skin.body.matrixWorld).toArray()
   poses.push({id,walking:movement.walking,position:next,target,phase,waistPitch:rig.waist.rotation.x,bodyYaw:player.rotation.y,headForward,bodyForward,footY:actualFootY,butt:{x:butt.x,y:butt.y},contacts:queue.map(palm=>palm.contact)})
  }
- rectangles=rects;batchRenderer?.update();gl.render(scene,camera)
- if(host.value){host.value.dataset.modelBounds=JSON.stringify({height,width,models:modelBounds});host.value.dataset.silhouettes=JSON.stringify(rects);host.value.dataset.poses=JSON.stringify(poses);host.value.dataset.renderMs=String(performance.now()-renderStarted);host.value.dataset.renderDrawCalls=String(gl.info.render.calls);host.value.dataset.renderTriangles=String(gl.info.render.triangles)}
+ rectangles=rects;batchRenderer?.update();if(software&&batchRenderer)software.render(batchRenderer.mesh,camera);else gl?.render(scene,camera)
+ if(host.value){const info=software?.info??gl!.info;host.value.dataset.modelBounds=JSON.stringify({height,width,models:modelBounds});host.value.dataset.silhouettes=JSON.stringify(rects);host.value.dataset.poses=JSON.stringify(poses);host.value.dataset.renderMs=String(performance.now()-renderStarted);host.value.dataset.renderDrawCalls=String(info.render.calls);host.value.dataset.renderTriangles=String(info.render.triangles);host.value.dataset.renderUploads=String(software?software.info.uploads:0)}
  if(decorativeActive.value||reacting||walking)frame=requestAnimationFrame(render)
 }
 async function buildScene(){
  try{
-  gl=new WebGLRenderer({alpha:true,antialias:false,powerPreference:'low-power'});gl.setPixelRatio(Math.min(devicePixelRatio||1,2));gl.setClearColor(0,0);strip.value!.prepend(gl.domElement)
+  gl=new WebGLRenderer({alpha:true,antialias:false,powerPreference:'low-power'});gl.setPixelRatio(Math.min(devicePixelRatio||1,2));gl.setClearColor(0,0)
   // Software GL shares CPU time with backdrop rasterization. Preserve theme
   // colors, while temporarily yielding decorative frost to this interaction.
-  try{const context=gl.getContext(),debug=context.getExtension('WEBGL_debug_renderer_info'),renderer=String(context.getParameter(debug?.UNMASKED_RENDERER_WEBGL??context.RENDERER));softwareRenderer=/swiftshader|llvmpipe|lavapipe|softpipe|software/i.test(renderer)}catch{softwareRenderer=false}emit('softwareRenderer',softwareRenderer)
+  try{const context=gl.getContext(),debug=context.getExtension('WEBGL_debug_renderer_info'),renderer=String(context.getParameter(debug?.UNMASKED_RENDERER_WEBGL??context.RENDERER));softwareRenderer=/swiftshader|llvmpipe|lavapipe|softpipe|software/i.test(renderer);host.value!.dataset.rendererProbe=JSON.stringify({vendor:context.getParameter(context.VENDOR),renderer:context.getParameter(context.RENDERER),version:context.getParameter(context.VERSION),unmaskedVendor:debug?context.getParameter(debug.UNMASKED_VENDOR_WEBGL):null,unmaskedRenderer:debug?context.getParameter(debug.UNMASKED_RENDERER_WEBGL):null})}catch{softwareRenderer=false}
+  // A software compositor synchronously reads every WebGL frame. Rasterize the
+  // same posed geometry directly to one CPU canvas on that path; hardware keeps PBR.
+  if(softwareRenderer){gl.dispose();gl.forceContextLoss();gl=undefined;software=new MascotSoftwareRenderer()}
+  host.value!.dataset.renderBackend=software?'canvas2d-depth':'webgl-pbr';strip.value!.prepend(software?.domElement??gl!.domElement);emit('softwareRenderer',softwareRenderer)
   scene=new Scene();camera=new OrthographicCamera(-100,100,34,0,.1,300);camera.position.set(0,0,100);camera.lookAt(0,0,0)
   scene.add(new AmbientLight(0xffffff,2.1));const light=new DirectionalLight(0xffffff,1.2);light.position.set(-40,80,70);scene.add(light)
   await Promise.all(MASCOTS.map(async mascot=>{
@@ -169,9 +176,9 @@ async function buildScene(){
   }))
   if(closed)return
   const atlas=createMascotAtlas(MASCOTS.map(m=>players.get(m.id)!.skin.map!.image as HTMLImageElement));textures.push(atlas)
-  batchRenderer=new MascotBatchRenderer(MASCOTS.map(m=>rigs.get(m.id)!.parts.map(part=>part.mesh)),atlas,softwareRenderer);scene.add(batchRenderer.mesh);host.value!.dataset.material=batchRenderer.mesh.material.type
+  batchRenderer=new MascotBatchRenderer(MASCOTS.map(m=>rigs.get(m.id)!.parts.map(part=>part.mesh)),atlas);scene.add(batchRenderer.mesh);host.value!.dataset.material=batchRenderer.mesh.material.type
   resize=new ResizeObserver(fit);resize.observe(strip.value!);fit();ready.value=true;wake()
- }catch{supported.value=false;ready.value=true;gl?.dispose();gl=undefined}
+ }catch{supported.value=false;ready.value=true;gl?.dispose();gl=undefined;software?.dispose();software=undefined}
 }
 watch(hidden,value=>{if(value){hiddenAt=performance.now();cancelAnimationFrame(frame);frame=0;gate.reset();palms.clear();lastHits.clear();strip.value?.querySelectorAll<HTMLElement>('.mascot-feedback svg').forEach(element=>element.style.opacity='0');audio.pause();void flush().catch(()=>{})}else{const paused=hiddenAt?performance.now()-hiddenAt:0;for(const walk of walks.values())walk.start+=paused;hiddenAt=0;void audio.unlock();wake()}},{flush:'sync'})
 watch(decorativeActive,wake)
@@ -180,7 +187,7 @@ onMounted(async()=>{
  try{state.value=await window.kamucl.invoke('mascots:state') as MascotState;displayOrder=[...state.value.order];for(const [index,id] of displayOrder.entries())positions.set(id,index);await audio.unlock();await buildScene();if(props.focusOnReady)await nextTick(()=>strip.value?.querySelector<HTMLButtonElement>(`[data-hit="${displayOrder[0]}"]`)?.focus())}
  catch(error){persistError.value=errText(error);toast(errText(error),'error')}
 })
-onUnmounted(()=>{closed=true;unsubscribe();clearTimeout(sortTimer);clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);resize?.disconnect();gate.reset();palms.clear();walks.clear();batchRenderer?.dispose();batchRenderer=undefined;rigs.clear();for(const player of players.values())player.dispose();for(const texture of textures)texture.dispose();players.clear();gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove();void audio.dispose()})
+onUnmounted(()=>{closed=true;unsubscribe();clearTimeout(sortTimer);clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);resize?.disconnect();gate.reset();palms.clear();walks.clear();batchRenderer?.dispose();batchRenderer=undefined;rigs.clear();for(const player of players.values())player.dispose();for(const texture of textures)texture.dispose();players.clear();gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove();software?.dispose();software?.domElement.remove();software=undefined;void audio.dispose()})
 defineExpose({flush,closeStage})
 function keyDown(event:KeyboardEvent){void audio.unlock();if(event.repeat&&(event.key===' '||event.key==='Enter'))event.preventDefault()}
 </script>

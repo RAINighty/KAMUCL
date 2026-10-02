@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Only the mascot stage is batched. The attributed skinview3d rigs remain unmodified.
-import {BufferAttribute,BufferGeometry,DynamicDrawUsage,Matrix3,Mesh,MeshLambertMaterial,MeshStandardMaterial,NearestFilter,SRGBColorSpace,Texture,Vector3} from 'three'
+import {BufferAttribute,BufferGeometry,DynamicDrawUsage,Matrix3,Mesh,MeshStandardMaterial,NearestFilter,SRGBColorSpace,Texture,Vector3} from 'three'
 
 const SKIN_SIZE=64,GUTTER=1,TILE_SIZE=SKIN_SIZE+GUTTER*2
 export function mascotAtlasUV(u:number,v:number,index:number,count:number):[number,number]{
@@ -24,14 +24,14 @@ export function createMascotAtlas(images:HTMLImageElement[]):Texture{
 
 /** One indexed draw, with the exact original world positions and inverse-transpose normals. */
 export class MascotBatchRenderer{
- readonly mesh:Mesh<BufferGeometry,MeshStandardMaterial|MeshLambertMaterial>
+ readonly mesh:Mesh<BufferGeometry,MeshStandardMaterial>
  private readonly entries:Array<{source:Mesh;offset:number}>=[]
  private readonly positions:BufferAttribute
  private readonly normals:BufferAttribute
  private readonly normalMatrix=new Matrix3()
  private readonly vector=new Vector3()
  private disposed=false
- constructor(skins:Mesh[][],atlas:Texture,software=false){
+ constructor(skins:Mesh[][],atlas:Texture){
   const material=skins[0]?.[0]?.material
   if(!(material instanceof MeshStandardMaterial))throw new Error('Mascot batch requires the original standard base material')
   const vertexCount=skins.flat().reduce((sum,part)=>sum+part.geometry.getAttribute('position').count,0)
@@ -47,9 +47,7 @@ export class MascotBatchRenderer{
   this.positions=new BufferAttribute(new Float32Array(vertexCount*3),3).setUsage(DynamicDrawUsage)
   this.normals=new BufferAttribute(new Float32Array(vertexCount*3),3).setUsage(DynamicDrawUsage)
   const geometry=new BufferGeometry();geometry.setAttribute('position',this.positions);geometry.setAttribute('normal',this.normals);geometry.setAttribute('uv',new BufferAttribute(uvs,2));geometry.setIndex(indices)
-  // Software WebGL must finish shading before the compositor can read pixels.
-  // Keep the same textured, lit cubes, with a smaller shader on that path only.
-  const batchedMaterial=software?new MeshLambertMaterial({map:atlas,color:material.color,emissive:material.emissive,emissiveIntensity:material.emissiveIntensity,opacity:material.opacity,transparent:material.transparent,alphaTest:material.alphaTest,side:material.side,depthTest:material.depthTest,depthWrite:material.depthWrite,toneMapped:material.toneMapped,flatShading:material.flatShading}):material.clone();batchedMaterial.map=atlas
+  const batchedMaterial=material.clone();batchedMaterial.map=atlas
   this.mesh=new Mesh(geometry,batchedMaterial);this.mesh.frustumCulled=false;this.mesh.matrixAutoUpdate=false
  }
  update(){
