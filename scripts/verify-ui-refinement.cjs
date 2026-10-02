@@ -26,7 +26,13 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   let text='';for(let i=0;i<30;i++){text=await evaluate("document.body?.innerText || ''");if(text?.includes(version)&&text.includes('开始游戏')&&await evaluate("!!document.querySelector('.viewer3d canvas')"))break;await wait(1000)}
   assert(text.includes(version)&&text.includes('开始游戏'));assert(await evaluate("!!document.querySelector('.viewer3d canvas')"),'skin canvas missing');await wait(6500);
 
-  const mainPage=(await(await fetch(`http://127.0.0.1:${mainPort}/json`)).json())[0];assert(mainPage,'main inspector unavailable');
+  const mainReadiness={port:mainPort,maximumMs:6000,samples:[]},mainStarted=Date.now();let mainPage;
+  while(Date.now()-mainStarted<mainReadiness.maximumMs){
+    try{const pages=await(await fetch(`http://127.0.0.1:${mainPort}/json`,{signal:AbortSignal.timeout(Math.max(1,mainReadiness.maximumMs-(Date.now()-mainStarted)))})).json();mainPage=pages.find(p=>p.webSocketDebuggerUrl);mainReadiness.samples.push({elapsedMs:Date.now()-mainStarted,ready:!!mainPage})}
+    catch(error){mainReadiness.samples.push({elapsedMs:Date.now()-mainStarted,ready:false,error:error.message,cause:error.cause?.code})}
+    fs.writeFileSync('out/main-inspector-ready-live.json',JSON.stringify(mainReadiness,null,2));if(mainPage)break;await wait(Math.max(0,Math.min(100,mainReadiness.maximumMs-(Date.now()-mainStarted))))
+  }
+  assert(mainPage,'main inspector did not become available within 6 seconds: '+JSON.stringify(mainReadiness.samples.at(-1)));
   mainWs=new WebSocket(mainPage.webSocketDebuggerUrl);await new Promise(r=>mainWs.addEventListener('open',r,{once:true}));let mid=0;const mp=new Map();mainWs.addEventListener('message',e=>{const m=JSON.parse(e.data);mp.get(m.id)?.(m)});
   const main=expression=>new Promise((resolve,reject)=>{const n=++mid,t=setTimeout(()=>reject(Error('Main inspection timeout')),10000);mp.set(n,m=>{clearTimeout(t);mp.delete(n);m.result?.exceptionDetails?reject(Error(JSON.stringify(m.result.exceptionDetails))):resolve(m.result?.result?.value)});mainWs.send(JSON.stringify({id:n,method:'Runtime.evaluate',params:{expression,returnByValue:true,awaitPromise:true}}))});
 
