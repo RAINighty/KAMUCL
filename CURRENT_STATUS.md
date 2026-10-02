@@ -3,9 +3,15 @@
 ## Identity
 
 - Project: KAMUCL。
-- Version: 1.1.8，基于1.1.7 db54f58。
-- Status timestamp: 2026-10-02 15:37（Asia/Hong_Kong）。
+- Version or revision: 1.1.8，基于1.1.7 db54f58；最后产品构建提交83ba094，后续仅更新验证脚本与交付文档。
+- Status timestamp: 2026-10-02 15:44（Asia/Hong_Kong）。
 - 本批列明范围的实现与功能验证完成；公开发布及附件核对由发行脚本执行。
+- Build command: npm run build；源码复验依次执行npm ci、node scripts/build-bridge.cjs、npx tsc --noEmit、npm run build、node scripts/check-licenses.cjs。
+- Build result: 生产构建与最终源码干净解压构建均通过，全部命令退出码0，868个源码文件摘要保持不变。
+- Test/validation commands: npm test；npx tsc --noEmit；node scripts/check-licenses.cjs；node scripts/verify-windows-package.cjs；node scripts/verify-source-archive.cjs；原生Mac流程见.github/workflows/mac-build.yml。
+- Validation results: 629/629测试通过；Windows便携包与三主题GUI、双架构Mac APP/DMG及真实Minecraft26.2功能验证通过；Intel原始录屏benchmark未达30fps，主观听测与真实账号/在线Mod安装未覆盖。
+- Finished artifact: KAMUCL-1.1.8.exe，以及下面列明的Windows ZIP和双架构Mac DMG/ZIP。
+- Artifact SHA256: 1eae5169245c4c7095cd8ba4fbb46b59e86942ad6c601c7502aae0f97b494c10；其余成品摘要见下表。
 
 ## Last verified state
 
@@ -25,7 +31,15 @@
 
 以上为七个已验收成品；源码 ZIP 与交接包包含本文件，摘要记入外部 SHA256SUMS，避免自引用。
 
-## Known boundaries
+## Completed
+
+皮肤编辑布局、手势与关闭流程，七人回望姿态、全身拍打与走位，混合图片管理和社区收藏集中管理已实现。本轮补齐Intel实际模型就绪/焦点观测、真实游戏及工具执行证据，独立评分、历史失败记录和覆盖报告均已归档。实现与最终成品一致，后续测试脚本和文档的提交差异已说明。
+
+## Remaining
+
+发行流程仍须完成交接ZIP的全新解压验证、外层SHA256清单、公开Release及远端提交/标签/附件核对；这些结果以交接外部审计和公开Release为准。下面未覆盖的人工及真实服务验收继续保持未覆盖，不因本批发行改写为通过。
+
+## Known issues and risks
 
 硬件主观听测、真实微软上传、真实在线收藏模组下载安装未验收；可信CDP走位遮挡端点保持未定。实例图片优先仅源码核对，无专门GUI断言。Mac三主题完整遍历未实跑，Mac无Developer ID签名／公证。小屏模型与调色工具需滚动切换。保留功能的公网NAT、工单等原边界继续保留，不能称本批全部验收已通过。
 
