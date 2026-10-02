@@ -7,6 +7,7 @@ import {errText} from '../api'
 import {toast} from '../store'
 import {PreviewPlayer} from '../skinModel'
 import {MascotAudio} from '../mascotAudio'
+import {createMascotAtlas,MascotBatchRenderer} from '../mascotBatch'
 
 const emit=defineEmits<{close:[]}>(),{reduced,hidden,decorativeActive}=useMotion()
 const props=defineProps<{focusOnReady?:boolean}>()
@@ -16,10 +17,12 @@ const sound=computed(()=>normalizeMascotSound(state.value.sound))
 const skinUrls=import.meta.glob('../assets/mascot-skins/*.png',{eager:true,import:'default'}) as Record<string,string>
 const gate=new MascotSweepGate(),players=new Map<string,PreviewPlayer>(),textures:Texture[]=[],lastHits=new Map<string,number>(),positions=new Map<string,number>()
 type Part={name:string;mesh:Mesh;corners:Vector3[]}
-type Rig={waist:Group;pelvis:Object3D;parts:Part[];feet:Part[];phase:number}
+type Rig={waist:Group;pelvis:Object3D;parts:Part[];feet:Part[];phase:number;dom:{button:HTMLElement|null;label:HTMLElement|null;feedback:HTMLElement|null;palms:HTMLElement[];prints:HTMLElement[]}}
 const rigs=new Map<string,Rig>(),walks=new Map<string,{from:number;to:number;start:number;duration:number;phase:number}>(),palms=new Map<string,Array<{start:number;contact:number}>>()
 const APPROACH_MS=80,PALM_MS=150,PRINT_MS=500
 let gl:WebGLRenderer|undefined,scene:Scene,camera:OrthographicCamera,resize:ResizeObserver|undefined,frame=0,lastFrame=0,closed=false,slot=20,height=60,width=400,scale=1,hiddenAt=0
+let batchRenderer:MascotBatchRenderer|undefined
+const parentRotation=new Quaternion(),faceRotation=new Quaternion(),faceEuler=new Euler(),scratch=new Vector3()
 let rectangles:MascotHitRect[]=[],displayOrder=MASCOTS.map(m=>m.id) as string[]
 let sortTimer:ReturnType<typeof setTimeout>|undefined,saveTimer:ReturnType<typeof setTimeout>|undefined,retryTimer:ReturnType<typeof setTimeout>|undefined,retryDelay=800
 let hits:string[]=[],batch:MascotBatch|undefined,flight:Promise<void>|undefined,soundRevision=0,savedSoundRevision=0,pendingReported=false
@@ -112,31 +115,30 @@ function render(now:number){
   player.skin.leftArm.rotation.set(-.15-step*.7+pop*.2,0,.07);player.skin.rightArm.rotation.set(-.15+step*.7+pop*.2,0,-.07)
   player.updateMatrixWorld(true)
   // The neck counters waist and walking rotation, so the actual face stays visible.
-  const parentRotation=rig.waist.getWorldQuaternion(new Quaternion()),faceRotation=new Quaternion().setFromEuler(new Euler(.025,.32,decorativeActive.value&&!reduced.value?Math.sin(now*.0016+MASCOTS.findIndex(m=>m.id===id))*.015:0))
+  rig.waist.getWorldQuaternion(parentRotation);faceRotation.setFromEuler(faceEuler.set(.025,.32,decorativeActive.value&&!reduced.value?Math.sin(now*.0016+MASCOTS.findIndex(m=>m.id===id))*.015:0))
   player.skin.head.quaternion.copy(parentRotation).invert().multiply(faceRotation)
-  player.updateMatrixWorld(true)
-  const footY=Math.min(...rig.feet.flatMap(part=>part.corners.map(c=>c.clone().applyMatrix4(part.mesh.matrixWorld).y)))
+  let footY=Infinity;for(const part of rig.feet)for(const corner of part.corners)footY=Math.min(footY,scratch.copy(corner).applyMatrix4(part.mesh.matrixWorld).y)
   player.position.y+=1.6-footY;player.updateMatrixWorld(true)
   const personShapes=rig.parts.map(part=>{
-   const points=part.corners.map(c=>project(c.clone().applyMatrix4(part.mesh.matrixWorld))),polygon=mascotHull(points)
+   const points=part.corners.map(c=>project(scratch.copy(c).applyMatrix4(part.mesh.matrixWorld))),polygon=mascotHull(points)
    return{id,part:part.name,left:Math.min(...points.map(p=>p.x)),right:Math.max(...points.map(p=>p.x)),top:Math.min(...points.map(p=>p.y)),bottom:Math.max(...points.map(p=>p.y)),depth:points.reduce((sum,p)=>sum+p.z,0)/points.length,polygon}
   });rects.push(...personShapes)
   const r={id,left:Math.min(...personShapes.map(r=>r.left)),right:Math.max(...personShapes.map(r=>r.right)),top:Math.min(...personShapes.map(r=>r.top)),bottom:Math.max(...personShapes.map(r=>r.bottom))};modelBounds.push(r)
-  const butt=project(rig.pelvis.getWorldPosition(new Vector3()))
-  const button=strip.value!.querySelector<HTMLElement>(`[data-hit="${id}"]`),label=strip.value!.querySelector<HTMLElement>(`[data-label="${id}"]`)
+  const butt=project(rig.pelvis.getWorldPosition(scratch))
+  const {button,label,feedback}=rig.dom
   if(button){button.style.left=r.left+'px';button.style.top=r.top+'px';button.style.width=(r.right-r.left)+'px';button.style.height=(r.bottom-r.top)+'px';button.dataset.lastHit=String(lastHits.get(id)??0);button.style.zIndex=String(10+Math.round(player.position.z))}
   if(label){label.style.left=(player.position.x+worldWidth/2)/worldWidth*width+'px';label.style.width=width/7+'px';label.style.opacity=movement.walking?'0':'1'}
-  const feedback=strip.value!.querySelector<HTMLElement>(`[data-feedback="${id}"]`)
   if(feedback){feedback.style.left=butt.x+'px';feedback.style.top=butt.y+'px';feedback.dataset.target='pelvis';feedback.dataset.contacts=JSON.stringify(queue.map(palm=>palm.contact))
    const active=queue.filter(palm=>now>=palm.start&&now-palm.start<PALM_MS).slice(0,4),prints=landed.slice(-4)
-   feedback.querySelectorAll<HTMLElement>('.pixel-palm').forEach((element,index)=>{const timing=active[index],palmAge=timing?now-timing.start:Infinity,approach=Math.min(1,palmAge/APPROACH_MS),retreat=Math.max(0,(palmAge-APPROACH_MS)/(PALM_MS-APPROACH_MS));element.style.opacity=timing&&!reduced.value?String(1-retreat):'0';element.style.transform=timing?`translate(${(1-approach)*11+retreat*5}px,${-(1-approach)*10-retreat*4}px) rotate(${(1-approach)*-30+retreat*15}deg)`:'none';element.dataset.contact=String(timing?.contact??0)})
-   feedback.querySelectorAll<HTMLElement>('.palm-print').forEach((element,index)=>{const timing=prints[index],printAge=timing?now-timing.contact:Infinity;element.style.opacity=timing?String(reduced.value?.6:.72*(1-printAge/PRINT_MS)):'0';element.style.transform=`translate(${index%2}px,${Math.floor(index/2)}px)`;element.dataset.contact=String(timing?.contact??0)})
+   rig.dom.palms.forEach((element,index)=>{const timing=active[index],palmAge=timing?now-timing.start:Infinity,approach=Math.min(1,palmAge/APPROACH_MS),retreat=Math.max(0,(palmAge-APPROACH_MS)/(PALM_MS-APPROACH_MS));element.style.opacity=timing&&!reduced.value?String(1-retreat):'0';element.style.transform=timing?`translate(${(1-approach)*11+retreat*5}px,${-(1-approach)*10-retreat*4}px) rotate(${(1-approach)*-30+retreat*15}deg)`:'none';element.dataset.contact=String(timing?.contact??0)})
+   rig.dom.prints.forEach((element,index)=>{const timing=prints[index],printAge=timing?now-timing.contact:Infinity;element.style.opacity=timing?String(reduced.value?.6:.72*(1-printAge/PRINT_MS)):'0';element.style.transform=`translate(${index%2}px,${Math.floor(index/2)}px)`;element.dataset.contact=String(timing?.contact??0)})
   }
-  const actualFootY=Math.min(...rig.feet.flatMap(part=>part.corners.map(c=>c.clone().applyMatrix4(part.mesh.matrixWorld).y))),headForward=new Vector3(0,0,1).transformDirection(player.skin.head.matrixWorld),bodyForward=new Vector3(0,0,1).transformDirection(player.skin.body.matrixWorld)
-  poses.push({id,walking:movement.walking,position:next,target,phase,waistPitch:rig.waist.rotation.x,bodyYaw:player.rotation.y,headForward:headForward.toArray(),bodyForward:bodyForward.toArray(),footY:actualFootY,butt:{x:butt.x,y:butt.y},contacts:queue.map(palm=>palm.contact)})
+  let actualFootY=Infinity;for(const part of rig.feet)for(const corner of part.corners)actualFootY=Math.min(actualFootY,scratch.copy(corner).applyMatrix4(part.mesh.matrixWorld).y)
+  const headForward=scratch.set(0,0,1).transformDirection(player.skin.head.matrixWorld).toArray(),bodyForward=scratch.set(0,0,1).transformDirection(player.skin.body.matrixWorld).toArray()
+  poses.push({id,walking:movement.walking,position:next,target,phase,waistPitch:rig.waist.rotation.x,bodyYaw:player.rotation.y,headForward,bodyForward,footY:actualFootY,butt:{x:butt.x,y:butt.y},contacts:queue.map(palm=>palm.contact)})
  }
- rectangles=rects;gl.render(scene,camera)
- if(host.value){host.value.dataset.modelBounds=JSON.stringify({height,width,models:modelBounds});host.value.dataset.silhouettes=JSON.stringify(rects);host.value.dataset.poses=JSON.stringify(poses);host.value.dataset.renderMs=String(performance.now()-renderStarted)}
+ rectangles=rects;batchRenderer?.update();gl.render(scene,camera)
+ if(host.value){host.value.dataset.modelBounds=JSON.stringify({height,width,models:modelBounds});host.value.dataset.silhouettes=JSON.stringify(rects);host.value.dataset.poses=JSON.stringify(poses);host.value.dataset.renderMs=String(performance.now()-renderStarted);host.value.dataset.renderDrawCalls=String(gl.info.render.calls);host.value.dataset.renderTriangles=String(gl.info.render.triangles)}
  if(decorativeActive.value||reacting||walking)frame=requestAnimationFrame(render)
 }
 async function buildScene(){
@@ -157,10 +159,14 @@ async function buildScene(){
    const pelvis=new Object3D();pelvis.position.set(0,-7.9,-2.3);player.skin.add(pelvis)
    const parts:Part[]=[]
    for(const [name,part] of [['head',player.skin.head],['body',player.skin.body],['leftArm',player.skin.leftArm],['rightArm',player.skin.rightArm],['leftLeg',player.skin.leftLeg],['rightLeg',player.skin.rightLeg]] as const){part.innerLayer.traverse(object=>{if(object instanceof Mesh){object.geometry.computeBoundingBox();const b=object.geometry.boundingBox!;const corners:Vector3[]=[];for(const x of [b.min.x,b.max.x])for(const y of [b.min.y,b.max.y])for(const z of [b.min.z,b.max.z])corners.push(new Vector3(x,y,z));parts.push({name,mesh:object,corners})}})}
-   rigs.set(mascot.id,{waist,pelvis,parts,feet:parts.filter(p=>p.name.endsWith('Leg')),phase:0})
-   players.set(mascot.id,player);scene.add(player)
+   const feedback=strip.value!.querySelector<HTMLElement>(`[data-feedback="${mascot.id}"]`)
+   rigs.set(mascot.id,{waist,pelvis,parts,feet:parts.filter(p=>p.name.endsWith('Leg')),phase:0,dom:{button:strip.value!.querySelector<HTMLElement>(`[data-hit="${mascot.id}"]`),label:strip.value!.querySelector<HTMLElement>(`[data-label="${mascot.id}"]`),feedback,palms:Array.from(feedback?.querySelectorAll<HTMLElement>('.pixel-palm')??[]),prints:Array.from(feedback?.querySelectorAll<HTMLElement>('.palm-print')??[])}})
+   // Rigs drive poses and visible-part hit geometry on the CPU; only their batch is rendered.
+   players.set(mascot.id,player)
   }))
   if(closed)return
+  const atlas=createMascotAtlas(MASCOTS.map(m=>players.get(m.id)!.skin.map!.image as HTMLImageElement));textures.push(atlas)
+  batchRenderer=new MascotBatchRenderer(MASCOTS.map(m=>rigs.get(m.id)!.parts.map(part=>part.mesh)),atlas);scene.add(batchRenderer.mesh)
   resize=new ResizeObserver(fit);resize.observe(strip.value!);fit();ready.value=true;wake()
  }catch{supported.value=false;ready.value=true;gl?.dispose();gl=undefined}
 }
@@ -171,7 +177,7 @@ onMounted(async()=>{
  try{state.value=await window.kamucl.invoke('mascots:state') as MascotState;displayOrder=[...state.value.order];for(const [index,id] of displayOrder.entries())positions.set(id,index);await audio.unlock();await buildScene();if(props.focusOnReady)await nextTick(()=>strip.value?.querySelector<HTMLButtonElement>(`[data-hit="${displayOrder[0]}"]`)?.focus())}
  catch(error){persistError.value=errText(error);toast(errText(error),'error')}
 })
-onUnmounted(()=>{closed=true;unsubscribe();clearTimeout(sortTimer);clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);resize?.disconnect();gate.reset();palms.clear();walks.clear();rigs.clear();for(const player of players.values())player.dispose();for(const texture of textures)texture.dispose();players.clear();gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove();void audio.dispose()})
+onUnmounted(()=>{closed=true;unsubscribe();clearTimeout(sortTimer);clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);resize?.disconnect();gate.reset();palms.clear();walks.clear();batchRenderer?.dispose();batchRenderer=undefined;rigs.clear();for(const player of players.values())player.dispose();for(const texture of textures)texture.dispose();players.clear();gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove();void audio.dispose()})
 defineExpose({flush,closeStage})
 function keyDown(event:KeyboardEvent){void audio.unlock();if(event.repeat&&(event.key===' '||event.key==='Enter'))event.preventDefault()}
 </script>
@@ -197,6 +203,7 @@ function keyDown(event:KeyboardEvent){void audio.unlock();if(event.repeat&&(even
 </template>
 
 <style scoped>
+.figure-strip{contain:layout paint;isolation:isolate}
 .mascot-stage{position:relative;display:flex;align-items:stretch;width:100%;height:100%;min-width:0;-webkit-app-region:no-drag;animation:stage-in .25s ease-out;container-type:inline-size}.figure-strip{position:relative;flex:1;min-width:0;height:100%;overflow:hidden;touch-action:none}.figure-strip :deep(canvas){position:absolute;left:0;top:0;display:block;pointer-events:none;image-rendering:pixelated}.mascot-hit{position:absolute;padding:0;border:0;border-radius:4px;background:transparent;cursor:pointer;z-index:2;touch-action:none}.mascot-hit:focus-visible{outline:2px solid var(--accent);outline-offset:2px;background:color-mix(in srgb,var(--accent) 12%,transparent)}.mascot-label{position:absolute;bottom:2px;transform:translateX(-50%);text-align:center;font-size:9px;line-height:10px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}.mascot-label b{color:var(--accent);font-variant-numeric:tabular-nums;font-weight:600}.slap-burst{position:absolute;inset:-7px -3px;display:grid;place-items:center;font-size:12px;font-style:normal;font-weight:700;color:var(--accent);text-shadow:0 1px var(--bg);pointer-events:none;animation:slap-flash .22s ease-out both}.stage-tools{display:grid;grid-template-columns:24px;grid-template-rows:24px 24px 20px;align-content:center;padding-left:5px;flex-shrink:0}.tool{border:0;background:transparent;color:var(--text-dim);font-size:17px;line-height:1;border-radius:5px;cursor:pointer;padding:0;min-width:0}.tool:hover,.tool:focus-visible{background:var(--card-2);color:var(--accent)}.menu-tool{font-size:15px}.sound-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:9100;min-width:210px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--card-solid,var(--bg-2));box-shadow:var(--shadow-lg);display:grid;gap:10px;font-size:11px}.sound-panel label{display:flex;align-items:center;gap:7px}.sound-panel input{width:100px;accent-color:var(--accent)}.sound-panel b{min-width:30px}.sound-panel>div{display:flex;justify-content:flex-end;gap:4px}.save-error{position:absolute;left:0;bottom:0;font-size:9px;color:var(--accent);background:var(--bg)}.fallback-note{position:absolute;inset:0;display:grid;place-items:center;font-size:10px;color:var(--text-dim)}.hidden *{animation-play-state:paused!important}.reduced{animation:none}.reduced .slap-burst{animation:none;opacity:0}@container(max-width:270px){.mascot-label>span{display:none}.mascot-label{font-size:8px}.stage-tools{padding-left:2px;grid-template-columns:20px}}@keyframes stage-in{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}@keyframes slap-flash{0%{opacity:1;transform:scale(.8)}35%{transform:translateY(-2px) scale(1.15)}100%{opacity:0;transform:translateY(-7px) scale(.9)}}
 .mascot-feedback{position:absolute;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;pointer-events:none;z-index:30}.mascot-feedback svg{position:absolute;inset:0;width:100%;height:100%;shape-rendering:crispEdges;opacity:0}.pixel-palm{transform-origin:70% 90%}.palm-print{fill:#cf674e;filter:drop-shadow(0 0 1px #46221e)}
 .mascot-label{transition:opacity .1s ease-out}.reduced .mascot-label{transition:none}

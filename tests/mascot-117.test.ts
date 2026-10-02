@@ -8,6 +8,42 @@ import {build} from 'esbuild'
 import sharp from 'sharp'
 import {MASCOTS,MascotSweepGate,addMascotHits,mascotHull,mascotShapeContains,mascotWalkFrame,normalizeMascotSound,type MascotHitRect} from '../src/shared/mascots'
 import {MascotAudio,slapSamples} from '../src/renderer/src/mascotAudio'
+import {BoxGeometry,FrontSide,Matrix3,Mesh,MeshStandardMaterial,Texture,Vector3} from 'three'
+import {MascotBatchRenderer,mascotAtlasUV} from '../src/renderer/src/mascotBatch'
+
+test('mascot batch preserves all 42 animated meshes, world positions, inverse-transpose normals and skin UVs',()=>{
+ const atlas=new Texture(),original=new Texture(),material=new MeshStandardMaterial({map:original,roughness:.83,metalness:.07,side:FrontSide})
+ const skins=Array.from({length:7},(_,skinIndex)=>Array.from({length:6},(_,part)=>{
+  const mesh=new Mesh(new BoxGeometry(8,12,4),material);mesh.position.set(skinIndex*24,part*3,-part);mesh.rotation.set(part*.14,skinIndex*.2,part*.03);mesh.scale.set(1.42,.68,1.1);mesh.updateMatrixWorld(true);return mesh
+ }))
+ const batch=new MascotBatchRenderer(skins,atlas);batch.update()
+ const geometry=batch.mesh.geometry,positions=geometry.getAttribute('position'),normals=geometry.getAttribute('normal'),uvs=geometry.getAttribute('uv'),index=geometry.getIndex()!
+ assert.equal(positions.count,1008);assert.equal(index.count,1512);assert.equal(geometry.groups.length,0,'one indexed material draw, not 42 groups');assert.equal(batch.mesh.material.map,atlas);assert.equal(batch.mesh.material.roughness,material.roughness);assert.equal(batch.mesh.material.metalness,material.metalness);assert.equal(batch.mesh.material.side,material.side);assert.equal(material.map,original);assert.notEqual(batch.mesh.material,material)
+ for(const sample of [0,1]){
+  if(sample){skins.forEach((parts,i)=>parts.forEach((mesh,j)=>{mesh.position.x-=13;mesh.rotation.x+=.31;mesh.scale.y=.9+j*.02;mesh.updateMatrixWorld(true)}));batch.update()}
+  let offset=0,indexOffset=0
+  for(const [skinIndex,parts] of skins.entries())for(const mesh of parts){
+   const position=mesh.geometry.getAttribute('position'),normal=mesh.geometry.getAttribute('normal'),uv=mesh.geometry.getAttribute('uv'),sourceIndex=mesh.geometry.getIndex()!,normalMatrix=new Matrix3().getNormalMatrix(mesh.matrixWorld)
+   for(let i=0;i<position.count;i++){
+    const expectedPosition=new Vector3().fromBufferAttribute(position,i).applyMatrix4(mesh.matrixWorld),expectedNormal=new Vector3().fromBufferAttribute(normal,i).applyMatrix3(normalMatrix).normalize(),expectedUV=mascotAtlasUV(uv.getX(i),uv.getY(i),skinIndex,skins.length)
+    assert(new Vector3().fromBufferAttribute(positions,offset+i).distanceTo(expectedPosition)<1e-5);assert(new Vector3().fromBufferAttribute(normals,offset+i).distanceTo(expectedNormal)<1e-6)
+    assert(Math.abs(uvs.getX(offset+i)-expectedUV[0])<1e-7&&Math.abs(uvs.getY(offset+i)-expectedUV[1])<1e-7)
+   }
+   for(let i=0;i<sourceIndex.count;i++)assert.equal(index.getX(indexOffset+i),offset+sourceIndex.getX(i))
+   offset+=position.count;indexOffset+=sourceIndex.count
+  }
+ }
+ let geometryDisposals=0,materialDisposals=0;geometry.addEventListener('dispose',()=>geometryDisposals++);batch.mesh.material.addEventListener('dispose',()=>materialDisposals++)
+ batch.dispose();batch.dispose();assert.equal(geometryDisposals,1);assert.equal(materialDisposals,1);const version=positions.version;batch.update();assert.equal(positions.version,version,'disposed batch cannot allocate or upload another frame')
+ skins.flat().forEach(mesh=>mesh.geometry.dispose());material.dispose();atlas.dispose();original.dispose()
+})
+test('mascot atlas leaves independent one-pixel gutters around every 64px skin',()=>{
+ for(let i=0;i<7;i++){
+  const min=mascotAtlasUV(0,0,i,7),max=mascotAtlasUV(1,1,i,7)
+  assert.equal(Math.round(min[0]*462),i*66+1);assert.equal(Math.round(max[0]*462),i*66+65);assert.equal(Math.round(min[1]*66),1);assert.equal(Math.round(max[1]*66),65)
+  if(i<6)assert(mascotAtlasUV(0,0,i+1,7)[0]>max[0],'a UV edge cannot bleed into an adjacent skin')
+ }
+})
 
 const rectangles:MascotHitRect[]=MASCOTS.map((m,index)=>({id:m.id,left:20+index*30,right:40+index*30,top:10,bottom:24}))
 test('a sparse pointer sweep intersects all seven hip zones in travel order',()=>{
