@@ -1,4 +1,8 @@
 // Actual portable EXE GUI, with an isolated profile and loopback-only inspection.
+if (process.argv[2]) {
+  if (!['black-orange', 'blue-white', 'custom'].includes(process.argv[2])) throw new Error('Unknown GUI theme argument')
+  process.env.KAMUCL_TEST_THEME = process.argv[2]
+}
 const fs=require('fs'),path=require('path'),os=require('os'),net=require('net'),assert=require('assert/strict'),{spawn}=require('child_process');
 const version=require('../package.json').version,root=fs.mkdtempSync(path.join(os.tmpdir(),'KAMUCL EXE GUI 中文 ')),profile=path.join(root,'profile'),games=path.join(root,'games');
 fs.mkdirSync(profile);fs.mkdirSync(games);fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({gameDir:games,activeFolder:games,folders:[{path:games,name:'独立验证目录',isDefault:true}],autoUpdate:false,theme:process.env.KAMUCL_TEST_THEME || 'black-orange'}));

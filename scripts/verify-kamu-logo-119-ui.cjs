@@ -10,6 +10,8 @@ module.exports=async function verifyKamuLogo(h){
  const saved=()=>evaluate("window.kamucl.invoke('mascots:state')")
  const counts=async(label,target)=>until(label,async s=>s.count===target&&s.phase==='front'&&(await saved()).counts.kamu===target)
  await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await nav('skins')
+ const paneBackdrop=()=>evaluate("[...document.querySelectorAll('.page[data-design-page] .pane')].map(e=>({class:e.className,blur:getComputedStyle(e).backdropFilter}))")
+ proof.backdrop={before:await paneBackdrop()}
  const nativeFocus=activate=>main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/renderer/index.html'));if(${activate}&&process.platform==='darwin'){testElectron.app.focus({steal:true});w.show();w.focus()}return{platform:process.platform,windowFocused:w.isFocused(),visible:w.isVisible(),minimized:w.isMinimized(),focusedWindowId:testElectron.BrowserWindow.getFocusedWindow()?.id,windowId:w.id}})()`)
  proof.nativeFocus={before:await nativeFocus(false),activation:await nativeFocus(true),samples:[]};await call('Page.bringToFront')
  for(let i=0;i<30;i++){const native=await nativeFocus(false),renderer=await evaluate('({hasFocus:document.hasFocus(),hidden:document.hidden})');proof.nativeFocus.samples.push({native,renderer});proof.nativeFocus.ready=native.platform!=='darwin'||native.windowFocused&&native.visible&&!native.minimized&&native.focusedWindowId===native.windowId&&renderer.hasFocus;if(proof.nativeFocus.ready)break;await wait(50)}
@@ -35,6 +37,8 @@ module.exports=async function verifyKamuLogo(h){
  await evaluate("window.kamucl.invoke('mascots:sound',{muted:false,volume:.45})")
  const brandBefore=await evaluate("({logo:document.querySelector('.logo-text').getBoundingClientRect().toJSON(),topbar:document.querySelector('.topbar').getBoundingClientRect().toJSON(),motto:document.querySelector('.topbar-spacer').innerText})")
  proof.intro=await recordScreencast('mascot-119-logo-intro',async()=>trustedClick('.brand-avatar'),850);await until('actual model first render readiness',s=>!s.disabled&&s.readyAt>0);await wait(450)
+ proof.gpuReadiness=await evaluate("(()=>{const d=document.querySelector('.mascot-stage').dataset;return{backend:d.renderBackend,status:d.gpuReadyStatus,compileMs:Number(d.compileMs),submitMs:Number(d.firstSubmitMs),checkMs:Number(d.gpuCheckMs),fallback:d.gpuReadyFallback,readyAt:Number(d.readyAt)}})()")
+ if(proof.gpuReadiness.backend==='webgl-pbr')assert.equal(proof.gpuReadiness.status,'commands-complete','ready must follow actual first draw GPU completion')
  proof.layout=await evaluate("({single:document.querySelectorAll('.mascot-hit').length,inLogo:!!document.querySelector('.brand-slot .mascot-stage'),inTopbar:!!document.querySelector('.topbar .mascot-stage'),logo:document.querySelector('.logo-text').getBoundingClientRect().toJSON(),topbar:document.querySelector('.topbar').getBoundingClientRect().toJSON(),motto:document.querySelector('.topbar-spacer').innerText,canvas:{width:document.querySelector('.figure-strip canvas').width,height:document.querySelector('.figure-strip canvas').height}})")
  assert.equal(proof.layout.single,1);assert(proof.layout.inLogo&&!proof.layout.inTopbar);assert.deepEqual(proof.layout.logo,brandBefore.logo);assert.deepEqual(proof.layout.topbar,brandBefore.topbar);assert.equal(proof.layout.motto,brandBefore.motto);assert.deepEqual(proof.layout.canvas,{width:48,height:72});assert.equal((await saved()).counts.kamu||0,initial)
  await screenshot('extension-119-kamu-front')
@@ -76,7 +80,9 @@ module.exports=async function verifyKamuLogo(h){
  assert(frames.some(f=>Number(f.feedback.palm)>0),'real frames show moving pixel palm');assert(frames.some(f=>Number(f.feedback.print)>0),'real frames show local handprint');assert(frames.some(f=>Math.abs(Number(f.feedback.yaw)-Math.PI)<.001),'contact occurs on actual back-facing model')
  await counts('PNG evidence clicks persist exactly once',initial+18)
  // Ready focus uses observed first-render state rather than an arbitrary delay.
+ proof.backdrop.active=await paneBackdrop();assert(proof.backdrop.active.every(p=>p.blur==='none'),'active LOGO defers unrelated page blur in every render backend')
  await trustedClick('.menu-tool');await trustedClick('.sound-panel button:last-of-type');await until('close disposes original stage',s=>!s.open)
+ proof.backdrop.restored=await paneBackdrop();assert.deepEqual(proof.backdrop.restored,proof.backdrop.before,'restoring LOGO restores the original theme glass rules')
  assert(await evaluate("document.activeElement===document.querySelector('.brand-avatar')"),'product-owned close restores LOGO keyboard focus');await key(' ','Space');const focus=await until('keyboard activation focus transfers only to ready Kamu',s=>!s.disabled&&s.readyAt>0&&s.focus==='kamu')
  fs.writeFileSync('out/mascot-header-keyboard-ready-live.json',JSON.stringify({version,ready:focus},null,2))
  // Real reverse and forward Tab must not expose the fading retired LOGO button.
@@ -121,6 +127,17 @@ module.exports=async function verifyKamuLogo(h){
  // Enter requires its native carriage-return text to generate button keypress activation.
  await key('Enter','Enter');await until('native Enter text activates LOGO and focuses ready Kamu',s=>!s.disabled&&s.readyAt>0&&s.focus==='kamu')
  await key('Enter','Enter');await key('Escape','Escape');await until('Escape drains pending Enter slap and releases stage',s=>!s.open&&s.audio.every(v=>v==='closed'));assert.equal((await saved()).counts.kamu,5)
+ // Controlled delayed IPC, exercised through real coordinate clicks: restoring
+ // the LOGO during initialization must not let the late state create resources.
+ proof.initializationClose={classification:'real UI with controlled delayed state IPC',contextsBefore:await evaluate('window.__mascotSoundProof.contexts.length')}
+ await main("globalThis.kamuStateBase=testElectron.ipcMain._invokeHandlers.get('mascots:state');globalThis.kamuStateEntered=false;globalThis.kamuStateReturned=false;testElectron.ipcMain.removeHandler('mascots:state');testElectron.ipcMain.handle('mascots:state',async(...args)=>{const state=await kamuStateBase(...args);kamuStateEntered=true;await new Promise(resolve=>globalThis.kamuStateRelease=resolve);kamuStateReturned=true;return state})")
+ try{
+  await trustedClick('.brand-avatar');await until('state request is really pending before initialization close',async s=>s.open&&s.disabled&&await main('kamuStateEntered'))
+  await trustedClick('.menu-tool');await trustedClick('.sound-panel button:last-of-type');await until('restore LOGO while state initialization is pending',s=>!s.open)
+  await main('kamuStateRelease()');await until('late state response returns after unmount',async s=>!s.open&&await main('kamuStateReturned'))
+  proof.initializationClose.after=await evaluate('({stage:!!document.querySelector(".mascot-stage"),contexts:window.__mascotSoundProof.contexts.length,focused:document.activeElement===document.querySelector(".brand-avatar"),audio:window.__mascotSoundProof.contexts.map(c=>c.state)})')
+  assert(!proof.initializationClose.after.stage&&proof.initializationClose.after.focused);assert.equal(proof.initializationClose.after.contexts,proof.initializationClose.contextsBefore,'late state must not create an audio or rendering context');assert(proof.initializationClose.after.audio.every(s=>s==='closed'))
+ }finally{await main("globalThis.kamuStateRelease?.();testElectron.ipcMain.removeHandler('mascots:state');testElectron.ipcMain.handle('mascots:state',kamuStateBase)")}
  const recordingAudio=await evaluate(`(async()=>{const p=window.__mascotSoundProof,all=[];for(const r of p.recorders){if(r.state!=='inactive')await new Promise(resolve=>{r.addEventListener('stop',resolve,{once:true});r.stop()});if(r.__chunks.length)all.push(Array.from(new Uint8Array(await new Blob(r.__chunks).arrayBuffer())))}if(all[0]){const c=new window.__mascotOriginalAudioContext(),d=await c.decodeAudioData(new Uint8Array(all[0]).buffer);let peak=0,power=0;for(let k=0;k<d.numberOfChannels;k++)for(const v of d.getChannelData(k)){peak=Math.max(peak,Math.abs(v));power+=v*v}p.output={peak,rms:Math.sqrt(power/(d.length*d.numberOfChannels)),sampleRate:d.sampleRate};await c.close()}return all})()`)
  if(recordingAudio[0]){fs.writeFileSync('out/mascot-kamu-119.webm',Buffer.from(recordingAudio[0]));proof.audio=await evaluate('({recordingScope:"first activation compressor stream; events include later contexts",events:window.__mascotSoundProof.events,output:window.__mascotSoundProof.output})');assert(proof.audio.output.peak>0&&proof.audio.output.peak<.999)}
  proof.persistence=await main('kamuPendingTrace');proof.complete=true;saveProof();console.log(version+' single Kamu LOGO functional GUI passed; capture '+proof.performanceBenchmark.status)

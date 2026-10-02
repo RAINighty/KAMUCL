@@ -103,6 +103,8 @@ async function main() {
   const mac = ['arm64', 'x64'].flatMap(arch => ['dmg', 'zip'].map(ext => path.join(root, 'release', `KAMUCL-${version}-mac-${arch}.${ext}`)))
   const handoff = path.join(root, 'release', `KAMUCL-${version}-handoff.zip`)
   const packages = [exe, zip, unpacked, source, ...mac, handoff]
+  const history = path.join(root, 'release', `KAMUCL-${version}-validation-history.zip`)
+  if (fs.existsSync(history)) packages.push(history)
   for (const f of packages) {
     if (!fs.existsSync(f)) {
       console.error(`缺少构建产物：${f}（先运行打包）`)

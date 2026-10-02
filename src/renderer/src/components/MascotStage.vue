@@ -25,6 +25,45 @@ const writtenStyles=new WeakMap<Element,Map<string,string>>(),writtenData=new Ma
 function style(element:HTMLElement|SVGElement|undefined,key:string,value:string){if(!element)return;let values=writtenStyles.get(element);if(!values){values=new Map();writtenStyles.set(element,values)}if(values.get(key)===value)return;element.style.setProperty(key,value);values.set(key,value)}
 function data(key:string,value:string){if(!host.value||writtenData.get(key)===value)return;host.value.dataset[key]=value;writtenData.set(key,value)}
 let frame=0,disposed=false,activated=0,lastContact=-1000,contactsTotal=0,reported=false
+let cancelImage:undefined|(()=>void)
+let gpuContext:WebGL2RenderingContext|undefined,gpuFence:WebGLSync|undefined,gpuFrame=0,gpuStarted=0,gpuDeadline:ReturnType<typeof setTimeout>|undefined
+let contextCanvas:HTMLCanvasElement|undefined
+function cancelGpuReady(){cancelAnimationFrame(gpuFrame);gpuFrame=0;clearTimeout(gpuDeadline);gpuDeadline=undefined;if(gpuFence){gpuContext?.deleteSync(gpuFence);gpuFence=undefined}gpuContext=undefined}
+function publishReady(now:number){
+ if(disposed||hidden.value||!player||!host.value||ready.value)return
+ ready.value=true;activated=now;interaction.resume(now);host.value.dataset.readyAt=String(now);emit('ready')
+ if(props.focusOnReady)void nextTick(()=>{if(!disposed&&!hidden.value&&ready.value)hit.value?.focus()})
+ wake()
+}
+function releaseGl(){if(contextCanvas){contextCanvas.removeEventListener('webglcontextlost',contextLost);contextCanvas=undefined}gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove();gl=undefined}
+function useSoftware(reason:string){
+ cancelGpuReady();ready.value=false;interaction.pause(performance.now());data('gpuReadyFallback',reason);data('gpuReadyStatus','software-pending');releaseGl()
+ try{software??=new MascotSoftwareRenderer();software.setSize(48,72,1);if(disposed||!viewport.value){software.dispose();software=undefined;return}viewport.value.prepend(software.domElement);data('renderBackend','canvas2d-depth');emit('render-mode',true);supported.value=true;previousPose=undefined;wake()}
+ catch(error){supported.value=false;data('gpuReadyStatus','failed');persistError.value='像素预览无法加载：'+errText(error)}
+}
+function contextLost(event:Event){event.preventDefault();if(!disposed)useSoftware('WebGL context lost')}
+function checkGpuReady(){
+ gpuFrame=0;if(disposed||hidden.value){cancelGpuReady();return}
+ const context=gpuContext,fence=gpuFence;if(!context||!fence)return
+ try{
+  if(context.isContextLost()){useSoftware('WebGL context lost during first draw');return}
+  const result=context.clientWaitSync(fence,0,0);data('gpuCheckMs',String(performance.now()-gpuStarted))
+  if(result===context.ALREADY_SIGNALED||result===context.CONDITION_SATISFIED){cancelGpuReady();data('gpuReadyStatus','commands-complete');publishReady(performance.now())}
+  else if(result===context.WAIT_FAILED)useSoftware('WebGL first draw fence WAIT_FAILED')
+  else gpuFrame=requestAnimationFrame(checkGpuReady)
+ }catch(error){useSoftware('WebGL first draw fence: '+errText(error))}
+}
+function confirmGpuDraw(){
+ if(!gl||gpuFence||disposed||hidden.value)return
+ try{
+  const context=gl.getContext();if(context.isContextLost()){useSoftware('WebGL context lost before first draw');return}
+  const fence=context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE,0);if(!fence){useSoftware('WebGL first draw fence unavailable');return}
+  gpuContext=context;gpuFence=fence;gpuStarted=performance.now();data('gpuReadyStatus','pending');context.flush()
+  // This is only a failure boundary. A naturally signalled fence publishes immediately.
+  gpuDeadline=setTimeout(()=>{if(!disposed&&gpuFence)useSoftware('WebGL first draw fence timed out (3000ms)')},3000);checkGpuReady()
+ }catch(error){useSoftware('WebGL first draw submission: '+errText(error))}
+}
+function retryPreview(){if(disposed)return;persistError.value='';useSoftware('manual software preview retry')}
 let hits:string[]=[],batch:MascotBatch|undefined,flight:Promise<void>|undefined,saveTimer:ReturnType<typeof setTimeout>|undefined,retryTimer:ReturnType<typeof setTimeout>|undefined,retryDelay=800,soundRevision=0,savedSoundRevision=0
 const unsaved=()=>!!batch||!!hits.length||soundRevision!==savedSoundRevision
 function reportPending(){const pending=unsaved()||interaction.busy;if(pending!==reported){reported=pending;window.kamucl.send('window:mascotPending',pending)}}
@@ -39,7 +78,7 @@ async function save():Promise<void>{
 }
 function queueSave(){reportPending();if(!saveTimer)saveTimer=setTimeout(()=>{saveTimer=undefined;void save().catch(()=>{})},120)}
 function recordContacts(contacts:number[],now:number){for(const contact of contacts){state.value=addMascotHits(state.value,['kamu']);hits.push('kamu');lastContact=hidden.value?-1000:contact;contactsTotal++;if(!hidden.value)audio.play(0)}if(contacts.length)queueSave()}
-async function drain(){while(interaction.busy&&!disposed){if(hidden.value){const now=performance.now();interaction.resume(now);recordContacts(interaction.advance(now+10000,reduced.value).contacts,now+10000);interaction.pause(now);busy.value=interaction.busy;reportPending()}else{wake();await new Promise<void>(resolve=>setTimeout(resolve,16))}}}
+async function drain(){while(interaction.busy&&!disposed){if(!supported.value)throw new Error('互动预览不可用，请重试预览后保存');if(hidden.value){const now=performance.now();interaction.resume(now);recordContacts(interaction.advance(now+10000,reduced.value).contacts,now+10000);interaction.pause(now);busy.value=interaction.busy;reportPending()}else{wake();await new Promise<void>(resolve=>setTimeout(resolve,16))}}}
 async function flush(){const wasClosing=closing.value;closing.value=true;try{await drain();clearTimeout(saveTimer);saveTimer=undefined;clearTimeout(retryTimer);await save()}finally{closing.value=wasClosing}}
 async function closeStage(){if(closing.value)return;closing.value=true;try{await flush();emit('close')}catch(error){toast('互动次数尚未保存：'+errText(error),'error')}finally{closing.value=false}}
 async function closeWindow(quit=false){if(closing.value)return;closing.value=true;try{await flush();window.kamucl.send(quit?'window:mascotQuit':'window:close')}catch(error){toast('互动次数尚未保存，关闭已暂停：'+errText(error),'error')}finally{closing.value=false}}
@@ -53,8 +92,8 @@ function wake(){if(!disposed&&!hidden.value&&player&&!frame)frame=requestAnimati
 function render(now:number){
  frame=0;if(disposed||hidden.value||!player)return
  const started=performance.now(),pose=interaction.advance(now,reduced.value,50);recordContacts(pose.contacts,now);busy.value=interaction.busy
- const activation=Math.min(1,(now-activated)/(reduced.value?100:380)),ease=activation*activation*(3-2*activation)
- const idle=decorativeActive.value?Math.sin(now*.002)*.016:0,pop=Math.max(0,1-(now-lastContact)/210)*Math.sin(Math.min(1,Math.max(0,(now-lastContact)/210))*Math.PI)
+ const activation=ready.value?Math.min(1,(now-activated)/(reduced.value?100:380)):0,ease=activation*activation*(3-2*activation)
+ const idle=ready.value&&decorativeActive.value?Math.sin(now*.002)*.016:0,pop=Math.max(0,1-(now-lastContact)/210)*Math.sin(Math.min(1,Math.max(0,(now-lastContact)/210))*Math.PI)
  const waistAngle=Math.sin(pose.yaw/2)*.28+pop*.12,headAngle=-waistAngle+idle,armAngle=-.04+pop*.15,scale=.75+ease*.25
  const nextPose=[pose.yaw,waistAngle,headAngle,armAngle,scale],modelChanged=!previousPose||nextPose.some((value,index)=>value!==previousPose![index])
  if(modelChanged){
@@ -65,7 +104,11 @@ function render(now:number){
  let footY=Infinity;for(const part of feet)for(const corner of part.corners)footY=Math.min(footY,point.copy(corner).applyMatrix4(part.mesh.matrixWorld).y)
  player.position.y+=1-footY;player.updateMatrixWorld(true)
  projected.copy(pelvis.getWorldPosition(point)).project(camera)
- batchRenderer?.update();if(software&&batchRenderer)software.render(batchRenderer.mesh,camera);else gl?.render(scene,camera)
+ batchRenderer?.update()
+ try{
+  if(software&&batchRenderer)software.render(batchRenderer.mesh,camera)
+  else if(gl){const drawingGl=gl;if(!ready.value){const compileStarted=performance.now();gl.compile(scene,camera);data('compileMs',String(performance.now()-compileStarted))}const submitStarted=performance.now();gl.render(scene,camera);if(gl!==drawingGl){previousPose=undefined;return}if(!ready.value)data('firstSubmitMs',String(performance.now()-submitStarted))}
+ }catch(error){if(software){supported.value=false;persistError.value='像素预览无法加载：'+errText(error)}else useSoftware('WebGL compile/draw: '+errText(error));return}
  previousPose=nextPose
  }
  // Only the local compositor transform moves the feedback; left/top stay fixed.
@@ -80,10 +123,11 @@ function render(now:number){
  // Keep this observation even when exact pixels are unchanged.
  if(host.value)host.value.dataset.renderMs=String(performance.now()-started)
  reportPending()
- if(!ready.value){ready.value=true;host.value!.dataset.readyAt=String(now);emit('ready');if(props.focusOnReady)void nextTick(()=>hit.value?.focus())}
+ if(!ready.value){if(software){data('gpuReadyStatus','software-first-raster');publishReady(now)}else confirmGpuDraw();return}
  if(decorativeActive.value||interaction.busy||now-lastContact<500||activation<1)frame=requestAnimationFrame(render)
 }
 async function buildScene(){
+ if(disposed||!host.value||!viewport.value)return
  try{
   feedbackElement=host.value!.querySelector<HTMLElement>('.mascot-feedback')??undefined;palmElement=feedbackElement?.querySelector<SVGElement>('.pixel-palm')??undefined;printElement=feedbackElement?.querySelector<SVGElement>('.palm-print')??undefined
   scene=new Scene();camera=new OrthographicCamera(-12,12,35,-1,.1,300);camera.position.set(0,0,100);camera.lookAt(0,0,0)
@@ -92,9 +136,14 @@ async function buildScene(){
    const context=gl.getContext(),debug=context.getExtension('WEBGL_debug_renderer_info'),renderer=String(context.getParameter(debug?.UNMASKED_RENDERER_WEBGL??context.RENDERER));host.value!.dataset.rendererProbe=renderer
    if(/swiftshader|llvmpipe|lavapipe|softpipe|software/i.test(renderer)){gl.dispose();gl.forceContextLoss();gl=undefined;software=new MascotSoftwareRenderer()}
   }catch{gl?.dispose();gl=undefined;software=new MascotSoftwareRenderer()}
+  if(gl){contextCanvas=gl.domElement;contextCanvas.addEventListener('webglcontextlost',contextLost)}
   software?.setSize(48,72,1);viewport.value!.prepend(software?.domElement??gl!.domElement);host.value!.dataset.renderBackend=software?'canvas2d-depth':'webgl-pbr';emit('render-mode',!!software)
-  const image=await new Promise<HTMLImageElement>((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=skinUrl})
-  if(disposed)return
+  const image=await new Promise<HTMLImageElement>((resolve,reject)=>{
+   const image=new Image(),clear=()=>{image.onload=null;image.onerror=null;cancelImage=undefined}
+   cancelImage=()=>{clear();image.src='';reject(new Error('像素预览已关闭'))}
+   image.onload=()=>{clear();resolve(image)};image.onerror=event=>{clear();reject(event)};image.src=skinUrl
+  })
+  if(disposed||!host.value||!viewport.value)return
   const skin=new Texture(image);skin.colorSpace=SRGBColorSpace;skin.magFilter=skin.minFilter=NearestFilter;skin.generateMipmaps=false;skin.needsUpdate=true;textures.push(skin)
   player=new PreviewPlayer();player.skin.map=skin;player.skin.setOuterLayerVisible(false);player.skin.position.y=16.8
   player.skin.head.scale.setScalar(1.42);player.skin.body.scale.y=.72;player.skin.body.position.y=-4.3
@@ -106,12 +155,12 @@ async function buildScene(){
   for(const [name,part] of [['head',player.skin.head],['body',player.skin.body],['leftArm',player.skin.leftArm],['rightArm',player.skin.rightArm],['leftLeg',player.skin.leftLeg],['rightLeg',player.skin.rightLeg]] as const)part.innerLayer.traverse(object=>{if(object instanceof Mesh){parts.push(object);if(name.endsWith('Leg')){object.geometry.computeBoundingBox();const b=object.geometry.boundingBox!,corners:Vector3[]=[];for(const x of [b.min.x,b.max.x])for(const y of [b.min.y,b.max.y])for(const z of [b.min.z,b.max.z])corners.push(new Vector3(x,y,z));feet.push({mesh:object,corners})}}})
   const atlas=createMascotAtlas([image]);textures.push(atlas);batchRenderer=new MascotBatchRenderer([parts],atlas);scene.add(batchRenderer.mesh)
   activated=performance.now();wake()
- }catch(error){supported.value=false;persistError.value='像素预览无法加载：'+errText(error)}
+ }catch(error){if(!disposed){supported.value=false;persistError.value='像素预览无法加载：'+errText(error)}}
 }
-watch(hidden,value=>{if(value){interaction.pause(performance.now());cancelAnimationFrame(frame);frame=0;audio.pause();void save().catch(()=>{})}else{interaction.resume(performance.now());void audio.unlock();wake()}},{flush:'sync'})
+watch(hidden,value=>{if(value){interaction.pause(performance.now());cancelAnimationFrame(frame);frame=0;cancelGpuReady();audio.pause();void save().catch(()=>{})}else{interaction.resume(performance.now());if(!ready.value)previousPose=undefined;void audio.unlock();wake()}},{flush:'sync'})
 watch(decorativeActive,wake);watch(reduced,wake)
-onMounted(async()=>{try{state.value=await window.kamucl.invoke('mascots:state') as MascotState;await audio.unlock();await buildScene()}catch(error){persistError.value=errText(error);toast(errText(error),'error')}})
-onUnmounted(()=>{disposed=true;unsubscribe();clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);batchRenderer?.dispose();player?.dispose();for(const texture of textures)texture.dispose();gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove();software?.dispose();software?.domElement.remove();void audio.dispose()})
+onMounted(async()=>{try{const initial=await window.kamucl.invoke('mascots:state') as MascotState;if(disposed)return;state.value=initial;await audio.unlock();if(disposed)return;await buildScene()}catch(error){if(!disposed){persistError.value=errText(error);toast(errText(error),'error')}}})
+onUnmounted(()=>{disposed=true;cancelImage?.();cancelGpuReady();unsubscribe();clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);batchRenderer?.dispose();player?.dispose();for(const texture of textures)texture.dispose();releaseGl();software?.dispose();software?.domElement.remove();void audio.dispose()})
 defineExpose({flush,closeStage})
 </script>
 <template>
@@ -119,7 +168,7 @@ defineExpose({flush,closeStage})
   <div ref="viewport" class="figure-strip">
    <button ref="hit" class="mascot-hit" data-hit="kamu" :aria-label="'拍一下卡慕，累计 '+(state.counts.kamu||0)+' 次'" :title="'卡慕 · '+(state.counts.kamu||0)+' 次；点击转身拍打'" :disabled="!ready||closing" @click="slap" @pointerdown="audio.unlock()" @keydown="keyDown"></button>
    <span class="mascot-feedback" data-feedback="kamu" aria-hidden="true"><svg class="palm-print" viewBox="0 0 16 16"><path d="M3 6V2h2v4h1V0h2v6h1V1h2v5h1V3h2v7h1v3h-2v2H6v-2H4v-2H1V7h2Z"/></svg><svg class="pixel-palm" viewBox="0 0 16 16"><path fill="#71452f" d="M2 6V1h4V0h3v1h3v2h3v7h1v4h-2v2H5v-2H3v-2H0V6Z"/><path fill="#f3c699" d="M3 7V2h2v5h1V1h2v6h1V2h2v5h1V4h2v7h1v2h-2v2H6v-2H4v-2H1V7Z"/><path fill="#d9956a" d="M6 10h6v1H6Zm1 3h5v1H7Z"/></svg></span>
-   <span v-if="!supported" class="fallback-note">预览不可用</span>
+   <button v-if="!supported" class="fallback-note" title="预览不可用，点击重试" @click="retryPreview">重试预览</button>
   </div>
   <button ref="menuButton" class="menu-tool" :aria-expanded="menu" aria-label="卡慕互动设置" title="次数、音量与关闭" @click="menu=!menu">⋯</button>
   <div v-if="menu" class="sound-panel" @keydown.esc.stop.prevent="closeMenu"><strong>卡慕 <span>{{state.counts.kamu||0}} 次</span></strong><label>音量 <input type="range" min="0" max="100" :value="Math.round(sound.volume*100)" aria-label="拍打音效音量" @input="soundChanged({volume:Number(($event.target as HTMLInputElement).value)/100})"/><b>{{Math.round(sound.volume*100)}}%</b></label><button class="btn btn-sm btn-ghost" :aria-pressed="sound.muted" @click="soundChanged({muted:!sound.muted})">{{sound.muted?'开启音效':'静音音效'}}</button><template v-if="confirmReset"><span>仅清空卡慕累计次数？</span><div><button class="btn btn-sm btn-ghost" @click="confirmReset=false">取消</button><button class="btn btn-sm btn-ghost" :disabled="busy||closing" @click="resetCounts">确认清空</button></div></template><button v-else class="btn btn-sm btn-ghost" :disabled="busy||closing" @click="confirmReset=true">重置卡慕次数</button><button class="btn btn-sm btn-ghost" :disabled="closing" @click="closeStage">{{closing?'正在保存并关闭…':'恢复 LOGO'}}</button><button v-if="persistError" class="btn btn-sm btn-ghost" @click="flush().catch(()=>{})">保存失败，重试</button><p v-if="persistError" role="status">{{persistError}}</p></div>

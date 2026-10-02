@@ -1236,7 +1236,7 @@ onUnmounted(() => {
   <div data-ui="App:870373af1ab7" v-if="bgStyle" class="app-bg" :style="bgStyle"></div>
   <div data-ui="App:e8c1fdc22711"
     class="shell"
-    :class="{ 'edit-mode': store.editMode, 'has-bg': !!bgStyle, 'mascots-software': mascotOpen&&mascotSoftware }"
+    :class="{ 'edit-mode': store.editMode, 'has-bg': !!bgStyle, 'mascots-active': mascotOpen, 'mascots-software': mascotOpen&&mascotSoftware }"
 
   >
     <!-- ============ 左侧边栏（宽度 --sidebar-w） ============ -->
@@ -1244,7 +1244,7 @@ onUnmounted(() => {
       <!-- Logo 区 -->
       <div data-ui="App:fc5fc8ba7e96" class="logo-area">
         <div class="brand-slot">
-        <button class="brand-avatar" :class="{'avatar-open':mascotOpen&&mascotReady}" :tabindex="mascotOpen?-1:0" aria-label="打开卡慕互动彩蛋" :aria-expanded="mascotOpen" @click="openMascots"><img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" /></button>
+        <button class="brand-avatar" :class="{'avatar-open':mascotOpen&&mascotReady,'avatar-preparing':mascotOpen&&!mascotReady}" :tabindex="mascotOpen?-1:0" aria-label="打开卡慕互动彩蛋" :aria-expanded="mascotOpen" :aria-busy="mascotOpen&&!mascotReady" :title="mascotOpen&&!mascotReady?'正在准备卡慕…':'打开卡慕互动彩蛋'" @click="openMascots"><img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" /></button>
         <MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @ready="mascotReady=true" @render-mode="mascotSoftware=$event" @close="closeMascots"/>
         </div>
         <div data-ui="App:7494cda29e47" class="logo-text">
@@ -1727,11 +1727,14 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Software compositing shares the host CPU with the pixel renderer. Defer web
-   backdrop blurs during interaction; alpha/theme colors and native material stay. */
-.shell.mascots-software,.shell.mascots-software :deep(*){backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
-.brand-slot{position:relative;z-index:5;width:48px;height:72px;flex-shrink:0;display:grid;place-items:center}.brand-avatar{display:block;background:transparent;border:0;padding:0;border-radius:12px;cursor:pointer;transition:opacity .38s,transform .38s;flex-shrink:0}.brand-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.brand-avatar.avatar-open{opacity:0;transform:translateY(-14px) scale(.65);pointer-events:none}
+/* Repeated background blur joins unrelated panes to the tiny animated LOGO's
+   compositor dependency graph, including native GPU paths. Defer only web blur
+   while the interaction is open; theme alpha/colors and native material stay.
+   The original glass rules resume immediately when the LOGO is restored. */
+.shell.mascots-active,.shell.mascots-active :deep(*){backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+.brand-slot{position:relative;z-index:5;width:48px;height:72px;flex-shrink:0;display:grid;place-items:center}.brand-avatar{display:block;background:transparent;border:0;padding:0;border-radius:12px;cursor:pointer;transition:opacity .38s,transform .38s;flex-shrink:0}.brand-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.brand-avatar.avatar-preparing{opacity:.75;transform:scale(.94)}.brand-avatar.avatar-open{opacity:0;transform:translateY(-14px) scale(.65);pointer-events:none}
 /* 配置不兼容弹窗 */
+@media (prefers-reduced-motion: reduce) { .brand-avatar { transition-duration: .1s; } }
 .cfg-mismatch-mask { z-index: 9600; display: grid; place-items: center; }
 .cfg-mismatch-modal { width: min(460px, 90vw); padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
 .upd-modal-title { margin: 0; font-size: 17px; }

@@ -5,11 +5,146 @@ import os from 'node:os'
 import path from 'node:path'
 import {createRequire} from 'node:module'
 import {build} from 'esbuild'
+import {compileScript,parse} from '@vue/compiler-sfc'
+import * as vue from 'vue'
 import sharp from 'sharp'
 import {MASCOTS,MascotSweepGate,addMascotHits,mascotHull,mascotShapeContains,mascotWalkFrame,normalizeMascotSound,type MascotHitRect} from '../src/shared/mascots'
 import {MascotAudio,slapSamples} from '../src/renderer/src/mascotAudio'
 import {BoxGeometry,FrontSide,Matrix3,Mesh,MeshStandardMaterial,Texture,Vector3} from 'three'
 import {MascotBatchRenderer,mascotAtlasUV} from '../src/renderer/src/mascotBatch'
+import {KamuInteraction} from '../src/shared/kamuInteraction'
+import * as Three from 'three'
+import {PreviewPlayer} from '../src/renderer/src/skinModel'
+
+function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no});return{promise,resolve,reject}}
+let mascotSetupBundle:Promise<string>|undefined
+async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boolean}={}){
+ mascotSetupBundle??=build({entryPoints:['src/renderer/src/components/MascotStage.vue'],bundle:true,write:false,platform:'node',format:'cjs',packages:'external',plugins:[{name:'mascot-lifecycle',setup(b){
+  b.onResolve({filter:/^(@shared\/|\.\.\/)/},args=>({path:args.path,external:true}))
+  b.onLoad({filter:/\.vue$/},async args=>{const {descriptor}=parse(await fs.readFile(args.path,'utf8'));return{contents:compileScript(descriptor,{id:args.path}).content,loader:'ts',resolveDir:path.dirname(args.path)}})
+ }}]}).then(bundle=>bundle.outputFiles[0].text)
+ const state=deferred<any>(),unlock=deferred<void>(),notices:string[]=[],images:any[]=[],events:any[]=[],hidden=vue.ref(false),counts={unlocks:0,audioDisposed:0,rendererCreated:0,rendererDisposed:0,contextLost:0,attached:0,removed:0,rigs:0,frames:0,unsubscribed:0,compile:0,draw:0,fences:0,deleted:0,checks:0,flush:0,focus:0,software:0,rasters:0,softwareDisposed:0}
+ let now=100,fenceStatus=0,lost=false,nextFrame=0,nextTimer=0,softwareFails=options.softwareFails
+ const frames=new Map<number,(time:number)=>void>(),timers=new Map<number,{callback:()=>void;at:number}>(),listeners=new Map<string,(event:any)=>void>()
+ const context={SYNC_GPU_COMMANDS_COMPLETE:1,ALREADY_SIGNALED:2,CONDITION_SATISFIED:3,WAIT_FAILED:4,TIMEOUT_EXPIRED:0,getExtension:()=>null,getParameter:()=> 'lifecycle fixture native GPU',isContextLost:()=>lost,fenceSync:()=>{counts.fences++;return{}},deleteSync:()=>counts.deleted++,clientWaitSync:(_sync:any,flags:number,timeout:number)=>{assert.equal(flags,0);assert.equal(timeout,0,'readiness must not synchronously wait');counts.checks++;return fenceStatus},flush:()=>counts.flush++}
+ let mounted!:()=>Promise<void>,unmounted!:()=>void
+ class Renderer{
+  domElement={remove:()=>counts.removed++,addEventListener:(name:string,callback:any)=>listeners.set(name,callback),removeEventListener:(name:string)=>listeners.delete(name)}
+  info={render:{calls:1}}
+  constructor(){counts.rendererCreated++}
+  setPixelRatio(){}setSize(){}setClearColor(){}
+  getContext(){return context}compile(){counts.compile++;now+=.6}render(){counts.draw++;now+=.4}
+  dispose(){counts.rendererDisposed++}forceContextLoss(){counts.contextLost++}
+ }
+ class ImageFixture{onload:any=null;onerror:any=null;src='';constructor(){images.push(this)}}
+ class AudioFixture{unlock(){counts.unlocks++;return unlock.promise}dispose(){counts.audioDisposed++;return Promise.resolve()}pause(){}play(){}update(){}}
+ const nodeRequire=createRequire(path.resolve('package.json')),mod={exports:{} as any}
+ const requireFixture=(name:string):any=>{
+  if(name==='vue')return{...vue,onMounted:(callback:any)=>mounted=callback,onUnmounted:(callback:any)=>unmounted=callback}
+  if(name==='three')return{...Three,WebGLRenderer:Renderer}
+  if(name==='@shared/mascots')return{MASCOTS,addMascotHits,normalizeMascotSound}
+  if(name==='@shared/kamuInteraction')return{KamuInteraction}
+  if(name==='../motion')return{useMotion:()=>({reduced:vue.ref(false),hidden,decorativeActive:vue.ref(true)})}
+  if(name==='../api')return{errText:String}
+  if(name==='../store')return{toast:(message:string)=>notices.push(message)}
+  if(name==='../mascotAudio')return{MascotAudio:AudioFixture}
+  if(name==='../skinModel')return{PreviewPlayer:options.model?class extends PreviewPlayer{constructor(){super();counts.rigs++}}:class{constructor(){counts.rigs++}}}
+  if(name==='../mascotBatch')return{createMascotAtlas:()=>{if(!options.model)throw Error('unexpected post-unmount atlas allocation');return new Texture()},MascotBatchRenderer}
+  if(name==='../mascotSoftware')return{MascotSoftwareRenderer:class{domElement={remove:()=>counts.removed++};info={render:{calls:1},frames:0,totalUploads:0};constructor(){if(!options.model||softwareFails)throw Error('software unavailable');counts.software++}setSize(){}render(){counts.rasters++;this.info.frames++;this.info.totalUploads++}dispose(){counts.softwareDisposed++}}}
+  if(name.endsWith('.png'))return'disposable-lifecycle-skin.png'
+  return nodeRequire(name)
+ }
+ const windowFixture={kamucl:{invoke:()=>state.promise,on:()=>()=>counts.unsubscribed++,send:()=>{}}}
+ new Function('require','module','exports','window','Image','requestAnimationFrame','cancelAnimationFrame','performance','setTimeout','clearTimeout',await mascotSetupBundle)(requireFixture,mod,mod.exports,windowFixture,ImageFixture,(callback:any)=>{counts.frames++;frames.set(++nextFrame,callback);return nextFrame},(id:number)=>frames.delete(id),{now:()=>now},(callback:any,delay:number)=>{timers.set(++nextTimer,{callback,at:now+delay});return nextTimer},(id:number)=>timers.delete(id))
+ const scope=vue.effectScope(),setup=scope.run(()=>mod.exports.default.setup({focusOnReady:true},{expose:()=>{},emit:(...event:any[])=>events.push(event)}))
+ setup.host.value={dataset:{},querySelector:()=>null};setup.viewport.value={prepend:()=>counts.attached++}
+ setup.hit.value={focus:()=>counts.focus++}
+ return{state,unlock,counts,images,notices,setup,events,hidden,context,frames,timers,listeners,setSoftwareFailure:(value:boolean)=>softwareFails=value,mount:()=>mounted(),unmount:()=>{unmounted();setup.host.value=undefined;setup.viewport.value=undefined;scope.stop()},signal:(status=context.CONDITION_SATISFIED)=>fenceStatus=status,lose:()=>{lost=true;listeners.get('webglcontextlost')?.({preventDefault:()=>{}})},runFrame:(elapsed=16)=>{now+=elapsed;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(now)},expire:()=>{now+=3001;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback()}}}
+}
+test('real mascot setup cannot allocate after unmount overtakes state or audio initialization',async()=>{
+ for(const gate of ['state','audio']){
+  const fixture=await mascotLifecycleFixture(),mount=fixture.mount()
+  if(gate==='audio'){fixture.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});await Promise.resolve();assert.equal(fixture.counts.unlocks,1)}
+  fixture.unmount();fixture.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});fixture.unlock.resolve();await mount
+  assert.equal(fixture.counts.rendererCreated,0,gate+' continuation cannot create a late WebGL context');assert.equal(fixture.counts.attached,0);assert.equal(fixture.counts.rigs,0);assert.equal(fixture.counts.frames,0);assert.equal(fixture.counts.audioDisposed,1);assert.equal(fixture.counts.unsubscribed,1);assert.deepEqual(fixture.notices,[])
+ }
+})
+test('real mascot setup cancels pending image work and releases its pre-existing context on unmount',async()=>{
+ const fixture=await mascotLifecycleFixture(),mount=fixture.mount();fixture.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});fixture.unlock.resolve()
+ for(let i=0;i<6;i++)await Promise.resolve()
+ assert.equal(fixture.counts.rendererCreated,1);assert.equal(fixture.images.length,1);assert.equal(fixture.counts.attached,1)
+ fixture.unmount();await mount
+ assert.equal(fixture.images[0].src,'');assert.equal(fixture.images[0].onload,null);assert.equal(fixture.images[0].onerror,null);assert.equal(fixture.counts.rendererDisposed,1);assert.equal(fixture.counts.contextLost,1);assert.equal(fixture.counts.removed,1);assert.equal(fixture.counts.rigs,0);assert.equal(fixture.counts.frames,0);assert.equal(fixture.setup.persistError.value,'');assert.deepEqual(fixture.notices,[])
+})
+test('a state failure arriving after mascot unmount cannot emit stale notices',async()=>{
+ const fixture=await mascotLifecycleFixture(),mount=fixture.mount();fixture.unmount();fixture.state.reject(Error('late state failure'));await mount
+ assert.equal(fixture.counts.rendererCreated,0);assert.equal(fixture.setup.persistError.value,'');assert.deepEqual(fixture.notices,[])
+})
+
+async function mountedMascotModel(options:{softwareFails?:boolean}={}){
+ const fixture=await mascotLifecycleFixture({...options,model:true}),mount=fixture.mount()
+ fixture.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});fixture.unlock.resolve()
+ for(let i=0;i<6;i++)await Promise.resolve()
+ assert.equal(fixture.images.length,1);fixture.images[0].onload();await mount;return fixture
+}
+
+test('actual mascot first draw waits for a naturally signalled GPU fence before readiness and focus',async()=>{
+ const f=await mountedMascotModel()
+ try{
+  f.runFrame();assert.equal(f.counts.compile,1);assert.equal(f.counts.draw,1);assert.equal(f.counts.fences,1);assert.equal(f.counts.flush,1);assert.equal(f.setup.ready.value,false);assert.equal(f.counts.focus,0)
+  assert.equal(f.setup.host.value.dataset.gpuReadyStatus,'pending');assert.equal(f.timers.size,1)
+  f.runFrame();f.runFrame();assert.equal(f.counts.draw,1,'polling does not submit dummy repeated frames');assert.equal(f.counts.compile,1);assert.equal(f.setup.ready.value,false);assert.equal(f.counts.focus,0)
+  f.signal();f.runFrame();assert.equal(f.setup.ready.value,true);assert.equal(f.counts.deleted,1);assert.equal(f.timers.size,0);await vue.nextTick();assert.equal(f.counts.focus,1)
+  assert.equal(f.events.filter(event=>event[0]==='ready').length,1);assert.equal(f.setup.host.value.dataset.gpuReadyStatus,'commands-complete');assert(Number(f.setup.host.value.dataset.compileMs)>.59);assert(Number(f.setup.host.value.dataset.firstSubmitMs)>.39);assert(Number(f.setup.host.value.dataset.gpuCheckMs)>=48)
+  f.runFrame();await vue.nextTick();assert.equal(f.counts.focus,1);assert.equal(f.events.filter(event=>event[0]==='ready').length,1)
+ }finally{f.unmount()}
+ assert.equal(f.frames.size,0);assert.equal(f.timers.size,0);assert.equal(f.listeners.size,0)
+})
+
+test('hiding cancels the actual pending fence and visibility requires a new real draw and fence',async()=>{
+ const f=await mountedMascotModel()
+ try{
+  f.runFrame();f.hidden.value=true;assert.equal(f.counts.deleted,1);assert.equal(f.frames.size,0);assert.equal(f.timers.size,0);assert.equal(f.setup.ready.value,false)
+  f.signal();f.runFrame();await vue.nextTick();assert.equal(f.counts.focus,0);assert.equal(f.counts.draw,1)
+  f.hidden.value=false;f.signal(f.context.TIMEOUT_EXPIRED);f.runFrame();assert.equal(f.counts.draw,2);assert.equal(f.counts.fences,2);assert.equal(f.setup.ready.value,false)
+  f.signal(f.context.ALREADY_SIGNALED);f.runFrame();await vue.nextTick();assert.equal(f.setup.ready.value,true);assert.equal(f.counts.focus,1);assert.equal(f.counts.deleted,2)
+ }finally{f.unmount()}
+})
+
+test('unmount cancels GPU work, deletes the real sync and suppresses all deferred readiness',async()=>{
+ const f=await mountedMascotModel();f.runFrame();f.unmount();f.signal();f.runFrame();f.expire();await vue.nextTick()
+ assert.equal(f.counts.deleted,1);assert.equal(f.frames.size,0);assert.equal(f.timers.size,0);assert.equal(f.listeners.size,0);assert.equal(f.counts.rendererDisposed,1);assert.equal(f.counts.contextLost,1);assert.equal(f.counts.focus,0);assert.equal(f.events.filter(event=>event[0]==='ready').length,0);assert.equal(f.counts.software,0)
+})
+
+test('ready focus queued by Vue cannot run after immediate hide or unmount',async()=>{
+ for(const action of ['hide','unmount']){
+  const f=await mountedMascotModel();f.signal();f.runFrame();assert.equal(f.setup.ready.value,true)
+  if(action==='hide')f.hidden.value=true;else f.unmount()
+  await vue.nextTick();assert.equal(f.counts.focus,0,action+' prevents the deferred focus handoff');if(action==='hide')f.unmount()
+ }
+})
+
+test('GPU WAIT_FAILED, context loss and deadline release resources and gate readiness on actual CPU raster',async()=>{
+ for(const failure of ['wait','lost','deadline']){
+  const f=await mountedMascotModel()
+  try{
+   f.runFrame();if(failure==='wait'){f.signal(f.context.WAIT_FAILED);f.runFrame()}else if(failure==='lost')f.lose();else f.expire()
+   assert.equal(f.setup.ready.value,false,'fallback construction is not a rendered frame');assert.equal(f.counts.deleted,1);assert.equal(f.counts.rendererDisposed,1);assert.equal(f.listeners.size,0);assert.equal(f.timers.size,0);assert.equal(f.counts.rasters,0)
+   assert.match(f.setup.host.value.dataset.gpuReadyFallback,failure==='wait'?/WAIT_FAILED/:failure==='lost'?/context lost/:/timed out/)
+   f.runFrame();await vue.nextTick();assert.equal(f.counts.rasters,1);assert.equal(f.setup.ready.value,true);assert.equal(f.counts.focus,1);assert.equal(f.setup.host.value.dataset.gpuReadyStatus,'software-first-raster');assert.equal(f.setup.host.value.dataset.renderBackend,'canvas2d-depth')
+  }finally{f.unmount()}
+  assert.equal(f.counts.softwareDisposed,1)
+ }
+})
+
+test('failed CPU fallback remains visibly unavailable and can recover without inventing readiness',async()=>{
+ const f=await mountedMascotModel({softwareFails:true})
+ try{
+  f.runFrame();f.signal(f.context.WAIT_FAILED);f.runFrame();assert.equal(f.setup.supported.value,false);assert.equal(f.setup.ready.value,false);assert.equal(f.setup.host.value.dataset.gpuReadyStatus,'failed');assert.match(f.setup.persistError.value,/software unavailable/);assert.equal(f.counts.focus,0);assert.equal(f.frames.size,0);assert.equal(f.timers.size,0)
+  f.setSoftwareFailure(false);f.setup.retryPreview();assert.equal(f.setup.supported.value,true);assert.equal(f.setup.ready.value,false);assert.equal(f.counts.rasters,0)
+  f.runFrame();await vue.nextTick();assert.equal(f.counts.rasters,1);assert.equal(f.setup.ready.value,true);assert.equal(f.counts.focus,1);assert.equal(f.setup.persistError.value,'')
+ }finally{f.unmount()}
+})
 
 test('mascot batch preserves all 42 animated meshes, world positions, inverse-transpose normals and skin UVs',()=>{
  const atlas=new Texture(),original=new Texture(),material=new MeshStandardMaterial({map:original,roughness:.83,metalness:.07,side:FrontSide})
