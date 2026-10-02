@@ -10,7 +10,10 @@ import {PreviewPlayer} from '../skinModel'
 import {MascotAudio} from '../mascotAudio'
 import {createMascotAtlas,MascotBatchRenderer} from '../mascotBatch'
 import {MascotSoftwareRenderer} from '../mascotSoftware'
+import {prepareFeedbackImages} from '../mascotFeedback'
 import skinUrl from '../assets/mascot-skins/kamu.png'
+import palmUrl from '../assets/mascot-feedback/pixel-palm.png'
+import printUrl from '../assets/mascot-feedback/palm-print.png'
 const props=defineProps<{focusOnReady?:boolean}>(),emit=defineEmits<{close:[];ready:[];'render-mode':[software:boolean]}>()
 const {reduced,hidden,decorativeActive}=useMotion(),host=ref<HTMLElement>(),viewport=ref<HTMLElement>(),hit=ref<HTMLButtonElement>(),menuButton=ref<HTMLButtonElement>()
 const ready=ref(false),supported=ref(true),closing=ref(false),menu=ref(false),confirmReset=ref(false),persistError=ref(''),busy=ref(false)
@@ -19,7 +22,8 @@ const sound=computed(()=>normalizeMascotSound(state.value.sound)),interaction=ne
 const audio=new MascotAudio(()=>sound.value,(played,voices)=>{if(host.value){host.value.dataset.soundsPlayed=String(played);host.value.dataset.activeSounds=String(voices)}},()=>!hidden.value,event=>{data('audioPreparation',event.phase);data('audioPrepareStartedAt',String(event.startedAt));data('audioPrepareAt',String(event.at));data('audioPrepareTime',String(event.audioTime))})
 let gl:WebGLRenderer|undefined,software:MascotSoftwareRenderer|undefined,batchRenderer:MascotBatchRenderer|undefined,scene:Scene,camera:OrthographicCamera,player:PreviewPlayer|undefined,waist:Group,pelvis:Object3D
 const textures:Texture[]=[],feet:Array<{mesh:Mesh;corners:Vector3[]}>=[],parts:Mesh[]=[],point=new Vector3(),projected=new Vector3()
-let feedbackElement:HTMLElement|undefined,palmElement:SVGElement|undefined,printElement:SVGElement|undefined
+let feedbackElement:HTMLElement|undefined,palmElement:HTMLImageElement|undefined,printElement:HTMLImageElement|undefined
+let feedbackReady=false,feedbackPending=false,initialStateReady=false,restartFeedback=false,cancelFeedback:undefined|(()=>void)
 let previousPose:number[]|undefined
 const writtenStyles=new WeakMap<Element,Map<string,string>>(),writtenData=new Map<string,string>()
 function style(element:HTMLElement|SVGElement|undefined,key:string,value:string){if(!element)return;let values=writtenStyles.get(element);if(!values){values=new Map();writtenStyles.set(element,values)}if(values.get(key)===value)return;element.style.setProperty(key,value);values.set(key,value)}
@@ -30,7 +34,7 @@ let gpuContext:WebGL2RenderingContext|undefined,gpuFence:WebGLSync|undefined,gpu
 let contextCanvas:HTMLCanvasElement|undefined
 function cancelGpuReady(){cancelAnimationFrame(gpuFrame);gpuFrame=0;clearTimeout(gpuDeadline);gpuDeadline=undefined;if(gpuFence){gpuContext?.deleteSync(gpuFence);gpuFence=undefined}gpuContext=undefined}
 function publishReady(now:number){
- if(disposed||hidden.value||!player||!host.value||ready.value)return
+ if(disposed||hidden.value||!feedbackReady||!player||!host.value||ready.value)return
  ready.value=true;activated=now;interaction.resume(now);host.value.dataset.readyAt=String(now);emit('ready')
  if(props.focusOnReady)void nextTick(()=>{if(!disposed&&!hidden.value&&ready.value)hit.value?.focus()})
  wake()
@@ -63,7 +67,7 @@ function confirmGpuDraw(){
   gpuDeadline=setTimeout(()=>{if(!disposed&&gpuFence)useSoftware('WebGL first draw fence timed out (3000ms)')},3000);checkGpuReady()
  }catch(error){useSoftware('WebGL first draw submission: '+errText(error))}
 }
-function retryPreview(){if(disposed)return;persistError.value='';useSoftware('manual software preview retry')}
+function retryPreview(){if(disposed)return;persistError.value='';if(!feedbackReady){void prepareScene();return}useSoftware('manual software preview retry')}
 let hits:string[]=[],batch:MascotBatch|undefined,flight:Promise<void>|undefined,saveTimer:ReturnType<typeof setTimeout>|undefined,retryTimer:ReturnType<typeof setTimeout>|undefined,retryDelay=800,soundRevision=0,savedSoundRevision=0
 const unsaved=()=>!!batch||!!hits.length||soundRevision!==savedSoundRevision
 function reportPending(){const pending=unsaved()||interaction.busy;if(pending!==reported){reported=pending;window.kamucl.send('window:mascotPending',pending)}}
@@ -130,10 +134,29 @@ function render(rafTimestamp:number){
  if(!ready.value){if(software){data('gpuReadyStatus','software-first-raster');publishReady(now)}else confirmGpuDraw();return}
  if(decorativeActive.value||interaction.busy||now-lastContact<500||activation<1)frame=requestAnimationFrame(render)
 }
+async function prepareScene(){
+ if(disposed||hidden.value||!initialStateReady||!host.value)return
+ if(feedbackPending){restartFeedback=true;return}
+ feedbackPending=true
+ try{
+  feedbackElement=host.value.querySelector<HTMLElement>('.mascot-feedback')??undefined;palmElement=feedbackElement?.querySelector<HTMLImageElement>('.pixel-palm')??undefined;printElement=feedbackElement?.querySelector<HTMLImageElement>('.palm-print')??undefined
+  if(!palmElement||!printElement)throw new Error('反馈像素图片节点不可用')
+  if(!feedbackReady){
+   data('feedbackPreparation','pending')
+   const preparation=prepareFeedbackImages([{name:'palm',image:palmElement,url:palmUrl},{name:'print',image:printElement,url:printUrl}],event=>{
+    if(disposed)return
+    const prefix=event.name==='palm'?'feedbackPalm':'feedbackPrint';data(prefix+'Phase',event.phase);data(prefix+event.phase[0].toUpperCase()+event.phase.slice(1)+'At',String(event.at));if(event.reason)data(prefix+'Reason',event.reason)
+   });cancelFeedback=preparation.cancel;await preparation.promise
+   if(disposed||hidden.value)return
+   feedbackReady=true;data('feedbackPreparation','decoded');supported.value=true
+  }
+  if(!player)await buildScene();else wake()
+ }catch(error){if(!disposed&&!hidden.value){supported.value=false;data('feedbackPreparation','failed');persistError.value='互动反馈无法加载：'+errText(error)}}
+ finally{cancelFeedback=undefined;feedbackPending=false;const restart=restartFeedback;restartFeedback=false;if(restart&&!disposed&&!hidden.value&&!feedbackReady)void prepareScene()}
+}
 async function buildScene(){
  if(disposed||!host.value||!viewport.value)return
  try{
-  feedbackElement=host.value!.querySelector<HTMLElement>('.mascot-feedback')??undefined;palmElement=feedbackElement?.querySelector<SVGElement>('.pixel-palm')??undefined;printElement=feedbackElement?.querySelector<SVGElement>('.palm-print')??undefined
   scene=new Scene();camera=new OrthographicCamera(-12,12,35,-1,.1,300);camera.position.set(0,0,100);camera.lookAt(0,0,0)
   scene.add(new AmbientLight(0xffffff,2.1));const light=new DirectionalLight(0xffffff,1.2);light.position.set(-40,80,70);scene.add(light)
   try{gl=new WebGLRenderer({alpha:true,antialias:false,powerPreference:'low-power'});gl.setPixelRatio(1);gl.setSize(48,72);gl.setClearColor(0,0)
@@ -161,17 +184,17 @@ async function buildScene(){
   activated=performance.now();wake()
  }catch(error){if(!disposed){supported.value=false;persistError.value='像素预览无法加载：'+errText(error)}}
 }
-watch(hidden,value=>{if(value){interaction.pause(performance.now());cancelAnimationFrame(frame);frame=0;cancelGpuReady();audio.pause();void save().catch(()=>{})}else{interaction.resume(performance.now());if(!ready.value)previousPose=undefined;void audio.unlock();wake()}},{flush:'sync'})
+watch(hidden,value=>{if(value){interaction.pause(performance.now());cancelAnimationFrame(frame);frame=0;cancelGpuReady();cancelFeedback?.();audio.pause();void save().catch(()=>{})}else{interaction.resume(performance.now());if(!ready.value)previousPose=undefined;void audio.unlock();if(!feedbackReady)void prepareScene();else wake()}},{flush:'sync'})
 watch(decorativeActive,wake);watch(reduced,wake)
-onMounted(async()=>{try{const initial=await window.kamucl.invoke('mascots:state') as MascotState;if(disposed)return;state.value=initial;await audio.unlock();if(disposed)return;await buildScene()}catch(error){if(!disposed){persistError.value=errText(error);toast(errText(error),'error')}}})
-onUnmounted(()=>{disposed=true;cancelImage?.();cancelGpuReady();unsubscribe();clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);batchRenderer?.dispose();player?.dispose();for(const texture of textures)texture.dispose();releaseGl();software?.dispose();software?.domElement.remove();void audio.dispose()})
+onMounted(async()=>{try{const initial=await window.kamucl.invoke('mascots:state') as MascotState;if(disposed)return;state.value=initial;await audio.unlock();if(disposed)return;initialStateReady=true;await prepareScene()}catch(error){if(!disposed){persistError.value=errText(error);toast(errText(error),'error')}}})
+onUnmounted(()=>{disposed=true;cancelFeedback?.();palmElement?.removeAttribute('src');printElement?.removeAttribute('src');cancelImage?.();cancelGpuReady();unsubscribe();clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);batchRenderer?.dispose();player?.dispose();for(const texture of textures)texture.dispose();releaseGl();software?.dispose();software?.domElement.remove();void audio.dispose()})
 defineExpose({flush,closeStage})
 </script>
 <template>
  <section ref="host" class="mascot-stage" :class="{reduced,hidden,ready}" aria-label="卡慕像素互动" data-ui="mascot:logo" @keydown.esc.stop.prevent="menu?closeMenu():closeStage()">
   <div ref="viewport" class="figure-strip">
    <button ref="hit" class="mascot-hit" data-hit="kamu" :aria-label="'拍一下卡慕，累计 '+(state.counts.kamu||0)+' 次'" :title="'卡慕 · '+(state.counts.kamu||0)+' 次；点击转身拍打'" :disabled="!ready||closing" @click="slap" @pointerdown="audio.unlock()" @keydown="keyDown"></button>
-   <span class="mascot-feedback" data-feedback="kamu" aria-hidden="true"><svg class="palm-print" viewBox="0 0 16 16"><path d="M3 6V2h2v4h1V0h2v6h1V1h2v5h1V3h2v7h1v3h-2v2H6v-2H4v-2H1V7h2Z"/></svg><svg class="pixel-palm" viewBox="0 0 16 16"><path fill="#71452f" d="M2 6V1h4V0h3v1h3v2h3v7h1v4h-2v2H5v-2H3v-2H0V6Z"/><path fill="#f3c699" d="M3 7V2h2v5h1V1h2v6h1V2h2v5h1V4h2v7h1v2h-2v2H6v-2H4v-2H1V7Z"/><path fill="#d9956a" d="M6 10h6v1H6Zm1 3h5v1H7Z"/></svg></span>
+   <span class="mascot-feedback" data-feedback="kamu" aria-hidden="true"><img class="palm-print" alt="" width="15" height="15" draggable="false"/><img class="pixel-palm" alt="" width="15" height="15" draggable="false"/></span>
    <button v-if="!supported" class="fallback-note" title="预览不可用，点击重试" @click="retryPreview">重试预览</button>
   </div>
   <button ref="menuButton" class="menu-tool" :aria-expanded="menu" aria-label="卡慕互动设置" title="次数、音量与关闭" @click="menu=!menu">⋯</button>
@@ -179,5 +202,5 @@ defineExpose({flush,closeStage})
  </section>
 </template>
 <style scoped>
-.mascot-stage{position:absolute;inset:0;width:48px;height:72px;-webkit-app-region:no-drag;isolation:isolate}.figure-strip{position:relative;width:48px;height:72px;overflow:visible;touch-action:none;opacity:0;contain:layout style;will-change:opacity,transform}.ready .figure-strip{animation:kamu-in .38s ease-out both}.figure-strip :deep(canvas){position:absolute;inset:0;display:block;width:48px;height:72px;pointer-events:none;image-rendering:pixelated;transform:translateZ(0);will-change:transform}.mascot-hit{position:absolute;inset:0;z-index:2;padding:0;border:0;border-radius:8px;background:transparent;cursor:pointer;touch-action:manipulation}.mascot-hit:focus-visible{outline:2px solid var(--accent);outline-offset:2px;background:color-mix(in srgb,var(--accent) 8%,transparent)}.menu-tool{position:absolute;right:-8px;bottom:0;z-index:35;border:1px solid var(--border);background:var(--card-solid,var(--bg-2));color:var(--text-dim);width:20px;height:16px;padding:0;border-radius:5px;line-height:10px;cursor:pointer;font-size:15px}.menu-tool:hover,.menu-tool:focus-visible{color:var(--accent);outline:2px solid var(--accent)}.sound-panel{position:absolute;left:0;top:calc(100% + 4px);z-index:9100;width:230px;padding:14px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--card-solid,var(--bg-2));box-shadow:var(--shadow-lg);display:grid;gap:10px;font-size:12px}.sound-panel strong{display:flex;justify-content:space-between}.sound-panel strong span{color:var(--accent)}.sound-panel label{display:flex;align-items:center;gap:7px}.sound-panel input{width:110px;accent-color:var(--accent)}.sound-panel b{min-width:30px}.sound-panel>div{display:flex;justify-content:flex-end;gap:4px}.sound-panel p{margin:0;color:var(--danger);overflow-wrap:anywhere}.fallback-note{position:absolute;inset:0;display:grid;place-items:center;font-size:10px;color:var(--text-dim)}.mascot-feedback{position:absolute;left:0;top:0;will-change:translate;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;pointer-events:none;z-index:30}.mascot-feedback svg{position:absolute;inset:0;width:100%;height:100%;shape-rendering:crispEdges;opacity:0}.pixel-palm{transform-origin:70% 90%}.palm-print{fill:#cf674e;stroke:#46221e;stroke-width:1;stroke-linejoin:miter;paint-order:stroke fill}.reduced.ready .figure-strip{animation:kamu-in .1s ease-out both}.hidden *{animation-play-state:paused!important}@keyframes kamu-in{from{opacity:0;transform:translateY(-7px) scale(.65)}to{opacity:1;transform:none}}
+.mascot-stage{position:absolute;inset:0;width:48px;height:72px;-webkit-app-region:no-drag;isolation:isolate}.figure-strip{position:relative;width:48px;height:72px;overflow:visible;touch-action:none;opacity:0;contain:layout style;will-change:opacity,transform}.ready .figure-strip{animation:kamu-in .38s ease-out both}.figure-strip :deep(canvas){position:absolute;inset:0;display:block;width:48px;height:72px;pointer-events:none;image-rendering:pixelated;transform:translateZ(0);will-change:transform}.mascot-hit{position:absolute;inset:0;z-index:2;padding:0;border:0;border-radius:8px;background:transparent;cursor:pointer;touch-action:manipulation}.mascot-hit:focus-visible{outline:2px solid var(--accent);outline-offset:2px;background:color-mix(in srgb,var(--accent) 8%,transparent)}.menu-tool{position:absolute;right:-8px;bottom:0;z-index:35;border:1px solid var(--border);background:var(--card-solid,var(--bg-2));color:var(--text-dim);width:20px;height:16px;padding:0;border-radius:5px;line-height:10px;cursor:pointer;font-size:15px}.menu-tool:hover,.menu-tool:focus-visible{color:var(--accent);outline:2px solid var(--accent)}.sound-panel{position:absolute;left:0;top:calc(100% + 4px);z-index:9100;width:230px;padding:14px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--card-solid,var(--bg-2));box-shadow:var(--shadow-lg);display:grid;gap:10px;font-size:12px}.sound-panel strong{display:flex;justify-content:space-between}.sound-panel strong span{color:var(--accent)}.sound-panel label{display:flex;align-items:center;gap:7px}.sound-panel input{width:110px;accent-color:var(--accent)}.sound-panel b{min-width:30px}.sound-panel>div{display:flex;justify-content:flex-end;gap:4px}.sound-panel p{margin:0;color:var(--danger);overflow-wrap:anywhere}.fallback-note{position:absolute;inset:0;display:grid;place-items:center;font-size:10px;color:var(--text-dim)}.mascot-feedback{position:absolute;left:0;top:0;will-change:translate;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;pointer-events:none;z-index:30}.mascot-feedback img{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;will-change:opacity,transform;opacity:0}.pixel-palm{transform-origin:70% 90%}.reduced.ready .figure-strip{animation:kamu-in .1s ease-out both}.hidden *{animation-play-state:paused!important}@keyframes kamu-in{from{opacity:0;transform:translateY(-7px) scale(.65)}to{opacity:1;transform:none}}
 </style>

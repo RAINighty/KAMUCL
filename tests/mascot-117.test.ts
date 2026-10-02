@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {createRequire} from 'node:module'
+import {createHash} from 'node:crypto'
 import {build} from 'esbuild'
 import {compileScript,parse} from '@vue/compiler-sfc'
 import * as vue from 'vue'
@@ -15,10 +16,11 @@ import {MascotBatchRenderer,mascotAtlasUV} from '../src/renderer/src/mascotBatch
 import {KamuInteraction} from '../src/shared/kamuInteraction'
 import * as Three from 'three'
 import {PreviewPlayer} from '../src/renderer/src/skinModel'
+import {prepareFeedbackImages} from '../src/renderer/src/mascotFeedback'
 
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no});return{promise,resolve,reject}}
 let mascotSetupBundle:Promise<string>|undefined
-async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boolean}={}){
+async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boolean;feedbackDeferred?:boolean}={}){
  mascotSetupBundle??=build({entryPoints:['src/renderer/src/components/MascotStage.vue'],bundle:true,write:false,platform:'node',format:'cjs',packages:'external',plugins:[{name:'mascot-lifecycle',setup(b){
   b.onResolve({filter:/^(@shared\/|\.\.\/)/},args=>({path:args.path,external:true}))
   b.onLoad({filter:/\.vue$/},async args=>{const {descriptor}=parse(await fs.readFile(args.path,'utf8'));return{contents:compileScript(descriptor,{id:args.path}).content,loader:'ts',resolveDir:path.dirname(args.path)}})
@@ -48,6 +50,7 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
   if(name==='../api')return{errText:String}
   if(name==='../store')return{toast:(message:string)=>notices.push(message)}
   if(name==='../mascotAudio')return{MascotAudio:AudioFixture}
+  if(name==='../mascotFeedback')return{prepareFeedbackImages}
   if(name==='../skinModel')return{PreviewPlayer:options.model?class extends PreviewPlayer{constructor(){super();counts.rigs++}}:class{constructor(){counts.rigs++}}}
   if(name==='../mascotBatch')return{createMascotAtlas:()=>{if(!options.model)throw Error('unexpected post-unmount atlas allocation');return new Texture()},MascotBatchRenderer}
   if(name==='../mascotSoftware')return{MascotSoftwareRenderer:class{domElement={remove:()=>counts.removed++};info={render:{calls:1},frames:0,totalUploads:0};constructor(){if(!options.model||softwareFails)throw Error('software unavailable');counts.software++}setSize(){}render(){counts.rasters++;this.info.frames++;this.info.totalUploads++}dispose(){counts.softwareDisposed++}}}
@@ -57,10 +60,12 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
  const windowFixture={kamucl:{invoke:()=>state.promise,on:()=>()=>counts.unsubscribed++,send:()=>{}}}
  new Function('require','module','exports','window','Image','requestAnimationFrame','cancelAnimationFrame','performance','setTimeout','clearTimeout',await mascotSetupBundle)(requireFixture,mod,mod.exports,windowFixture,ImageFixture,(callback:any)=>{counts.frames++;frames.set(++nextFrame,callback);return nextFrame},(id:number)=>frames.delete(id),{now:()=>now},(callback:any,delay:number)=>{timers.set(++nextTimer,{callback,at:now+delay});return nextTimer},(id:number)=>timers.delete(id))
  const scope=vue.effectScope(),setup=scope.run(()=>mod.exports.default.setup({focusOnReady:true},{expose:()=>{},emit:(...event:any[])=>events.push(event)}))
- const palmStyles=new Map<string,string>(),printStyles=new Map<string,string>(),feedback={dataset:{},style:{setProperty:()=>{}},querySelector:(selector:string)=>({style:{setProperty:(key:string,value:string)=>(selector==='.pixel-palm'?palmStyles:printStyles).set(key,value)}})}
+ const palmStyles=new Map<string,string>(),printStyles=new Map<string,string>()
+ const feedbackImages=['palm','print'].map(name=>{const gate=deferred<void>();return{gate,src:'',decodeCalls:0,complete:true,naturalWidth:15,naturalHeight:15,style:{setProperty:(key:string,value:string)=>(name==='palm'?palmStyles:printStyles).set(key,value)},decode(){this.decodeCalls++;return options.feedbackDeferred?this.gate.promise:Promise.resolve()},addEventListener(){},removeEventListener(){},removeAttribute(){this.src=''}}})
+ const feedback={dataset:{},style:{setProperty:()=>{}},querySelector:(selector:string)=>feedbackImages[selector==='.pixel-palm'?0:1]}
  setup.host.value={dataset:{},querySelector:()=>feedback};setup.viewport.value={prepend:()=>counts.attached++}
  setup.hit.value={focus:()=>counts.focus++}
- return{state,unlock,counts,images,notices,setup,events,plays,palmStyles,printStyles,hidden,context,frames,timers,listeners,clock:()=>now,setSoftwareFailure:(value:boolean)=>softwareFails=value,mount:()=>mounted(),unmount:()=>{unmounted();setup.host.value=undefined;setup.viewport.value=undefined;scope.stop()},signal:(status=context.CONDITION_SATISFIED)=>fenceStatus=status,lose:()=>{lost=true;listeners.get('webglcontextlost')?.({preventDefault:()=>{}})},runFrame:(elapsed=16,rafTimestamp?:number)=>{now+=elapsed;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(rafTimestamp??now)},expire:()=>{now+=3001;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback()}}}
+ return{state,unlock,counts,images,feedbackImages,notices,setup,events,plays,palmStyles,printStyles,hidden,context,frames,timers,listeners,clock:()=>now,setSoftwareFailure:(value:boolean)=>softwareFails=value,mount:()=>mounted(),unmount:()=>{unmounted();setup.host.value=undefined;setup.viewport.value=undefined;scope.stop()},signal:(status=context.CONDITION_SATISFIED)=>fenceStatus=status,lose:()=>{lost=true;listeners.get('webglcontextlost')?.({preventDefault:()=>{}})},runFrame:(elapsed=16,rafTimestamp?:number)=>{now+=elapsed;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(rafTimestamp??now)},expire:()=>{now+=3001;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback()}}}
 }
 test('real mascot setup cannot allocate after unmount overtakes state or audio initialization',async()=>{
  for(const gate of ['state','audio']){
@@ -72,7 +77,7 @@ test('real mascot setup cannot allocate after unmount overtakes state or audio i
 })
 test('real mascot setup cancels pending image work and releases its pre-existing context on unmount',async()=>{
  const fixture=await mascotLifecycleFixture(),mount=fixture.mount();fixture.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});fixture.unlock.resolve()
- for(let i=0;i<6;i++)await Promise.resolve()
+ for(let i=0;i<20;i++)await Promise.resolve()
  assert.equal(fixture.counts.rendererCreated,1);assert.equal(fixture.images.length,1);assert.equal(fixture.counts.attached,1)
  fixture.unmount();await mount
  assert.equal(fixture.images[0].src,'');assert.equal(fixture.images[0].onload,null);assert.equal(fixture.images[0].onerror,null);assert.equal(fixture.counts.rendererDisposed,1);assert.equal(fixture.counts.contextLost,1);assert.equal(fixture.counts.removed,1);assert.equal(fixture.counts.rigs,0);assert.equal(fixture.counts.frames,0);assert.equal(fixture.setup.persistError.value,'');assert.deepEqual(fixture.notices,[])
@@ -82,10 +87,75 @@ test('a state failure arriving after mascot unmount cannot emit stale notices',a
  assert.equal(fixture.counts.rendererCreated,0);assert.equal(fixture.setup.persistError.value,'');assert.deepEqual(fixture.notices,[])
 })
 
+test('actual compiled mascot setup waits for both feedback decodes before allocating or accepting clicks',async()=>{
+ const f=await mascotLifecycleFixture({model:true,feedbackDeferred:true}),mount=f.mount()
+ f.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});f.unlock.resolve()
+ for(let i=0;i<20;i++)await Promise.resolve()
+ assert.equal(f.counts.rendererCreated,0);assert.equal(f.setup.ready.value,false);assert.equal(f.setup.host.value.dataset.feedbackPreparation,'pending')
+ f.setup.slap();assert.equal(f.setup.interaction.queued,0);assert.equal(f.plays.length,0)
+ f.feedbackImages[0].gate.resolve();for(let i=0;i<20;i++)await Promise.resolve()
+ assert.equal(f.counts.rendererCreated,0);assert.equal(f.setup.host.value.dataset.feedbackPalmPhase,'decoded');assert.equal(f.setup.host.value.dataset.feedbackPrintPhase,'decoding')
+ f.feedbackImages[1].gate.resolve();for(let i=0;i<20;i++)await Promise.resolve()
+ assert.equal(f.images.length,1);assert.equal(f.setup.host.value.dataset.feedbackPreparation,'decoded');assert.equal(f.setup.ready.value,false)
+ f.images[0].onload();await mount;f.signal();f.runFrame();await vue.nextTick()
+ assert.equal(f.setup.ready.value,true);assert.equal(f.counts.focus,1);assert.equal(f.plays.length,0);assert.equal(f.setup.state.value.counts.kamu,undefined)
+ f.unmount();assert(f.feedbackImages.every(image=>image.src===''))
+})
+
+test('unmount cancels actual feedback decoding and late decode completion cannot allocate resources or focus',async()=>{
+ const f=await mascotLifecycleFixture({model:true,feedbackDeferred:true}),mount=f.mount()
+ f.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});f.unlock.resolve()
+ for(let i=0;i<20;i++)await Promise.resolve()
+ f.unmount();await mount;f.feedbackImages.forEach(image=>image.gate.resolve());for(let i=0;i<20;i++)await Promise.resolve();await vue.nextTick()
+ assert(f.feedbackImages.every(image=>image.src===''));assert.equal(f.counts.rendererCreated,0);assert.equal(f.counts.rigs,0);assert.equal(f.counts.frames,0);assert.equal(f.counts.focus,0);assert.equal(f.counts.audioDisposed,1);assert.equal(f.setup.ready.value,false);assert.deepEqual(f.notices,[])
+})
+
+test('hidden pending feedback is cancelled, and visible decoding is genuinely re-confirmed before GPU readiness',async()=>{
+ const f=await mascotLifecycleFixture({model:true,feedbackDeferred:true}),mount=f.mount()
+ f.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});f.unlock.resolve()
+ for(let i=0;i<20;i++)await Promise.resolve()
+ f.hidden.value=true;await mount;assert(f.feedbackImages.every(image=>image.src===''));assert.equal(f.setup.host.value.dataset.feedbackPalmPhase,'cancelled')
+ f.feedbackImages.forEach(image=>image.gate.resolve());for(let i=0;i<20;i++)await Promise.resolve()
+ assert.equal(f.counts.rendererCreated,0);assert.equal(f.setup.ready.value,false);assert.equal(f.counts.focus,0)
+ f.feedbackImages.forEach(image=>image.gate=deferred<void>());f.hidden.value=false;for(let i=0;i<20;i++)await Promise.resolve()
+ assert(f.feedbackImages.every(image=>image.decodeCalls===2));assert.equal(f.counts.rendererCreated,0)
+ f.feedbackImages.forEach(image=>image.gate.resolve());for(let i=0;i<20;i++)await Promise.resolve();f.images[0].onload();for(let i=0;i<20;i++)await Promise.resolve()
+ f.signal();f.runFrame();await vue.nextTick();assert.equal(f.setup.ready.value,true);assert.equal(f.counts.focus,1);assert.equal(f.setup.host.value.dataset.feedbackPreparation,'decoded');f.unmount()
+})
+
+test('a real feedback decode rejection refuses interaction and allows a fresh retry',async()=>{
+ const f=await mascotLifecycleFixture({model:true,feedbackDeferred:true}),mount=f.mount()
+ f.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});f.unlock.resolve();for(let i=0;i<20;i++)await Promise.resolve()
+ f.feedbackImages[0].gate.reject(Error('decode failed'));await mount;assert.equal(f.setup.supported.value,false);assert.equal(f.setup.ready.value,false);assert.equal(f.counts.rendererCreated,0);assert.match(f.setup.persistError.value,/decode failed/)
+ f.setup.slap();assert.equal(f.setup.interaction.queued,0)
+ f.feedbackImages.forEach(image=>image.gate=deferred<void>());f.setup.retryPreview();for(let i=0;i<20;i++)await Promise.resolve();f.feedbackImages.forEach(image=>image.gate.resolve());for(let i=0;i<20;i++)await Promise.resolve()
+ f.images[0].onload();for(let i=0;i<20;i++)await Promise.resolve();f.signal();f.runFrame();await vue.nextTick();assert.equal(f.setup.ready.value,true);assert.equal(f.setup.supported.value,true);assert.equal(f.setup.persistError.value,'');f.unmount()
+})
+
+test('feedback load, decode and cancellation are actual separate states, with removable native listeners',async()=>{
+ const events:any[]=[],images=['palm','print'].map(name=>{
+  const handlers=new Map<string,EventListener>(),gate=deferred<void>()
+  return{name:name as 'palm'|'print',gate,handlers,src:'',complete:false,naturalWidth:0,naturalHeight:0,decodeCalls:0,decode(){this.decodeCalls++;return gate.promise},addEventListener(type:string,handler:EventListener){handlers.set(type,handler)},removeEventListener(type:string,handler:EventListener){assert.equal(handlers.get(type),handler);handlers.delete(type)},removeAttribute(){this.src=''}}
+ })
+ const preparation=prepareFeedbackImages(images.map(image=>({name:image.name,image:image as unknown as HTMLImageElement,url:image.name+'.png'})),event=>events.push(event))
+ assert.equal(images[0].decodeCalls,0);assert.deepEqual(events.map(e=>e.phase),['loading','loading'])
+ images[0].complete=true;images[0].naturalWidth=images[0].naturalHeight=15;images[0].handlers.get('load')!({} as Event)
+ assert.equal(images[0].decodeCalls,1);assert.equal(images[1].decodeCalls,0);assert.deepEqual(events.slice(-2).map(e=>e.phase),['loaded','decoding'])
+ preparation.cancel();await assert.rejects(preparation.promise,/已取消/);images[0].gate.resolve();await Promise.resolve()
+ assert(images.every(image=>image.src===''&&image.handlers.size===0));assert(!events.some(e=>e.phase==='decoded'),'late decode must not claim readiness after cancellation')
+})
+
+test('feedback decode deadline rejects failure instead of publishing assumed readiness',async()=>{
+ const events:any[]=[],gate=deferred<void>(),handlers=new Map<string,EventListener>()
+ const image={src:'',complete:true,naturalWidth:15,naturalHeight:15,decode:()=>gate.promise,addEventListener:(type:string,handler:EventListener)=>handlers.set(type,handler),removeEventListener:(type:string)=>handlers.delete(type),removeAttribute(){this.src=''}}
+ const preparation=prepareFeedbackImages([{name:'palm',image:image as unknown as HTMLImageElement,url:'palm.png'}],event=>events.push(event),5)
+ await assert.rejects(preparation.promise,/超时/);assert.equal(image.src,'');assert.equal(handlers.size,0);gate.resolve();await Promise.resolve();assert(!events.some(e=>e.phase==='decoded'));assert.equal(events.at(-1).phase,'failed')
+})
+
 async function mountedMascotModel(options:{softwareFails?:boolean}={}){
  const fixture=await mascotLifecycleFixture({...options,model:true}),mount=fixture.mount()
  fixture.state.resolve({counts:{},order:[],sound:{muted:false,volume:.45}});fixture.unlock.resolve()
- for(let i=0;i<6;i++)await Promise.resolve()
+ for(let i=0;i<20;i++)await Promise.resolve()
  assert.equal(fixture.images.length,1);fixture.images[0].onload();await mount;return fixture
 }
 
@@ -187,10 +257,9 @@ test('hidden close still drains all accepted contacts unbounded without hidden s
 })
 
 test('actual handprint SVG keeps its pixel silhouette and readable outline without a first-contact filter surface',async()=>{
- const {descriptor}=parse(await fs.readFile('src/renderer/src/components/MascotStage.vue','utf8')),template=descriptor.template!.content,css=descriptor.styles.map(style=>style.content).join('\n')
- const svg=template.match(/<svg class="palm-print"[^>]*>[\s\S]*?<\/svg>/)![0],rule=css.match(/\.palm-print\{([^}]*)\}/)![1]
+ const source=await fs.readFile('src/renderer/src/assets/mascot-feedback/palm-print.svg','utf8'),svg=source.replace(/<style>[\s\S]*?<\/style>/,''),rule=source.match(/\.palm-print\{([^}]*)\}/)![1]
  assert(!/\bfilter\s*:|<filter\b|\bfilter\s*=/.test(rule+svg),'no CSS or SVG filter graph is created by the first visible handprint')
- const raster=async(style:string,size:number)=>sharp(Buffer.from(svg.replace('<svg ',`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" shape-rendering="crispEdges" `).replace('</svg>',`<style>.palm-print{${style}}</style></svg>`))).ensureAlpha().raw().toBuffer()
+ const raster=async(style:string,size:number)=>sharp(Buffer.from(svg.replace('width="15" height="15"',`width="${size}" height="${size}"`).replace('</svg>',`<style>.palm-print{${style}}</style></svg>`))).ensureAlpha().raw().toBuffer()
  for(const size of [15,160]){
   const actual=await raster(rule,size),base=await raster('fill:#cf674e',size);let filled=0,outline=0,added=0
   for(let i=0;i<base.length;i+=4){
@@ -201,6 +270,27 @@ test('actual handprint SVG keeps its pixel silhouette and readable outline witho
   }
   assert(filled>size*size*.3);assert(outline>0,'dark pixel edge stays visible against clothing');assert(added<size*size*.35,'one-unit outline does not replace the recognizable hand silhouette')
  }
+})
+
+test('compiled 15px PNG feedback has every original SVG RGBA byte including transparent edges and deterministic output',async()=>{
+ const directory='src/renderer/src/assets/mascot-feedback',tmp=await fs.mkdtemp(path.join(os.tmpdir(),'kamu-feedback-'))
+ // Raw RGBA SHA256 from the pre-change inline SVG at its actual 15px size.
+ const originalHashes={'pixel-palm':'6799e4dfb221d592fdb6e67994e8b324e4623cdbad02e90e4182518ba7837828','palm-print':'3794a05a09ee890a517140c71d441590cb5414b2c35e30bf95b8adfbd1500896'}
+ const {compileFeedback}=createRequire(path.resolve('package.json'))('./scripts/generate-kamu-feedback.cjs')
+ try{
+  for(const name of ['pixel-palm','palm-print'] as const){
+   const svg=await fs.readFile(path.join(directory,name+'.svg')),png=await fs.readFile(path.join(directory,name+'.png'))
+   await fs.writeFile(path.join(tmp,name+'.svg'),svg)
+   const original=await sharp(svg,{density:72}).ensureAlpha().raw().toBuffer({resolveWithObject:true}),decoded=await sharp(png).ensureAlpha().raw().toBuffer({resolveWithObject:true})
+   assert.equal(decoded.info.width,15);assert.equal(decoded.info.height,15);assert.equal(decoded.info.channels,4);assert.deepEqual(decoded.data,original.data,'every RGB/alpha byte, including outside the silhouette, is unchanged')
+   assert.equal(createHash('sha256').update(decoded.data).digest('hex'),originalHashes[name],'fixed original inline SVG oracle preserves all original pixels independently of new SVG source')
+   assert(decoded.data.some((byte,index)=>index%4===3&&byte===0),'transparent boundary preserved');assert(decoded.data.some((byte,index)=>index%4===3&&byte===255),'solid pixel interiors preserved')
+  }
+  await compileFeedback(tmp)
+  for(const name of ['pixel-palm','palm-print'])assert.deepEqual(await fs.readFile(path.join(tmp,name+'.png')),await fs.readFile(path.join(directory,name+'.png')),'offline compilation is byte deterministic')
+  const {descriptor}=parse(await fs.readFile('src/renderer/src/components/MascotStage.vue','utf8'));assert(!/<svg\b/.test(descriptor.template!.content),'feedback no longer creates first-contact SVG paint surfaces')
+  assert.equal((descriptor.template!.content.match(/<img class="(?:pixel-palm|palm-print)"/g)||[]).length,2)
+ }finally{await fs.rm(tmp,{recursive:true,force:true})}
 })
 
 test('mascot batch preserves all 42 animated meshes, world positions, inverse-transpose normals and skin UVs',()=>{
