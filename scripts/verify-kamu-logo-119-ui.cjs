@@ -52,7 +52,15 @@ module.exports=async function verifyKamuLogo(h){
  await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:pos.x,y:pos.y});await wait(300);assert.equal((await saved()).counts.kamu||0,initial)
  const gpu=await main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/renderer/index.html')),d=testElectron.screen.getDisplayMatching(w.getBounds());return{activeDisplay:{id:d.id,size:d.size,scaleFactor:d.scaleFactor,displayFrequency:d.displayFrequency},platform:process.platform,arch:process.arch}})()`)
  assert.equal(typeof recordScreencast,'function')
+ // Observe the product's own render attribute once per animation callback.
+ // This is CPU/update cadence, separate from the native compositor capture gate.
+ await evaluate(`(()=>{const samples=[],longTasks=[];const observer=new MutationObserver(()=>{const e=document.querySelector('.mascot-stage');if(e)samples.push({at:performance.now(),phase:e.dataset.phase,yaw:Number(e.dataset.bodyYaw),queue:Number(e.dataset.queue),contacts:Number(e.dataset.contacts),renderMs:Number(e.dataset.renderMs),drawCalls:Number(e.dataset.renderDrawCalls),actualDraws:window.__mascotSoundProof.draws})});observer.observe(document.querySelector('.mascot-stage'),{attributes:true,attributeFilter:['data-render-ms']});let tasks;try{tasks=new PerformanceObserver(list=>longTasks.push(...list.getEntries().map(e=>({startTime:e.startTime,duration:e.duration,name:e.name}))));tasks.observe({entryTypes:['longtask']})}catch{}window.__kamuFrameWatch={samples,longTasks,observer,tasks}})()`)
  const recording=await recordScreencast('mascot-119-logo-screencast',async()=>{for(let i=0;i<10;i++)await trustedClick('[data-hit=kamu]')},2200)
+ const cadence=await evaluate(`(()=>{const p=window.__kamuFrameWatch;p.observer.disconnect();p.tasks?.disconnect();return{samples:p.samples,longTasks:p.longTasks}})()`)
+ assert(cadence.samples.length>=2,'actual product render observations required')
+ const intervals=cadence.samples.slice(1).map((sample,index)=>sample.at-cadence.samples[index].at),sorted=[...intervals].sort((a,b)=>a-b),renderTimes=cadence.samples.map(sample=>sample.renderMs).sort((a,b)=>a-b)
+ proof.rendererCadence={source:'MutationObserver after product data-render-ms write; real product rAF CPU/update observations, not display presentation or interpolated frames',captureStartedAt:recording.startedAt,...cadence,intervals,fps:1000*(cadence.samples.length-1)/(cadence.samples.at(-1).at-cadence.samples[0].at),gapP95:sorted[Math.floor(sorted.length*.95)],maxGap:sorted.at(-1),renderP95:renderTimes[Math.floor(renderTimes.length*.95)],maxRender:renderTimes.at(-1)}
+ saveProof()
  assert(recording.frames.length>=2&&Number.isFinite(recording.fps)&&recording.fps>0)
  const budget=require('./mascot-capture-budget.cjs')(gpu,recording.fps);proof.performanceBenchmark={...budget,status:budget.passed?'passed':'below-target'}
  fs.writeFileSync('out/mascot-header-screencast-live.json',JSON.stringify({...recording,...budget,frameRatePassed:budget.passed,trigger:'ten trusted left click press/release pairs on LOGO Kamu',hardwareListening:'not performed'},null,2))
@@ -118,6 +126,7 @@ module.exports=async function verifyKamuLogo(h){
  proof.persistence=await main('kamuPendingTrace');proof.complete=true;saveProof();console.log(version+' single Kamu LOGO functional GUI passed; capture '+proof.performanceBenchmark.status)
  }catch(error){proof.error=String(error);saveProof();await screenshot('extension-119-kamu-failure');throw error}
  finally{
+ await evaluate('window.__kamuFrameWatch?.observer.disconnect();window.__kamuFrameWatch?.tasks?.disconnect()')
  await main("if(globalThis.kamuProofBase){testElectron.ipcMain.removeHandler('mascots:batch');testElectron.ipcMain.handle('mascots:batch',kamuProofBase)}if(globalThis.kamuPendingListener)testElectron.ipcMain.removeListener('window:mascotPending',kamuPendingListener)")
  await evaluate('(()=>{const h=window.__mascotHooks;if(!h)return;window.AudioContext=h.Original;AudioBufferSourceNode.prototype.start=h.start;AudioNode.prototype.connect=h.connect;h.Original.prototype.close=h.close;h.Original.prototype.resume=h.resume;h.Original.prototype.suspend=h.suspend;HTMLCanvasElement.prototype.getContext=h.getContext;WebGL2RenderingContext.prototype.drawElements=h.draw;CanvasRenderingContext2D.prototype.putImageData=h.putImageData})()')
  await call('Emulation.setEmulatedMedia',{features:[]})
