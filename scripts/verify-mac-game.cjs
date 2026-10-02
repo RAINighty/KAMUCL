@@ -134,12 +134,40 @@ async function main() {
   events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
   assert(!events.some(e => e.name === 'launchState' && ['error', 'exited'].includes(e.value.status)), 'game exited during initialization')
   execFileSync('/usr/sbin/screencapture', ['-x', '-D', '1', path.join(proof, 'minecraft.png')])
+  // Observe the real new-window handshake and the main process's own state replay.
+  // Connecting CDP (and its fixed initial settle delay) does not imply that async
+  // account/instance/assets boot tasks have emitted boot:renderer-ready yet.
+  await evaluateMain(`(()=>{
+    const electron=process.mainModule.require('electron');globalThis.__dockReopenObservation={events:[]};
+    const note=value=>__dockReopenObservation.events.push({at:Date.now(),...value});
+    electron.ipcMain.on('boot:stage',(event,stage)=>note({kind:'boot-stage',sender:event.sender.id,stage}));
+    electron.ipcMain.on('boot:renderer-ready',event=>note({kind:'renderer-ready',sender:event.sender.id}));
+    electron.app.on('browser-window-created',(_event,window)=>{
+      note({kind:'window-created',sender:window.webContents.id,windowId:window.id});
+      const original=window.webContents.send;
+      window.webContents.send=function(channel,...args){if(channel==='event:launchState')note({kind:'launch-state',sender:this.id,state:args[0]});return original.call(this,channel,...args)};
+    });
+  })()`)
   await evaluateMain(`process.mainModule.require('electron').BrowserWindow.getAllWindows().forEach(w=>w.close())`)
   await wait(1500);process.kill(gamePid,0)
   assert.equal(await evaluateMain(`process.mainModule.require('electron').BrowserWindow.getAllWindows().length`),0)
   await evaluateMain(`process.mainModule.require('electron').app.emit('activate')`)
   await connectRenderer()
-  assert((await evaluate('document.body.innerText')).includes('游戏运行中'),'Dock reopen forgot the live game')
+  const dockReopen = await require('./mac-reopen-observer.cjs').observeDockReopen({
+    expected: { pid: gamePid, versionId: installed.installedId },
+    timeoutMs: 10000,
+    record: value => fs.writeFileSync(path.join(proof, 'dock-reopen.json'), JSON.stringify({arch,version,source:'Existing test app.emit(activate) invokes the production activation handler; observed actual main-process boot/launch-state sends, owned PID and visible running UI; no synthetic state replay',...value}, null, 2)),
+    snapshot: async () => {
+      let gameAlive = true; try { process.kill(gamePid, 0) } catch { gameAlive = false }
+      const [main, renderer] = await Promise.all([
+        evaluateMain(`(()=>{const e=process.mainModule.require('electron'),fs=process.mainModule.require('fs'),p=process.mainModule.require('path'),w=e.BrowserWindow.getAllWindows().find(w=>!w.isDestroyed());let runningRecord=null;try{const r=JSON.parse(fs.readFileSync(p.join(e.app.getPath('userData'),'running-game.json'),'utf8'));runningRecord={pid:r.pid,versionId:r.versionId}}catch{}return{events:__dockReopenObservation.events,runningRecord,window:w?{id:w.id,webContentsId:w.webContents.id,visible:w.isVisible(),minimized:w.isMinimized(),bounds:w.getBounds(),loading:w.webContents.isLoading()}:null}})()`),
+        evaluate(`(()=>{const e=document.querySelector('.runtime-state.running strong'),r=e?.getBoundingClientRect(),style=e?getComputedStyle(e):null;return{documentReady:document.readyState,bodyText:document.body.innerText,runningText:e?.textContent?.trim()??null,visible:!!e&&(e.checkVisibility?e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}):style.display!=='none'&&style.visibility==='visible'&&Number(style.opacity)>0),bounds:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null}})()`)
+      ])
+      return { gameAlive, main, renderer }
+    }
+  })
+  execFileSync('/usr/sbin/screencapture', ['-x', '-D', '1', path.join(proof, 'dock-reopen.png')])
+  assert(dockReopen.ready, 'Dock reopen forgot the live game: within 10 seconds require real current-window boot/state replay, live owned PID and visible 游戏运行中; original observations saved')
   await evaluate(`window.__gameTestEvents=[];for(const name of ['launchLog','launchState'])window.kamucl.on('event:'+name,value=>window.__gameTestEvents.push({name,value}));`)
   const helper=path.join(app,'Contents/Resources/app.asar.unpacked/out/main/MacGameWindow')
   execFileSync('/usr/bin/open',['-a',app]);await wait(1500)
