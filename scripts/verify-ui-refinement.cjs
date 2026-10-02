@@ -35,6 +35,12 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   const skinFixture = await evaluate("(()=>{const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');g.fillStyle='#49a595';g.fillRect(0,0,64,64);g.fillStyle='#a07856';g.fillRect(8,8,8,8);return c.toDataURL()})()");
   await main(`globalThis.testElectron=process.mainModule.require('electron');globalThis.uiSkin=${JSON.stringify(skinFixture)};globalThis.uiAccount={id:'ui-fixture',type:'microsoft',username:'界面验证账户',uuid:'00000000000000000000000000000001'};for(const [channel,handler] of [['accounts:selected',()=>uiAccount],['accounts:list',()=>[uiAccount]],['skin:profile',()=>({username:uiAccount.username,skins:[{id:'fixture',variant:'classic',dataUrl:uiSkin,url:''}],capes:[]})],['skin:history',()=>[]],['skin:avatar',()=>uiSkin]]){testElectron.ipcMain.removeHandler(channel);testElectron.ipcMain.handle(channel,handler)}`);
   await call('Page.reload'); await wait(2200);
+  if(process.platform==='darwin'){
+    // CDP focus emulation does not activate NSApp. The disposable native QA
+    // window must be genuinely foreground before trusted coordinate gestures.
+    const nativeFocus=await main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows()[0],before={focused:w.isFocused(),visible:w.isVisible(),hidden:testElectron.app.isHidden()};testElectron.app.focus({steal:true});w.show();w.focus();return{before,after:{focused:w.isFocused(),visible:w.isVisible(),hidden:testElectron.app.isHidden()}}})()`);
+    await wait(250);fs.writeFileSync('out/native-gui-focus-live.json',JSON.stringify({source:'actual disposable macOS NSApp activation and BrowserWindow focus; no system preferences changed',...nativeFocus},null,2));
+  }
   assert.equal(await evaluate('document.documentElement.dataset.theme'),process.env.KAMUCL_TEST_THEME||'black-orange','requested theme must actually apply');
   const screenshot=async name=>{await wait(220);fs.writeFileSync(path.join(shotDir,name+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'))};
   const click=async selector=>{
@@ -64,9 +70,12 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
       // throttle the native compositor; persist the original frames afterwards.
       const listener=e=>{const message=JSON.parse(e.data);if(message.method!=='Page.screencastFrame')return;const frame=message.params,index=frames.length,file='frame-'+String(index).padStart(4,'0')+'.jpg';ws.send(JSON.stringify({id:++nextAck,method:'Page.screencastFrameAck',params:{sessionId:frame.sessionId}}));frames.push({file,receivedAt:Date.now(),...frame.metadata});buffers.push(Buffer.from(frame.data,'base64'))};
       ws.addEventListener('message',listener);
-      try{await call('Page.startScreencast',{format:'jpeg',quality:95,everyNthFrame:1});await wait(100);await action();await wait(duration)}finally{await call('Page.stopScreencast');ws.removeEventListener('message',listener)}
+      // Keep the native compositor's real timing, while limiting QA-only JPEG
+      // encoding cost. Full-resolution PNGs are captured in a separate run.
+      const capture={format:'jpeg',quality:70,maxWidth:960,maxHeight:620,everyNthFrame:1};
+      try{await call('Page.startScreencast',capture);await wait(100);await action();await wait(duration)}finally{await call('Page.stopScreencast');ws.removeEventListener('message',listener)}
       for(let i=0;i<frames.length;i++)fs.writeFileSync(path.join(directory,frames[i].file),buffers[i]);
-      const intervals=frames.slice(1).map((frame,index)=>frame.timestamp-frames[index].timestamp),elapsed=frames.length>1?frames.at(-1).timestamp-frames[0].timestamp:0,result={version,directory,source:'actual Page.startScreencast full compositor frames, acknowledged before decode and buffered in memory until recording stops; no interpolated frames',startedAt:new Date(startedAt).toISOString(),frames,elapsed,fps:elapsed?(frames.length-1)/elapsed:0,intervals};fs.writeFileSync(path.join(directory,'recording.json'),JSON.stringify(result,null,2));return result;
+      const intervals=frames.slice(1).map((frame,index)=>frame.timestamp-frames[index].timestamp),elapsed=frames.length>1?frames.at(-1).timestamp-frames[0].timestamp:0,result={version,directory,capture,source:'actual Page.startScreencast full compositor frames scaled to fit 960x620, JPEG quality70, acknowledged before decode and buffered in memory until recording stops; no interpolated frames',startedAt:new Date(startedAt).toISOString(),frames,elapsed,fps:elapsed?(frames.length-1)/elapsed:0,intervals};fs.writeFileSync(path.join(directory,'recording.json'),JSON.stringify(result,null,2));return result;
     };
     const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version,recordScreencast};
     if(!process.env.KAMUCL_SKIP_EXTENSION_BASE)await require('./verify-extension-ui.cjs')(harness);

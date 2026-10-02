@@ -34,18 +34,29 @@ module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
     await evaluate(`document.activeElement?.blur();document.querySelector('.skin-editor canvas').scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});window.__skin118GestureSignature=null`)
     const state=await until('visible stable skin gesture',`(()=>{const c=document.querySelector('.skin-editor canvas'),r=c.getBoundingClientRect(),start={x:r.x+r.width*.49,y:r.y+r.height*.19},end={x:r.x+r.width*${button==='middle'||modifiers?.61:.53},y:r.y+r.height*.22},hits=[start,end].map(p=>document.elementFromPoint(p.x,p.y)),signature=JSON.stringify([r.x,r.y,r.width,r.height,innerWidth,innerHeight]),stable=window.__skin118GestureSignature===signature;window.__skin118GestureSignature=signature;return{ready:stable&&!c.closest('[inert]')&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&hits.every(e=>e===c),start,end,rect:{x:r.x,y:r.y,width:r.width,height:r.height},hits:hits.map(e=>({tag:e?.tagName,classes:e?.className})),bodyScroll:document.querySelector('.editor-content').scrollTop,modelScroll:document.querySelector('.editor-model').scrollTop}})()`),{start,end}=state,buttons=button==='middle'?4:1
     const record={button,modifiers,...state};(proof.gestures??=[]).push(record);persist()
-    await evaluate(`(()=>{window.__skin118PointerTrace=[];window.__skin118PointerObserver=e=>{window.__skin118PointerTrace.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY,button:e.button,buttons:e.buttons,altKey:e.altKey,target:e.target?.className,canvas:e.target===document.querySelector('.skin-editor canvas'),viewer:!!e.target?.closest('.viewer3d'),at:performance.now()})};for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture'])document.addEventListener(type,window.__skin118PointerObserver,true)})()`)
+    await evaluate(`(()=>{
+      window.__skin118PointerTrace=[];
+      const trace=window.__skin118PointerTrace,viewer=()=>document.querySelector('.skin-editor .viewer3d');
+      window.__skin118PointerObserver=e=>trace.push({type:e.type,trusted:e.isTrusted,pointerId:e.pointerId,pointerType:e.pointerType,x:e.clientX,y:e.clientY,button:e.button,buttons:e.buttons,altKey:e.altKey,target:e.target?.className,canvas:e.target===document.querySelector('.skin-editor canvas'),viewer:!!e.target?.closest('.viewer3d'),hasCapture:!!viewer()?.hasPointerCapture(e.pointerId),documentFocus:document.hasFocus(),hidden:document.hidden,at:performance.now()});
+      for(const type of ['pointerdown','pointermove','pointerup','pointercancel','gotpointercapture','lostpointercapture'])document.addEventListener(type,window.__skin118PointerObserver,true);
+      window.__skin118EnvironmentObserver=e=>trace.push({type:'environment:'+e.type,trusted:e.isTrusted,target:e.target?.className,documentFocus:document.hasFocus(),active:document.activeElement?.className,hidden:document.hidden,bodyScroll:document.querySelector('.editor-content')?.scrollTop,at:performance.now()});
+      for(const type of ['blur','focus','resize','scroll','visibilitychange'])window.addEventListener(type,window.__skin118EnvironmentObserver,true);
+      window.__skin118CaptureMethods={};
+      for(const name of ['setPointerCapture','releasePointerCapture']){const original=Element.prototype[name];window.__skin118CaptureMethods[name]=original;Element.prototype[name]=function(pointerId){trace.push({type:'call:'+name,pointerId,target:this.className,before:this.hasPointerCapture(pointerId),stack:new Error().stack,at:performance.now()});return original.call(this,pointerId)}}
+    })()`)
     try{
     await call('Input.dispatchMouseEvent',{type:'mouseMoved',...start,button:'none',buttons:0})
     await call('Input.dispatchMouseEvent',{type:'mousePressed',...start,button,buttons,modifiers,clickCount:1})
     await until('trusted skin pointerdown',`window.__skin118PointerTrace.some(e=>e.type==='pointerdown'&&e.trusted&&e.canvas&&e.buttons===${buttons})`)
-    await call('Input.dispatchMouseEvent',{type:'mouseMoved',...end,button:'none',buttons,modifiers})
+    // Keep CDP's held button consistent with its bitmask throughout the drag.
+    // 'none' describes a hover and can drop native pointer capture on macOS.
+    await call('Input.dispatchMouseEvent',{type:'mouseMoved',...end,button,buttons,modifiers})
     // CDP acknowledgement is not evidence that Chromium has delivered its
     // coalesced pointermove. Observe the real trusted event before releasing.
     await until('trusted skin drag movement',`window.__skin118PointerTrace.some(e=>e.type==='pointermove'&&e.trusted&&e.viewer&&e.buttons===${buttons}&&Math.abs(e.x-${end.x})<1&&Math.abs(e.y-${end.y})<1)`)
     await call('Input.dispatchMouseEvent',{type:'mouseReleased',...end,button,buttons:0,modifiers,clickCount:1});await wait(750)
     await until('trusted skin pointerup',`window.__skin118PointerTrace.some(e=>e.type==='pointerup'&&e.trusted&&e.viewer)`)
-    }finally{record.events=await evaluate(`(()=>{for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture'])document.removeEventListener(type,window.__skin118PointerObserver,true);return window.__skin118PointerTrace})()`);persist()}
+    }finally{record.events=await evaluate(`(()=>{for(const type of ['pointerdown','pointermove','pointerup','pointercancel','gotpointercapture','lostpointercapture'])document.removeEventListener(type,window.__skin118PointerObserver,true);for(const type of ['blur','focus','resize','scroll','visibilitychange'])window.removeEventListener(type,window.__skin118EnvironmentObserver,true);for(const [name,original]of Object.entries(window.__skin118CaptureMethods))Element.prototype[name]=original;return window.__skin118PointerTrace})()`);persist()}
   }
   const png=async()=>{await clickText('.editor-footer','保存 PNG…');await until('save finished',`document.querySelector('.skin-editor')&&!document.querySelector('.skin-editor .editor-content').inert`);assert(fs.existsSync(output));const bytes=await sharp(output).ensureAlpha().raw().toBuffer();return crypto.createHash('sha256').update(bytes).digest('hex')}
   const canvasShot=async()=>{
