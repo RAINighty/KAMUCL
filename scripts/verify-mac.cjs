@@ -135,7 +135,7 @@ main().finally(async()=>{
  const proofNames=[...requiredProofs,'native-gui-focus-live.json','skin-palette-ready-live.json','skin-palette-preference-live.json','main-inspector-ready-live.json','mascot-header-keyboard-ready-live.json','mascot-header-performance-live.json','mascot-header-performance-diagnostic.json','mascot-header-timeline.json','mascot-header-timeline-raw.json','mascot-header-native-focus-live.json','mascot-header-reverse-live.json','mascot-header-body-sweep-live.json','mascot-header-layout-live.json','mascot-header-visibility-live.json','mascot-header-persistence-live.json','mascot-header-overlap-live.json','mascot-header-screencast-live.json','gallery-favorites-motion-live.json','mascot-slap-117.wav','mascot-sweep-117.webm','mascot-slap-118.wav','mascot-sweep-118.webm','mascot-motion-118.webm','mascot-kamu-119.webm'],shots='release/ui-refinement-black-orange'
  const attemptStarted=Date.now(),fresh=file=>fs.existsSync(file)&&fs.statSync(file).mtimeMs>=attemptStarted
  if(version==='1.1.9')proofNames.push('kamu-native-compositor-trace-119.json','kamu-native-compositor-trace-119-events.json','kamu-native-compositor-trace-action.json','kamu-native-compositor-trace-observations.json','kamu-native-compositor-trace-preflight.json','kamu-motion-diagnostic-119-native-trace-black-orange.json')
- let extensionError,complete=false,performanceBenchmark=null
+ let extensionError,complete=false,performanceBenchmark=null,nativeVideoEvidence=null
  try{
   // Explicit opt-in diagnostic-only preflight. It uses a separate process/profile and
   // can never supply acceptance success. Preserve its receipt even if tracing
@@ -153,9 +153,12 @@ main().finally(async()=>{
   // header's MediaRecorder/tap hooks. Preserve its diagnostic evidence separately.
   if(version==='1.1.9')execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_SKIP_EXTENSION_BASE:'1',KAMUCL_UI_MODULE:'motion119',KAMUCL_TEST_THEME:'black-orange'},stdio:'inherit',timeout:180000})
   execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{
-   env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_TEST_THEME:'black-orange',KAMUCL_NATIVE_RECORDER_STAGE119:stage},
+   env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_TEST_THEME:'black-orange',KAMUCL_NATIVE_RECORDER_STAGE119:stage,KAMUCL_NATIVE_VIDEO_STAGE119:stage},
    stdio:'inherit',timeout:480000
   })
+  // An optional recorder may fail, but its current failure receipt must still be
+  // archived. A successful GUI process alone cannot prove its raw evidence exists.
+  if(version==='1.1.9')nativeVideoEvidence=require('./native-video-evidence-119.cjs')({root:'out',version,stage,startedAt:attemptStarted})
   for(const name of requiredProofs){const file=path.join('out',name);assert(fresh(file),'successful GUI run is missing current proof '+name);const result=JSON.parse(fs.readFileSync(file));assert.equal(result.version,version,'GUI proof must match this build: '+name);if('complete' in result)assert.equal(result.complete,true,'GUI proof must be complete: '+name)}
   const frameManifest=path.join('out',`mascot-${mascotProofRevision}-frames-black-orange`,'frames.json');assert(fresh(frameManifest),'successful GUI run is missing current compositor frame manifest');assert.equal(JSON.parse(fs.readFileSync(frameManifest)).version,version,'compositor frames must match this build')
   const recordingManifest=path.join('out',`mascot-${mascotProofRevision}-${mascotRecordingKind}-screencast-black-orange`,'recording.json');assert(fresh(recordingManifest),'successful GUI run is missing current actual screencast');const recording=JSON.parse(fs.readFileSync(recordingManifest));assert.equal(recording.version,version)
@@ -184,7 +187,7 @@ main().finally(async()=>{
   }
   for(const name of fs.readdirSync('out'))if(/^extension-118-skin-dirty-fixture-(?:native|compositor)-failure-\d+-black-orange\.png$/.test(name)&&fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}
   if(fs.existsSync(shots))for(const name of fs.readdirSync(shots))if(name.startsWith('extension-')&&name.endsWith('.png')&&fresh(path.join(shots,name))){fs.copyFileSync(path.join(shots,name),path.join(extensionProof,name));copied.push(name)}
-  fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,functionalComplete:complete,performanceBenchmark,performancePassed:performanceBenchmark?.passed??null,acceptance:'functional results only; independent visual, interaction and motion review is separate',error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
+  fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,functionalComplete:complete,performanceBenchmark,performancePassed:performanceBenchmark?.passed??null,nativeVideoEvidence,acceptance:'functional results only; independent visual, interaction and motion review is separate',error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
  }
  console.log('FUNCTIONAL PASS native macOS '+arch+' extension GUI '+version+'; capture benchmark '+performanceBenchmark.status)
 }).catch(e=>{console.error(e);process.exitCode=1})

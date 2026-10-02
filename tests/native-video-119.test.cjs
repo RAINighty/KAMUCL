@@ -1,6 +1,40 @@
 const test = require('node:test'), assert = require('node:assert/strict')
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), { createHash } = require('node:crypto')
 const { captureRequest, captureStatistics, stopOwnedHelper, verifyPixels } = require('../scripts/verify-kamu-native-video-119.cjs')
+const verifyCollection = require('../scripts/native-video-evidence-119.cjs')
+
+test('native collection cannot silently omit a UUID-stage receipt, but preserves an actual optional failure', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kamu-native-collection-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const args = { root, version: '1.1.9', stage: 'app', startedAt: 0 }
+  const directory = path.join(root, 'kamu-native-video-119-app-black-orange'), file = path.join(root, 'kamu-native-video-diagnostic-119-app-black-orange.json')
+  fs.writeFileSync(path.join(root, 'kamu-native-video-diagnostic-119-standalone-random-black-orange.json'), '{}')
+  assert.throws(() => verifyCollection(args), /missing current/)
+  const proof = { version: '1.1.9', stage: 'app', directory, file, complete: false, error: 'Screen recording permission unavailable' }
+  fs.writeFileSync(file, JSON.stringify(proof))
+  assert.deepEqual(verifyCollection(args), { receipt: path.basename(file), directory: path.basename(directory), collected: true, complete: false, rawFrames: 0, pngFrames: 0, nativeDeliveryBenchmark: null, error: proof.error })
+  assert.throws(() => verifyCollection({ ...args, startedAt: Date.now() + 1000 }), /stale/)
+  fs.writeFileSync(file, JSON.stringify({ ...proof, stage: 'dmg' }))
+  assert.throws(() => verifyCollection(args), /stage must match/)
+})
+
+test('native collection verifies immutable raw, timestamp sidecar, lossless PNG and preserves below-target benchmark', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kamu-native-collection-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const directory = path.join(root, 'kamu-native-video-119-dmg-black-orange'), file = path.join(root, 'kamu-native-video-diagnostic-119-dmg-black-orange.json')
+  fs.mkdirSync(directory)
+  const raw = Buffer.from([12, 34, 56, 255]), name = 'frame-000000.bgra'
+  fs.writeFileSync(path.join(directory, name), raw)
+  const capture = { frames: [{ index: 0, file: name, width: 1, height: 1, sha256: createHash('sha256').update(raw).digest('hex') }] }
+  fs.writeFileSync(path.join(directory, 'capture.json'), JSON.stringify(capture))
+  fs.writeFileSync(path.join(directory, 'frame-000000.json'), JSON.stringify({ presentationTime: { seconds: 12.3 } }))
+  const pngs = await verifyPixels(directory, capture), benchmark = { passed: false, actualFps: 28, minimumFps: 30 }
+  fs.writeFileSync(file, JSON.stringify({ version: '1.1.9', stage: 'dmg', directory, file, complete: true, capture, pngs, nativeDeliveryBenchmark: benchmark }))
+  const args = { root, version: '1.1.9', stage: 'dmg', startedAt: 0 }, result = verifyCollection(args)
+  assert.equal(result.rawFrames, 1); assert.equal(result.pngFrames, 1); assert.deepEqual(result.nativeDeliveryBenchmark, benchmark)
+  fs.writeFileSync(path.join(directory, name), Buffer.from([0, 0, 0, 0]))
+  assert.throws(() => verifyCollection(args), /raw hash/)
+})
 
 function geometry() {
   return { native: { ownerPID: 123, bounds: { x: 100, y: 50, width: 1000, height: 700 }, contentBounds: { x: 100, y: 50, width: 1000, height: 700 }, zoom: 2, visible: true, focused: true, minimized: false, appHidden: false, activeDisplay: { id: 8, scaleFactor: 2, bounds: { x: 0, y: 0, width: 1920, height: 1080 } } }, state: { hidden: false, focus: true, viewport: { width: 500, height: 350, scale: 1 }, footprint: { x: 17, y: 47, width: 48, height: 72 } } }
