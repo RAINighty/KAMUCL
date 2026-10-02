@@ -29,13 +29,23 @@ module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
   const open=async()=>{await coordinateClick('.skin-editor-entry');await until('editor mounted',`!!document.querySelector('.skin-editor canvas')`);await wait(350)}
   const pose=async text=>{await clickText('.view-tools',text);await evaluate(`document.querySelector('.editor-model').scrollTop=0`);await wait(750)}
   const gesture=async(button='left',modifiers=0)=>{
-    await evaluate(`document.activeElement?.blur();document.querySelector('.editor-model').scrollTop=0`)
-    const r=await evaluate(`(()=>{const r=document.querySelector('.skin-editor canvas').getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}})()`),buttons=button==='middle'?4:1
-    const start={x:r.x+r.w*.49,y:r.y+r.h*.19},end={x:r.x+r.w*(button==='middle'||modifiers ? .61 : .53),y:r.y+r.h*.22}
+    // Use the same visible canvas positioning as compositor capture. Saving can
+    // scroll the editor body to its footer; model.scrollTop alone cannot undo it.
+    await evaluate(`document.activeElement?.blur();document.querySelector('.skin-editor canvas').scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});window.__skin118GestureSignature=null`)
+    const state=await until('visible stable skin gesture',`(()=>{const c=document.querySelector('.skin-editor canvas'),r=c.getBoundingClientRect(),start={x:r.x+r.width*.49,y:r.y+r.height*.19},end={x:r.x+r.width*${button==='middle'||modifiers?.61:.53},y:r.y+r.height*.22},hits=[start,end].map(p=>document.elementFromPoint(p.x,p.y)),signature=JSON.stringify([r.x,r.y,r.width,r.height,innerWidth,innerHeight]),stable=window.__skin118GestureSignature===signature;window.__skin118GestureSignature=signature;return{ready:stable&&!c.closest('[inert]')&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&hits.every(e=>e===c),start,end,rect:{x:r.x,y:r.y,width:r.width,height:r.height},hits:hits.map(e=>({tag:e?.tagName,classes:e?.className})),bodyScroll:document.querySelector('.editor-content').scrollTop,modelScroll:document.querySelector('.editor-model').scrollTop}})()`),{start,end}=state,buttons=button==='middle'?4:1
+    const record={button,modifiers,...state};(proof.gestures??=[]).push(record);persist()
+    await evaluate(`(()=>{window.__skin118PointerTrace=[];window.__skin118PointerObserver=e=>{window.__skin118PointerTrace.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY,button:e.button,buttons:e.buttons,altKey:e.altKey,target:e.target?.className,canvas:e.target===document.querySelector('.skin-editor canvas'),viewer:!!e.target?.closest('.viewer3d'),at:performance.now()})};for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture'])document.addEventListener(type,window.__skin118PointerObserver,true)})()`)
+    try{
     await call('Input.dispatchMouseEvent',{type:'mouseMoved',...start,button:'none',buttons:0})
     await call('Input.dispatchMouseEvent',{type:'mousePressed',...start,button,buttons,modifiers,clickCount:1})
+    await until('trusted skin pointerdown',`window.__skin118PointerTrace.some(e=>e.type==='pointerdown'&&e.trusted&&e.canvas&&e.buttons===${buttons})`)
     await call('Input.dispatchMouseEvent',{type:'mouseMoved',...end,button:'none',buttons,modifiers})
+    // CDP acknowledgement is not evidence that Chromium has delivered its
+    // coalesced pointermove. Observe the real trusted event before releasing.
+    await until('trusted skin drag movement',`window.__skin118PointerTrace.some(e=>e.type==='pointermove'&&e.trusted&&e.viewer&&e.buttons===${buttons}&&Math.abs(e.x-${end.x})<1&&Math.abs(e.y-${end.y})<1)`)
     await call('Input.dispatchMouseEvent',{type:'mouseReleased',...end,button,buttons:0,modifiers,clickCount:1});await wait(750)
+    await until('trusted skin pointerup',`window.__skin118PointerTrace.some(e=>e.type==='pointerup'&&e.trusted&&e.viewer)`)
+    }finally{record.events=await evaluate(`(()=>{for(const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture'])document.removeEventListener(type,window.__skin118PointerObserver,true);return window.__skin118PointerTrace})()`);persist()}
   }
   const png=async()=>{await clickText('.editor-footer','保存 PNG…');await until('save finished',`document.querySelector('.skin-editor')&&!document.querySelector('.skin-editor .editor-content').inert`);assert(fs.existsSync(output));const bytes=await sharp(output).ensureAlpha().raw().toBuffer();return crypto.createHash('sha256').update(bytes).digest('hex')}
   const canvasShot=async()=>{
@@ -75,9 +85,15 @@ module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
       if(await evaluate(`innerWidth<=700`)){
         const fixed=()=>evaluate(`(()=>{const x=document.querySelector('.editor-close').getBoundingClientRect(),f=document.querySelector('.editor-footer').getBoundingClientRect();return{x:x.top,footer:f.top,bottom:f.bottom}})()`),beforeFixed=await fixed()
         await coordinateClick('.palette-hex')
-        for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'a',code:'KeyA',windowsVirtualKeyCode:65,modifiers:process.platform==='darwin'?4:2})
+        await until('actual HEX focus',`document.activeElement===document.querySelector('.palette-hex')`)
+        // Supply Chromium's native editing command as well as the real platform
+        // shortcut: an isolated macOS harness need not have an application Edit
+        // menu to map Cmd+A. Never insert into a maxlength field unselected.
+        for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'a',code:'KeyA',windowsVirtualKeyCode:65,modifiers:process.platform==='darwin'?4:2,...(type==='keyDown'?{commands:['selectAll']}:{})})
+        const selection=await until('actual HEX selection',`(()=>{const e=document.querySelector('.palette-hex');return{ready:document.activeElement===e&&e.selectionStart===0&&e.selectionEnd===e.value.length,value:e.value,start:e.selectionStart,end:e.selectionEnd,focused:document.activeElement?.className}})()`)
+        ;(proof.colourInputs??=[]).push({width,height,zoom,selection});persist()
         await call('Input.insertText',{text:'#1177ee'});await key('Tab')
-        await until('small-window actual colour input',`document.querySelector('[aria-label="RGB R"]').value==='17'&&document.querySelector('.palette-hex').value==='#1177ee'`)
+        await until('small-window actual colour input',`(()=>{const hex=document.querySelector('.palette-hex').value,red=document.querySelector('[aria-label="RGB R"]').value;return{ready:red==='17'&&hex==='#1177ee',hex,red,focus:document.activeElement?.getAttribute('aria-label')}})()`)
         assert.deepEqual(await fixed(),beforeFixed,'header and footer remain fixed while scrolling to colour tools')
         assert(await evaluate(`document.querySelector('.editor-header p').textContent.includes('已保存')`),'real colour input does not edit skin pixels')
         await screenshot('skin-small-tools-'+width+'-'+zoom)
