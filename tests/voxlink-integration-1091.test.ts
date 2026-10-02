@@ -70,12 +70,13 @@ test('TURN tolerates lost-bind ROLE_CONFLICT and UDP blackhole switches to frame
   const tcp = net.createServer(), sockets = new Set<net.Socket>()
   let udp = dgram.createSocket('udp4'), port = 0
   t.after(() => { for (const socket of sockets) socket.destroy(); if (tcp.listening) tcp.close(); try { udp.close() } catch {} })
-  // TCP and UDP have separate Windows exclusions. Allocate TCP first, then
-  // reserve its UDP counterpart; either bind may fail and must be retried.
+  // TCP and UDP have separate Windows exclusions. Let UDP choose its own
+  // allowed port first: TCP's allocator may repeatedly choose adjacent ports
+  // inside a UDP-only exclusion range. Then reserve the TCP counterpart.
   for (let attempt = 0; ; attempt++) {
     try {
-      tcp.listen(0, '127.0.0.1'); await once(tcp, 'listening'); port = (tcp.address() as net.AddressInfo).port
-      udp.bind(port, '127.0.0.1'); await once(udp, 'listening'); break
+      udp.bind(0, '127.0.0.1'); await once(udp, 'listening'); port = udp.address().port
+      tcp.listen(port, '127.0.0.1'); await once(tcp, 'listening'); break
     }
     catch (error) {
       if (attempt >= 9 || !['EADDRINUSE', 'EACCES'].includes((error as NodeJS.ErrnoException).code || '')) throw error

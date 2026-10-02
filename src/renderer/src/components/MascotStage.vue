@@ -11,7 +11,7 @@ import {MascotAudio} from '../mascotAudio'
 import {createMascotAtlas,MascotBatchRenderer} from '../mascotBatch'
 import {MascotSoftwareRenderer} from '../mascotSoftware'
 import skinUrl from '../assets/mascot-skins/kamu.png'
-const props=defineProps<{focusOnReady?:boolean}>(),emit=defineEmits<{close:[];ready:[]}>()
+const props=defineProps<{focusOnReady?:boolean}>(),emit=defineEmits<{close:[];ready:[];'render-mode':[software:boolean]}>()
 const {reduced,hidden,decorativeActive}=useMotion(),host=ref<HTMLElement>(),viewport=ref<HTMLElement>(),hit=ref<HTMLButtonElement>(),menuButton=ref<HTMLButtonElement>()
 const ready=ref(false),supported=ref(true),closing=ref(false),menu=ref(false),confirmReset=ref(false),persistError=ref(''),busy=ref(false)
 const state=ref<MascotState>({counts:{},order:MASCOTS.map(m=>m.id),sound:normalizeMascotSound()})
@@ -47,7 +47,7 @@ function closeMenu(){menu.value=false;confirmReset.value=false;void nextTick(()=
 function wake(){if(!disposed&&!hidden.value&&player&&!frame)frame=requestAnimationFrame(render)}
 function render(now:number){
  frame=0;if(disposed||hidden.value||!player)return
- const started=performance.now(),pose=interaction.advance(now,reduced.value);recordContacts(pose.contacts,now);busy.value=interaction.busy
+ const started=performance.now(),pose=interaction.advance(now,reduced.value,50);recordContacts(pose.contacts,now);busy.value=interaction.busy
  const activation=Math.min(1,(now-activated)/(reduced.value?100:380)),ease=activation*activation*(3-2*activation)
  const idle=decorativeActive.value?Math.sin(now*.002)*.016:0,pop=Math.max(0,1-(now-lastContact)/210)*Math.sin(Math.min(1,Math.max(0,(now-lastContact)/210))*Math.PI)
  player.rotation.y=pose.yaw;waist.rotation.x=Math.sin(pose.yaw/2)*.28+pop*.12;player.skin.head.rotation.x=-waist.rotation.x+idle
@@ -75,7 +75,7 @@ async function buildScene(){
    const context=gl.getContext(),debug=context.getExtension('WEBGL_debug_renderer_info'),renderer=String(context.getParameter(debug?.UNMASKED_RENDERER_WEBGL??context.RENDERER));host.value!.dataset.rendererProbe=renderer
    if(/swiftshader|llvmpipe|lavapipe|softpipe|software/i.test(renderer)){gl.dispose();gl.forceContextLoss();gl=undefined;software=new MascotSoftwareRenderer()}
   }catch{gl?.dispose();gl=undefined;software=new MascotSoftwareRenderer()}
-  software?.setSize(48,72,1);viewport.value!.prepend(software?.domElement??gl!.domElement);host.value!.dataset.renderBackend=software?'canvas2d-depth':'webgl-pbr'
+  software?.setSize(48,72,1);viewport.value!.prepend(software?.domElement??gl!.domElement);host.value!.dataset.renderBackend=software?'canvas2d-depth':'webgl-pbr';emit('render-mode',!!software)
   const image=await new Promise<HTMLImageElement>((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=skinUrl})
   if(disposed)return
   const skin=new Texture(image);skin.colorSpace=SRGBColorSpace;skin.magFilter=skin.minFilter=NearestFilter;skin.generateMipmaps=false;skin.needsUpdate=true;textures.push(skin)

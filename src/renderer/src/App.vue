@@ -73,11 +73,12 @@ const ProjectionsView = defineAsyncComponent(() => import('./views/ProjectionsVi
 const MascotStage = defineAsyncComponent(() => import('./components/MascotStage.vue'))
 const mascotOpen = ref(false)
 const mascotReady = ref(false)
+const mascotSoftware = ref(false)
 // Give the active logo interaction priority over decorative skin previews.
 provide(MASCOT_INTERACTIVE, computed(() => mascotOpen.value))
 const mascotRef = ref<{flush:()=>Promise<void>}>()
 const mascotKeyboard = ref(false)
-function openMascots(event:MouseEvent){if(mascotOpen.value)return;mascotKeyboard.value=event.detail===0;mascotReady.value=false;mascotOpen.value=true}
+function openMascots(event:MouseEvent){if(mascotOpen.value)return;mascotKeyboard.value=event.detail===0;mascotReady.value=false;mascotSoftware.value=false;mascotOpen.value=true}
 function closeMascots(){mascotOpen.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.brand-avatar')?.focus())}
 const PacksView = defineAsyncComponent(() => import('./views/PacksView.vue'))
 const ShadersView = defineAsyncComponent(() => import('./views/ShadersView.vue'))
@@ -1235,7 +1236,7 @@ onUnmounted(() => {
   <div data-ui="App:870373af1ab7" v-if="bgStyle" class="app-bg" :style="bgStyle"></div>
   <div data-ui="App:e8c1fdc22711"
     class="shell"
-    :class="{ 'edit-mode': store.editMode, 'has-bg': !!bgStyle }"
+    :class="{ 'edit-mode': store.editMode, 'has-bg': !!bgStyle, 'mascots-software': mascotOpen&&mascotSoftware }"
 
   >
     <!-- ============ 左侧边栏（宽度 --sidebar-w） ============ -->
@@ -1244,7 +1245,7 @@ onUnmounted(() => {
       <div data-ui="App:fc5fc8ba7e96" class="logo-area">
         <div class="brand-slot">
         <button class="brand-avatar" :class="{'avatar-open':mascotOpen&&mascotReady}" :tabindex="mascotOpen?-1:0" aria-label="打开卡慕互动彩蛋" :aria-expanded="mascotOpen" @click="openMascots"><img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" /></button>
-        <MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @ready="mascotReady=true" @close="closeMascots"/>
+        <MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @ready="mascotReady=true" @render-mode="mascotSoftware=$event" @close="closeMascots"/>
         </div>
         <div data-ui="App:7494cda29e47" class="logo-text">
           <span data-ui="App:c396a9ff34cb" class="logo-name">KAMUCL</span>
@@ -1726,6 +1727,9 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* Software compositing shares the host CPU with the pixel renderer. Defer web
+   backdrop blurs during interaction; alpha/theme colors and native material stay. */
+.shell.mascots-software,.shell.mascots-software :deep(*){backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 .brand-slot{position:relative;z-index:5;width:48px;height:72px;flex-shrink:0;display:grid;place-items:center}.brand-avatar{display:block;background:transparent;border:0;padding:0;border-radius:12px;cursor:pointer;transition:opacity .38s,transform .38s;flex-shrink:0}.brand-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.brand-avatar.avatar-open{opacity:0;transform:translateY(-14px) scale(.65);pointer-events:none}
 /* 配置不兼容弹窗 */
 .cfg-mismatch-mask { z-index: 9600; display: grid; place-items: center; }
