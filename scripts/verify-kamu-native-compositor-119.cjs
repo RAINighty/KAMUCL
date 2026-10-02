@@ -136,3 +136,5 @@ async function diagnostic(h) {
 module.exports=diagnostic
 module.exports.createNativeSession=createNativeSession
 module.exports.withRestoration=withRestoration
+// Shared read-only observer; exposing it does not change the vibrancy ABA.
+module.exports.installRendererObserver=installRendererObserver

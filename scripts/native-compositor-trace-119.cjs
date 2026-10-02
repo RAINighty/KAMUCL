@@ -4,6 +4,9 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto')
 const categories=['toplevel','devtools.timeline','disabled-by-default-devtools.timeline.frame','cc','viz','gpu','renderer.scheduler','blink.user_timing','disabled-by-default-cc.debug','disabled-by-default-viz.debug']
 const relevant=/BeginFrame|BeginMainFrame|RequestMainFrame|NeedsBeginFrame|Deadline|DrawFrame|SubmitCompositorFrame|ReceiveCompositorFrame|SurfaceAggregator|Swap|Presentation|Display::|Paint|Raster|Composite|Commit|Activate|Tile|Layer|Layout|UpdateStyle|UpdateLayout|FireAnimationFrame|AnimationFrame|RunTask|ProcessTask|Wait|Gpu|GPU|Flush|ReadPixels|DrawAndSwap|Scheduler|VSync|vsync|FrameSink/
+// Additional Chromium rendering names only. Argument privacy remains numeric
+// allowlist-only; unrelated capture payloads and user timing marks stay excluded.
+const recorderRelevant=/^(?:CopyOutput(?:Request|Result)?(?:::[A-Za-z0-9_]+)?|DirectRenderer::DrawRenderPass|SoftwareRenderer::(?:Draw|Copy)[A-Za-z0-9_]*|(?:DevToolsVideoConsumer|FrameSinkVideoCapturerImpl|VideoCaptureOracle|VideoFrameCapture|ScreenCapture|CaptureFrame|CaptureContent|CaptureScreenshot|CopyFromSurface)(?:::[A-Za-z0-9_]+)?)$/
 const allowedArgs=new Set(['data','clip','rect','bounds','damage','damage_rect','layerId','layer_id','frameId','frame_id','source_id','sequence_number','frame_time','deadline','interval','has_damage','type','x','y','width','height','begin_frame_args','expected_display_time','frame_token','surface_id','local_surface_id','frame_sink_id','id','nodeId','backendNodeId'])
 function numericArgs(value,key){
   if(!allowedArgs.has(key))return undefined
@@ -18,7 +21,7 @@ function redactEvents(events,markerName){
   return events.flatMap((e,sourceIndex)=>{
     if(String(e.cat||'').split(',').includes('blink.user_timing')&&e.name!==markerName)return[]
     const meta=e.ph==='M'&&['thread_name','process_name'].includes(e.name)
-    if(!meta&&e.name!==markerName&&!relevant.test(e.name||''))return[]
+    if(!meta&&e.name!==markerName&&!relevant.test(e.name||'')&&!recorderRelevant.test(e.name||''))return[]
     const clean={sourceIndex};for(const key of ['name','cat','ph'])if(typeof e[key]==='string')clean[key]=e[key]
     for(const key of ['pid','tid','ts','dur','tdur','tts','id'])if(Number.isFinite(e[key]))clean[key]=e[key]
     clean.args={}
