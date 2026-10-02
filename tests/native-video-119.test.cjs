@@ -25,13 +25,45 @@ test('native collection verifies immutable raw, timestamp sidecar, lossless PNG 
   fs.mkdirSync(directory)
   const raw = Buffer.from([12, 34, 56, 255]), name = 'frame-000000.bgra'
   fs.writeFileSync(path.join(directory, name), raw)
-  const capture = { frames: [{ index: 0, file: name, width: 1, height: 1, sha256: createHash('sha256').update(raw).digest('hex') }] }
+  const request = { displayID: 8, ownerPID: 123, crop: { x: 10, y: 20, width: 1, height: 1 }, expectedScale: 1 }
+  const identity = { displayID: 8, ownerPID: 123, globalCrop: request.crop, backingScaleFactor: 1 }
+  const capture = { identity, frames: [{ index: 0, file: name, width: 1, height: 1, sha256: createHash('sha256').update(raw).digest('hex'), presentationTime: { seconds: 12.3 } }] }
   fs.writeFileSync(path.join(directory, 'capture.json'), JSON.stringify(capture))
-  fs.writeFileSync(path.join(directory, 'frame-000000.json'), JSON.stringify({ presentationTime: { seconds: 12.3 } }))
+  fs.writeFileSync(path.join(directory, 'frame-000000.json'), JSON.stringify(capture.frames[0]))
   const pngs = await verifyPixels(directory, capture), benchmark = { passed: false, actualFps: 28, minimumFps: 30 }
-  fs.writeFileSync(file, JSON.stringify({ version: '1.1.9', stage: 'dmg', directory, file, complete: true, capture, pngs, nativeDeliveryBenchmark: benchmark }))
+  const nativeFirstFrame = { identity, firstFrame: capture.frames[0], clock: { machAbsoluteTime: '100' } }
+  const startMarker = { name: 'clicks-start', clock: { machAbsoluteTime: '110' } }, actionCompleteMarker = { name: 'action-complete', clock: { machAbsoluteTime: '150' } }
+  const proof = { version: '1.1.9', stage: 'dmg', directory, file, complete: true, capture, pngs, request, nativeFirstFrame, startMarker, actionCompleteMarker, nativeDeliveryBenchmark: benchmark }
+  const metadata = { 'identity.json': identity, 'request.json': request, 'ready.json': nativeFirstFrame, 'clicks-start.json': startMarker, 'action-complete.json': actionCompleteMarker }
+  for (const [name, value] of Object.entries(metadata)) fs.writeFileSync(path.join(directory, name), JSON.stringify(value))
+  for (const name of ['compile.log', 'helper.log']) fs.writeFileSync(path.join(directory, name), '')
+  fs.writeFileSync(file, JSON.stringify(proof))
   const args = { root, version: '1.1.9', stage: 'dmg', startedAt: 0 }, result = verifyCollection(args)
   assert.equal(result.rawFrames, 1); assert.equal(result.pngFrames, 1); assert.deepEqual(result.nativeDeliveryBenchmark, benchmark)
+  // Correct pixel hashes alone must not conceal missing identity, altered PTS,
+  // duplicated mappings, or files omitted from the receipt.
+  for (const name of [...Object.keys(metadata), 'compile.log', 'helper.log']) {
+    const target = path.join(directory, name), original = fs.readFileSync(target)
+    fs.unlinkSync(target); assert.throws(() => verifyCollection(args), /missing current/); fs.writeFileSync(target, original)
+  }
+  for (const [name, value] of Object.entries({ ...metadata, 'capture.json': capture, 'frame-000000.json': capture.frames[0] })) {
+    const target = path.join(directory, name)
+    fs.writeFileSync(target, JSON.stringify({ wrong: true })); assert.throws(() => verifyCollection(args), /must match/)
+    fs.writeFileSync(target, JSON.stringify(value))
+  }
+  for (const altered of [{ ...proof, pngs: [pngs[0], pngs[0]] }, { ...proof, pngs: [{ ...pngs[0], originalSHA256: 'wrong' }] }]) {
+    fs.writeFileSync(file, JSON.stringify(altered)); assert.throws(() => verifyCollection(args), /unique matching|original hash/)
+  }
+  fs.writeFileSync(file, JSON.stringify(proof))
+  const extra = path.join(directory, 'frame-000001.bgra'); fs.writeFileSync(extra, raw)
+  assert.throws(() => verifyCollection(args), /unreferenced/); fs.unlinkSync(extra)
+  const duplicate = { ...proof, capture: { ...capture, frames: [capture.frames[0], capture.frames[0]] } }
+  fs.writeFileSync(file, JSON.stringify(duplicate)); fs.writeFileSync(path.join(directory, 'capture.json'), JSON.stringify(duplicate.capture))
+  assert.throws(() => verifyCollection(args), /unique original callback order/)
+  fs.writeFileSync(file, JSON.stringify({ ...proof, complete: false, error: 'Actual later action failed' }))
+  fs.writeFileSync(path.join(directory, 'capture.json'), JSON.stringify(capture))
+  const failed = verifyCollection(args); assert.equal(failed.complete, false); assert.equal(failed.error, 'Actual later action failed'); assert.equal(failed.rawFrames, 1)
+  fs.writeFileSync(file, JSON.stringify(proof))
   fs.writeFileSync(path.join(directory, name), Buffer.from([0, 0, 0, 0]))
   assert.throws(() => verifyCollection(args), /raw hash/)
 })

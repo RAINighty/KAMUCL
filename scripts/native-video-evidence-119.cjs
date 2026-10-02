@@ -14,20 +14,56 @@ module.exports = function verify({ root, version, stage, startedAt, theme = 'bla
   assert.equal(proof.stage, stage, 'native video stage must match wrapper')
   assert.equal(path.resolve(proof.directory), directory, 'native video directory must match collected stage')
   assert.equal(path.resolve(proof.file), receipt, 'native video receipt must match collected stage')
+  assert.equal(typeof proof.complete, 'boolean', 'native video must preserve explicit completion status')
+  const read = name => { const file = path.join(directory, name); current(file); return JSON.parse(fs.readFileSync(file, 'utf8')) }
+  const matches = (name, expected) => { assert(expected !== undefined, 'native video receipt missing ' + name); assert.deepEqual(read(name), expected, 'native video sidecar must match receipt: ' + name) }
+  if (proof.complete || proof.compile) current(path.join(directory, 'compile.log'))
+  if (proof.complete || proof.helperPID) current(path.join(directory, 'helper.log'))
+  if (proof.complete || proof.request) matches('request.json', proof.request)
+  if (proof.complete || proof.nativeFirstFrame) matches('ready.json', proof.nativeFirstFrame)
+  if (proof.complete || proof.startMarker) matches('clicks-start.json', proof.startMarker)
+  if (proof.complete || proof.actionCompleteMarker) matches('action-complete.json', proof.actionCompleteMarker)
   let rawFrames = 0, pngFrames = 0
-  if (proof.capture) current(path.join(directory, 'capture.json'))
-  for (const frame of proof.capture?.frames || []) {
+  if (proof.complete || proof.capture) {
+    matches('capture.json', proof.capture)
+    matches('identity.json', proof.capture.identity)
+    assert(Array.isArray(proof.capture.frames), 'native capture requires original frame records')
+    if (proof.nativeFirstFrame) assert.deepEqual(proof.nativeFirstFrame.identity, proof.capture.identity, 'native first-frame identity must match capture')
+    if (proof.request) {
+      const identity = proof.capture.identity, request = proof.request
+      for (const key of ['displayID', 'ownerPID']) assert.equal(identity[key], request[key], 'native identity must match request: ' + key)
+      assert.deepEqual(identity.globalCrop, request.crop, 'native crop must match request')
+      assert.equal(identity.backingScaleFactor, request.expectedScale, 'native scale must match request')
+    }
+  }
+  const expectedFiles = new Set(), rawByIndex = new Map(), pngIndices = new Set()
+  for (const [ordinal, frame] of (proof.capture?.frames || []).entries()) {
+    assert.equal(frame.index, ordinal, 'native frame indices must be unique original callback order')
+    const stem = `frame-${String(frame.index).padStart(6, '0')}`
+    expectedFiles.add(stem + '.json'); matches(stem + '.json', frame)
     if (!frame.file) continue
-    assert(/^frame-\d{6}\.bgra$/.test(frame.file), 'native video raw filename must be safe and collected')
-    const file = path.join(directory, frame.file); current(file); current(path.join(directory, frame.file.replace(/\.bgra$/, '.json')))
+    assert.equal(frame.file, stem + '.bgra', 'native video raw filename must match unique frame index')
+    expectedFiles.add(frame.file); rawByIndex.set(frame.index, frame)
+    const file = path.join(directory, frame.file); current(file)
     assert.equal(createHash('sha256').update(fs.readFileSync(file)).digest('hex'), frame.sha256, 'native video raw hash must match receipt')
     rawFrames++
   }
+  if (proof.nativeFirstFrame) assert.deepEqual(proof.nativeFirstFrame.firstFrame, proof.capture?.frames[proof.nativeFirstFrame.firstFrame?.index], 'ready frame must be the original captured row')
   for (const frame of proof.pngs || []) {
-    assert(/^frame-\d{6}\.png$/.test(frame.file), 'native video PNG filename must be safe and collected')
+    const original = rawByIndex.get(frame.index)
+    assert(original && !pngIndices.has(frame.index), 'native PNG requires a unique matching original frame')
+    pngIndices.add(frame.index)
+    assert.equal(frame.file, original.file.replace(/\.bgra$/, '.png'), 'native PNG filename must match original')
+    assert.equal(frame.original, original.file, 'native PNG original must match raw frame')
+    assert.equal(frame.originalSHA256, original.sha256, 'native PNG original hash must match raw frame')
+    assert.equal(frame.losslessPixelsVerified, true, 'native PNG must preserve lossless verification receipt')
+    expectedFiles.add(frame.file)
     const file = path.join(directory, frame.file); current(file)
     assert.equal(createHash('sha256').update(fs.readFileSync(file)).digest('hex'), frame.sha256, 'native video PNG hash must match receipt')
     pngFrames++
+  }
+  if (fs.existsSync(directory)) for (const name of fs.readdirSync(directory)) {
+    if (/^frame-.*\.(?:bgra|png|json)$/.test(name)) assert(expectedFiles.has(name), 'native collection has unreferenced frame evidence: ' + name)
   }
   if (proof.complete) { assert(rawFrames > 0, 'complete native video requires original frames'); assert.equal(pngFrames, rawFrames, 'complete native video requires every lossless PNG') }
   return { receipt: receiptName, directory: stem, collected: true, complete: proof.complete, rawFrames, pngFrames, nativeDeliveryBenchmark: proof.nativeDeliveryBenchmark ?? null, error: proof.error ?? null }
