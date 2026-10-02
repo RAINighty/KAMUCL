@@ -18,11 +18,25 @@ export function slapSamples(sampleRate:number):Float32Array {
 }
 export class MascotAudio {
  private context?:AudioContext;private buffer?:AudioBuffer;private gain?:GainNode
+ private primer?:ConstantSourceNode;private primed=false
  private voices=new Set<AudioBufferSourceNode>();private next=0;private played=0;private closed=false;private paused=false
  private suspending?:Promise<void>
  constructor(private prefs:()=>MascotSound,private stats:(played:number,voices:number)=>void,private active:()=>boolean=()=>true){}
  private allowed(){return!this.closed&&!this.paused&&this.active()}
  private stateChanged=()=>{if(this.context?.state==='running'&&!this.allowed())this.suspend(this.context)}
+ private stopPrimer(){
+  const source=this.primer;if(!source)return;this.primer=undefined;source.onended=null
+  try{source.stop()}catch{}source.disconnect()
+ }
+ private primeOutput(context:AudioContext){
+  if(this.primed||!this.gain||!this.allowed()||context.state!=='running')return
+  // The first real LOGO activation opens the native output graph once. This
+  // source is exactly digital silence, never a slap or an extra queued contact.
+  const source=context.createConstantSource(),when=context.currentTime
+  source.offset.value=0;source.connect(this.gain);this.primer=source
+  source.onended=()=>{source.disconnect();if(this.primer===source)this.primer=undefined}
+  try{source.start(when);source.stop(when+.05);this.primed=true}catch(error){this.stopPrimer();throw error}
+ }
  private suspend(context:AudioContext){
   if(context.state==='closed'||this.suspending)return
   // A pending resume can finish after suspend. Guard both the resulting state
@@ -52,6 +66,7 @@ export class MascotAudio {
    if(!this.allowed()){this.suspend(context);return}
    if(context.state==='suspended')await context.resume()
    if(!this.allowed())this.suspend(context)
+   else this.primeOutput(context)
   }catch{/* Audio device availability must not block interaction or persistence. */}
  }
  /** Returns the visual-clock delay to the very same scheduled contact sound. */
@@ -71,6 +86,6 @@ export class MascotAudio {
   return (start-context.currentTime)*1000
  }
  update(){if(this.gain&&this.context)this.gain.gain.setTargetAtTime(this.prefs().muted?0:this.prefs().volume*.75,this.context.currentTime,.004)}
- pause(){this.paused=true;this.next=0;for(const source of this.voices){try{source.stop()}catch{}}if(this.context)this.suspend(this.context)}
+ pause(){this.paused=true;this.next=0;this.stopPrimer();for(const source of this.voices){try{source.stop()}catch{}}if(this.context)this.suspend(this.context)}
  async dispose(){this.closed=true;this.pause();const context=this.context;await context?.close().catch(()=>{});context?.removeEventListener('statechange',this.stateChanged);this.context=undefined;this.buffer=undefined;this.gain=undefined}
 }

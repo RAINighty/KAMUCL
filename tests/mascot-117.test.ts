@@ -121,13 +121,24 @@ test('original palm-pop waveform is deterministic, bounded, nonzero and fades ou
  assert(a.every(n=>Number.isFinite(n)&&Math.abs(n)<1));assert(a.some(n=>Math.abs(n)>.25));assert(Math.max(...a.slice(-100).map(Math.abs))<.005)
 })
 
+class FakeMascotConstantSource {
+ offset={value:1};onended:null|(()=>void)=null;destinations:unknown[]=[];starts:Array<{when:number;state:string;offset:number}>=[];stops:Array<number|undefined>=[];disconnects=0
+ constructor(private context:FakeMascotAudioContext){}
+ connect(target:unknown){this.destinations.push(target)}
+ disconnect(){this.disconnects++}
+ start(when=0){this.starts.push({when,state:this.context.state,offset:this.offset.value})}
+ stop(when?:number){this.stops.push(when);if(when===undefined)this.finish()}
+ finish(){this.onended?.()}
+}
 class FakeMascotAudioContext extends EventTarget {
  state='suspended';sampleRate=48000;currentTime=0;destination={};resumeCalls=0;suspendCalls=0;sourceStarts=0;startTimes:number[]=[]
  deferResume=false;deferSuspend=false;pendingResume?:()=>void;pendingSuspend?:()=>void
+ primers:FakeMascotConstantSource[]=[];gainNode={gain:{setTargetAtTime(){}},connect(){}}
  transition(state:string){this.state=state;this.dispatchEvent(new Event('statechange'))}
  createBuffer(){return{copyToChannel(){}}}
  createDynamicsCompressor(){return{threshold:{value:0},knee:{value:0},ratio:{value:0},attack:{value:0},release:{value:0},connect(){}}}
- createGain(){return{gain:{setTargetAtTime(){}},connect(){}}}
+ createGain(){return this.gainNode}
+ createConstantSource(){const source=new FakeMascotConstantSource(this);this.primers.push(source);return source}
  createBufferSource(){const context=this;return{buffer:undefined,playbackRate:{value:1},onended:null as null|(()=>void),connect(){},disconnect(){},start(when=0){context.sourceStarts++;context.startTimes.push(when)},stop(){this.onended?.()}}}
  resume(){this.resumeCalls++;const finish=()=>{if(this.state!=='closed')this.transition('running')};if(this.deferResume)return new Promise<void>(resolve=>{this.pendingResume=()=>{finish();resolve()}});finish();return Promise.resolve()}
  suspend(){this.suspendCalls++;const finish=()=>{if(this.state!=='closed')this.transition('suspended')};if(this.deferSuspend)return new Promise<void>(resolve=>{this.pendingSuspend=()=>{finish();resolve()}});finish();return Promise.resolve()}
@@ -140,6 +151,29 @@ async function fakeMascotAudio(run:(contexts:FakeMascotAudioContext[])=>Promise<
  try{await run(contexts)}finally{if(previous)Object.defineProperty(globalThis,'AudioContext',previous);else delete(globalThis as any).AudioContext}
 }
 const settleAudio=async()=>{for(let i=0;i<5;i++)await Promise.resolve()}
+test('LOGO audio output initializes once with exact digital silence outside slap counts and voices',async()=>{
+ await fakeMascotAudio(async contexts=>{
+  const preferences={muted:false,volume:.45},stats:number[][]=[],audio=new MascotAudio(()=>preferences,(played,voices)=>stats.push([played,voices]))
+  await audio.unlock();const context=contexts[0],primer=context.primers[0]
+  assert.equal(context.primers.length,1);assert.deepEqual(primer.starts,[{when:0,state:'running',offset:0}]);assert.deepEqual(primer.stops,[.05]);assert.equal(primer.destinations[0],context.gainNode,'silent source uses the original gain/compressor/output pipeline')
+  assert.equal(context.sourceStarts,0);assert.deepEqual(stats,[],'initialization cannot report a palm sound or voice');assert.deepEqual(preferences,{muted:false,volume:.45})
+  await Promise.all([audio.unlock(),audio.unlock()]);assert.equal(context.primers.length,1,'concurrent and repeated unlocks do not prime twice')
+  primer.finish();assert.equal(primer.disconnects,1,'scheduled end disconnects the independent initialization resource')
+  audio.play();assert.equal(context.sourceStarts,1);assert.deepEqual(stats,[[1,1]],'the first accepted slap remains the first played voice')
+  await audio.dispose();assert.equal(primer.disconnects,1,'ended primer is not stopped or disconnected again by disposal')
+ })
+})
+test('silent output initialization is stopped on pause and disposal without restarting per context',async()=>{
+ await fakeMascotAudio(async contexts=>{
+  let visible=true;const audio=new MascotAudio(()=>({muted:true,volume:.2}),()=>{},()=>visible)
+  await audio.unlock();const context=contexts[0],primer=context.primers[0]
+  assert.equal(primer.offset.value,0,'muted preferences still remain exactly silent');visible=false;audio.pause();await settleAudio()
+  assert.deepEqual(primer.stops,[.05,undefined]);assert.equal(primer.disconnects,1);assert.equal(context.sourceStarts,0);assert.equal(context.state,'suspended')
+  visible=true;await audio.unlock();assert.equal(context.primers.length,1,'show/resume preserves once-per-context initialization');await audio.dispose();assert.equal(primer.disconnects,1)
+  const second=new MascotAudio(()=>({muted:false,volume:.45}),()=>{});await second.unlock();const own=contexts[1].primers[0];await second.dispose()
+  assert.deepEqual(own.stops,[.05,undefined]);assert.equal(own.disconnects,1);assert.equal(contexts[1].state,'closed');await second.unlock();assert.equal(contexts.length,2,'disposed audio never creates another initialization graph')
+ })
+})
 test('palm contact and seven original pia sources share exact scheduling, including muted visuals',async()=>{
  await fakeMascotAudio(async contexts=>{
   let muted=false;const audio=new MascotAudio(()=>({muted,volume:.45}),()=>{});await audio.unlock();const context=contexts[0];context.currentTime=2
@@ -165,7 +199,7 @@ test('a deferred resume finishing after pause cannot leave hidden audio running'
   let visible=true;const audio=new MascotAudio(()=>({muted:false,volume:.45}),()=>{},()=>visible)
   const unlocking=audio.unlock(),context=contexts[0];assert.equal(context.resumeCalls,1)
   visible=false;audio.pause();context.pendingResume!();await unlocking;await settleAudio()
-  assert.equal(context.state,'suspended');audio.play();assert.equal(context.sourceStarts,0)
+  assert.equal(context.state,'suspended');audio.play();assert.equal(context.sourceStarts,0);assert.equal(context.primers.length,0,'resume overtaken by hiding cannot prime a hidden graph')
   context.deferResume=false;visible=true;await audio.unlock();assert.equal(context.state,'running');await audio.dispose()
  },true)
 })
@@ -182,7 +216,7 @@ test('disposing while resume is pending never restores an audio context or voice
  await fakeMascotAudio(async contexts=>{
   const audio=new MascotAudio(()=>({muted:false,volume:.45}),()=>{},()=>true)
   const unlocking=audio.unlock(),context=contexts[0];await audio.dispose();context.pendingResume!();await unlocking;await audio.unlock();audio.play()
-  assert.equal(context.state,'closed');assert.equal(context.resumeCalls,1);assert.equal(context.sourceStarts,0);assert.equal(contexts.length,1)
+  assert.equal(context.state,'closed');assert.equal(context.resumeCalls,1);assert.equal(context.sourceStarts,0);assert.equal(contexts.length,1);assert.equal(context.primers.length,0,'dispose overtaking resume cannot create initialization resources')
  },true)
 })
 test('seven Minecraft textures are independent 64×64 RGBA skin atlases with opaque base faces',async()=>{

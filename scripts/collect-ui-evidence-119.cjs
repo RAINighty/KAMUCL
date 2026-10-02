@@ -5,13 +5,15 @@ assert(['black-orange','blue-white','custom'].includes(theme)&&Number.isFinite(s
 const version=require('../package.json').version,exe=path.resolve(`release/KAMUCL-${version}.exe`)
 assert.equal(version,'1.1.9')
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex'),fresh=file=>fs.existsSync(file)&&fs.statSync(file).mtimeMs>=since
-const destination=path.resolve(`release/validation-${version}/Final-Windows-${theme}`)
+const label=process.env.KAMUCL_EVIDENCE_LABEL||'Final-Windows'
+assert(/^[A-Za-z0-9-]+$/.test(label),'evidence label must be a single directory component')
+const destination=path.resolve(`release/validation-${version}/${label}-${theme}`)
 assert(!fs.existsSync(destination),'Final evidence must not overwrite an earlier run')
 fs.mkdirSync(destination,{recursive:true})
 function copy(file,target=path.basename(file)) { assert(fresh(file),'Missing current evidence: '+file);fs.mkdirSync(path.dirname(path.join(destination,target)),{recursive:true});fs.copyFileSync(file,path.join(destination,target)) }
-const required=[`ui-refinement-${theme}.json`,`extension-ui-${theme}.json`,`skin-editor-ui-${theme}.json`,`skin-palette-ui-${theme}.json`,`mascot-header-ui-${theme}.json`,`gallery-favorites-ui-${theme}.json`,`gallery-favorites-118-ui-${theme}.json`,`import-routing-119-ui-${theme}.json`,`selection-ui-119-${theme}.json`]
+const required=[`ui-refinement-${theme}.json`,`extension-ui-${theme}.json`,`skin-editor-ui-${theme}.json`,`skin-palette-ui-${theme}.json`,`mascot-header-ui-${theme}.json`,`gallery-favorites-ui-${theme}.json`,`gallery-favorites-118-ui-${theme}.json`,`import-routing-119-ui-${theme}.json`,`selection-ui-119-${theme}.json`,`kamu-motion-diagnostic-119-after-header-${theme}.json`]
 for(const name of required) {const file=path.join('out',name);assert(fresh(file));const proof=JSON.parse(fs.readFileSync(file));assert.equal(proof.version,version);if('complete' in proof)assert.equal(proof.complete,true);if(name.startsWith('ui-refinement-'))assert.equal(proof.exeSHA256,sha(fs.readFileSync(exe)));copy(file)}
-for(const directory of [`mascot-119-logo-intro-${theme}`,`mascot-119-logo-screencast-${theme}`,`mascot-119-frames-${theme}`]) {
+for(const directory of [`mascot-119-logo-intro-${theme}`,`mascot-119-logo-screencast-${theme}`,`mascot-119-frames-${theme}`,`kamu-motion-119-after-header-cold-intro-${theme}`,...['first-native','warm-native','warm-no-backdrop','warm-restored-backdrop'].map(kind=>`kamu-motion-119-after-header-${kind}-${theme}`)]) {
  const source=path.join('out',directory),manifest=directory.includes('-frames-')?'frames.json':'recording.json',file=path.join(source,manifest)
  assert(fresh(file));const proof=JSON.parse(fs.readFileSync(file));assert.equal(proof.version,version);copy(file,directory+'/'+manifest)
  for(const item of proof.frames) {const name=typeof item==='string'?item:(item.file||item.name);assert(/^(frame-\d+\.(jpg|png))$/.test(name));copy(path.join(source,name),directory+'/'+name)}
