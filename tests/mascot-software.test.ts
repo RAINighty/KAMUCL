@@ -105,7 +105,7 @@ test('all seven real Minecraft rigs retain their 504 triangles, atlas bands and 
  batch.dispose();players.forEach(player=>player.dispose());map.dispose()
 })
 
-test('Canvas2D software renderer uploads once per frame at the requested pixel ratio and stops after disposal',()=>{
+test('Canvas2D software renderer uploads exact changed pixels, invalidates after resize and stops after disposal',()=>{
  let uploads=0,last:ImageData|undefined,options:unknown
  const context={imageSmoothingEnabled:true,createImageData:(w:number,h:number)=>({width:w,height:h,data:new Uint8ClampedArray(w*h*4)} as ImageData),putImageData:(image:ImageData)=>{uploads++;last=image}}
  const canvas={width:0,height:0,style:{width:'',height:''},getContext:(_type:string,o:unknown)=>{options=o;return context}} as unknown as HTMLCanvasElement
@@ -115,8 +115,14 @@ test('Canvas2D software renderer uploads once per frame at the requested pixel r
  camera.position.z=2;camera.lookAt(0,0,0);camera.updateProjectionMatrix()
  renderer.setSize(4,4,2);assert.equal(canvas.width,8);assert.equal(canvas.height,8);assert.equal(canvas.style.width,'4px');assert.deepEqual(options,{alpha:true,willReadFrequently:true})
  renderer.render(mesh,camera);assert.equal(uploads,1);assert.equal(renderer.info.render.calls,0);assert.equal(renderer.info.render.triangles,2);assert.equal(renderer.info.frames,1);assert.equal(renderer.info.uploads,1);assert(last!.data.some(n=>n>0))
- const reusableImage=last;renderer.render(mesh,camera);assert.equal(last,reusableImage);assert.equal(uploads,2);assert.equal(renderer.info.uploads,1,'upload count is per frame, not cumulative');assert.equal(renderer.info.frames,2)
+ const reusableImage=last,before=last!.data.slice();renderer.render(mesh,camera);assert.equal(last,reusableImage);assert.equal(uploads,1);assert.equal(renderer.info.uploads,0,'identical RGBA raster must not dirty the compositor canvas');assert.equal(renderer.info.frames,2,'real raster work is reported separately from canvas upload');assert.equal(renderer.info.unchangedFrames,1)
+ // A material change is a real visible pixel change, even with identical geometry.
+ material.color.setRGB(.25,1,1);renderer.render(mesh,camera);assert.equal(uploads,2);assert.notDeepEqual(last!.data,before);assert.equal(renderer.info.uploads,1);assert.equal(renderer.info.totalUploads,2)
+ renderer.render(mesh,camera);assert.equal(uploads,2);assert.equal(renderer.info.uploads,0)
+ // Resize clears a canvas. The next raster must re-upload, even when the new
+ // pixels happen to equal a previously cached image or contain only transparency.
+ renderer.setSize(3,3,2);renderer.render(mesh,camera);assert.equal(uploads,3);assert.equal(canvas.width,6);assert.equal(renderer.info.uploads,1)
  renderer.dispose();renderer.dispose();assert.equal(canvas.width,0);assert.equal(canvas.height,0);assert.equal(renderer.info.uploads,0)
- renderer.setSize(4,4);renderer.render(mesh,camera);assert.equal(uploads,2,'closed stage cannot upload or allocate another canvas');assert.equal(canvas.width,0)
+ renderer.setSize(4,4);renderer.render(mesh,camera);assert.equal(uploads,3,'closed stage cannot upload or allocate another canvas');assert.equal(canvas.width,0)
  geometry.dispose();material.dispose();map.dispose()
 })

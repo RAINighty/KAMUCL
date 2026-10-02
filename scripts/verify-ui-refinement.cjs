@@ -98,7 +98,10 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
       }
     }
   }
-  const closeApp=async()=>{if(process.platform==='darwin')await main('setTimeout(()=>testElectron.app.quit(),500)');mainWs.close();await wait(100);if(process.platform!=='darwin')await evaluate("window.kamucl.send('window:close')");for(let i=0;i<100&&child.exitCode===null;i++)await wait(100);assert.equal(child.exitCode,0)};
+  // Return the diagnostic response before destroying its renderer. Completion
+  // still requires the actual owned process to exit cleanly; a lost CDP reply
+  // from immediate destruction must not be mistaken for a failed close.
+  const closeApp=async()=>{if(process.platform==='darwin')await main('setTimeout(()=>testElectron.app.quit(),500)');mainWs.close();await wait(100);if(process.platform!=='darwin')await evaluate("setTimeout(()=>window.kamucl.send('window:close'),100); true");for(let i=0;i<100&&child.exitCode===null;i++)await wait(100);assert.equal(child.exitCode,0)};
   if(process.env.KAMUCL_EXTENSION_ONLY){await closeApp();return}
   // Reset renderer caches populated by extension fixtures before the original regression.
   if(process.env.KAMUCL_EXTENSION_GUI){await call('Page.reload');await wait(2200)}

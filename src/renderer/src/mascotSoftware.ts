@@ -143,10 +143,10 @@ export function rasterizeMascotFrame(input:MascotRasterInput,target:MascotRaster
  return visibleTriangles
 }
 
-/** One Canvas2D upload per frame, with no WebGL framebuffer/compositor readback. */
+/** Exact raster frames; upload only changed pixels, without compositor readback. */
 export class MascotSoftwareRenderer {
  readonly domElement:HTMLCanvasElement
- readonly info={render:{calls:0,triangles:0},uploads:0,frames:0}
+ readonly info={render:{calls:0,triangles:0},uploads:0,frames:0,totalUploads:0,unchangedFrames:0}
  private readonly context:CanvasRenderingContext2D
  private readonly projection=new Matrix4()
  private readonly scratch=new MascotRasterScratch()
@@ -154,6 +154,7 @@ export class MascotSoftwareRenderer {
  private readonly atlases=new Map<Texture,{version:number;texture:MascotRasterTexture}>()
  private target:MascotRasterTarget={width:0,height:0,rgba:new Uint8ClampedArray(0),depth:new Float32Array(0)}
  private image:ImageData|undefined
+ private presented:Uint8ClampedArray|undefined
  private disposed=false
  constructor(canvas:HTMLCanvasElement=document.createElement('canvas')){
   this.domElement=canvas
@@ -168,7 +169,7 @@ export class MascotSoftwareRenderer {
   this.domElement.style.width=`${width}px`;this.domElement.style.height=`${height}px`
   if(this.target.width===w&&this.target.height===h)return
   this.domElement.width=w;this.domElement.height=h
-  this.image=this.context.createImageData(w,h);this.target={width:w,height:h,rgba:this.image.data,depth:new Float32Array(w*h)}
+  this.image=this.context.createImageData(w,h);this.target={width:w,height:h,rgba:this.image.data,depth:new Float32Array(w*h)};this.presented=undefined
  }
  private readAtlas(map:Texture):MascotRasterTexture{
   const cached=this.atlases.get(map);if(cached?.version===map.version)return cached.texture
@@ -195,10 +196,18 @@ export class MascotSoftwareRenderer {
   camera.updateMatrixWorld();this.projection.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse)
   this.color[0]=material.color.r;this.color[1]=material.color.g;this.color[2]=material.color.b
   rasterizeMascotFrame({positions:position.array,normals:normal.array,uvs:uv.array,indices:index.array,projection:this.projection.elements,texture:this.readAtlas(material.map),color:this.color,side:material.side,opacity:material.opacity,alphaTest:material.alphaTest},this.target,this.scratch)
-  this.context.putImageData(this.image,0,0);this.info.render.calls=0;this.info.render.triangles=index.count/3;this.info.uploads=1;this.info.frames++
+  // Nearest-neighbour pixels can stay identical while a tiny idle pose changes.
+  // Re-uploading that identical bitmap needlessly dirties the native canvas layer.
+  // Compare every RGBA byte; no pose quantization or animation frame is invented.
+  const pixels=this.image.data,previous=this.presented
+  let changed=!previous
+  if(previous)for(let i=0;i<pixels.length;i++)if(pixels[i]!==previous[i]){changed=true;break}
+  if(changed){this.context.putImageData(this.image,0,0);if(previous)previous.set(pixels);else this.presented=new Uint8ClampedArray(pixels);this.info.totalUploads++}
+  else this.info.unchangedFrames++
+  this.info.render.calls=0;this.info.render.triangles=index.count/3;this.info.uploads=changed?1:0;this.info.frames++
  }
  dispose(){
-  if(this.disposed)return;this.disposed=true;this.scratch.dispose();this.atlases.clear();this.image=undefined
+  if(this.disposed)return;this.disposed=true;this.scratch.dispose();this.atlases.clear();this.image=undefined;this.presented=undefined
   this.target={width:0,height:0,rgba:new Uint8ClampedArray(0),depth:new Float32Array(0)};this.domElement.width=this.domElement.height=0;this.info.render.calls=0;this.info.render.triangles=0;this.info.uploads=0
  }
 }

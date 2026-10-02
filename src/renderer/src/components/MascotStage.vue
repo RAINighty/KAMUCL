@@ -19,6 +19,11 @@ const sound=computed(()=>normalizeMascotSound(state.value.sound)),interaction=ne
 const audio=new MascotAudio(()=>sound.value,(played,voices)=>{if(host.value){host.value.dataset.soundsPlayed=String(played);host.value.dataset.activeSounds=String(voices)}},()=>!hidden.value)
 let gl:WebGLRenderer|undefined,software:MascotSoftwareRenderer|undefined,batchRenderer:MascotBatchRenderer|undefined,scene:Scene,camera:OrthographicCamera,player:PreviewPlayer|undefined,waist:Group,pelvis:Object3D
 const textures:Texture[]=[],feet:Array<{mesh:Mesh;corners:Vector3[]}>=[],parts:Mesh[]=[],point=new Vector3(),projected=new Vector3()
+let feedbackElement:HTMLElement|undefined,palmElement:SVGElement|undefined,printElement:SVGElement|undefined
+let previousPose:number[]|undefined
+const writtenStyles=new WeakMap<Element,Map<string,string>>(),writtenData=new Map<string,string>()
+function style(element:HTMLElement|SVGElement|undefined,key:string,value:string){if(!element)return;let values=writtenStyles.get(element);if(!values){values=new Map();writtenStyles.set(element,values)}if(values.get(key)===value)return;element.style.setProperty(key,value);values.set(key,value)}
+function data(key:string,value:string){if(!host.value||writtenData.get(key)===value)return;host.value.dataset[key]=value;writtenData.set(key,value)}
 let frame=0,disposed=false,activated=0,lastContact=-1000,contactsTotal=0,reported=false
 let hits:string[]=[],batch:MascotBatch|undefined,flight:Promise<void>|undefined,saveTimer:ReturnType<typeof setTimeout>|undefined,retryTimer:ReturnType<typeof setTimeout>|undefined,retryDelay=800,soundRevision=0,savedSoundRevision=0
 const unsaved=()=>!!batch||!!hits.length||soundRevision!==savedSoundRevision
@@ -50,25 +55,37 @@ function render(now:number){
  const started=performance.now(),pose=interaction.advance(now,reduced.value,50);recordContacts(pose.contacts,now);busy.value=interaction.busy
  const activation=Math.min(1,(now-activated)/(reduced.value?100:380)),ease=activation*activation*(3-2*activation)
  const idle=decorativeActive.value?Math.sin(now*.002)*.016:0,pop=Math.max(0,1-(now-lastContact)/210)*Math.sin(Math.min(1,Math.max(0,(now-lastContact)/210))*Math.PI)
- player.rotation.y=pose.yaw;waist.rotation.x=Math.sin(pose.yaw/2)*.28+pop*.12;player.skin.head.rotation.x=-waist.rotation.x+idle
+ const waistAngle=Math.sin(pose.yaw/2)*.28+pop*.12,headAngle=-waistAngle+idle,armAngle=-.04+pop*.15,scale=.75+ease*.25
+ const nextPose=[pose.yaw,waistAngle,headAngle,armAngle,scale],modelChanged=!previousPose||nextPose.some((value,index)=>value!==previousPose![index])
+ if(modelChanged){
+ player.rotation.y=pose.yaw;waist.rotation.x=waistAngle;player.skin.head.rotation.x=headAngle
  player.skin.leftArm.rotation.set(-.04+pop*.15,0,.05);player.skin.rightArm.rotation.set(-.04+pop*.15,0,-.05)
  player.skin.leftLeg.rotation.x=0;player.skin.rightLeg.rotation.x=0
- player.scale.setScalar(.75+ease*.25);player.position.y=0;player.updateMatrixWorld(true)
+ player.scale.setScalar(scale);player.position.y=0;player.updateMatrixWorld(true)
  let footY=Infinity;for(const part of feet)for(const corner of part.corners)footY=Math.min(footY,point.copy(corner).applyMatrix4(part.mesh.matrixWorld).y)
  player.position.y+=1-footY;player.updateMatrixWorld(true)
  projected.copy(pelvis.getWorldPosition(point)).project(camera)
- const feedback=host.value?.querySelector<HTMLElement>('.mascot-feedback'),palm=feedback?.querySelector<SVGElement>('.pixel-palm'),print=feedback?.querySelector<SVGElement>('.palm-print')
- if(feedback){feedback.style.left=`${(projected.x+1)*24}px`;feedback.style.top=`${(1-projected.y)*36}px`;feedback.dataset.contacts=String(contactsTotal)}
- if(palm){const t=pose.palm,approach=Math.min(1,Math.max(0,t*2)),retreat=Math.max(0,(t-.5)*2);palm.style.opacity=t>=0&&!reduced.value?String(1-retreat):'0';palm.style.transform=`translate(${(1-approach)*12+retreat*4}px,${-(1-approach)*12-retreat*4}px) rotate(${(1-approach)*-35+retreat*15}deg)`}
- if(print)print.style.opacity=now-lastContact<500?String(.72*(1-(now-lastContact)/500)):'0'
  batchRenderer?.update();if(software&&batchRenderer)software.render(batchRenderer.mesh,camera);else gl?.render(scene,camera)
- if(host.value){host.value.dataset.phase=interaction.phase;host.value.dataset.queue=String(interaction.queued);host.value.dataset.contacts=String(contactsTotal);host.value.dataset.bodyYaw=String(pose.yaw);host.value.dataset.renderMs=String(performance.now()-started);host.value.dataset.activation=String(activation);host.value.dataset.renderDrawCalls=String(software?.info.render.calls??gl?.info.render.calls??0)}
+ previousPose=nextPose
+ }
+ // Only the local compositor transform moves the feedback; left/top stay fixed.
+ // The palm's own transform remains relative to this projected pelvis position.
+ style(feedbackElement,'translate',`${(projected.x+1)*24}px ${(1-projected.y)*36}px`)
+ if(feedbackElement&&feedbackElement.dataset.contacts!==String(contactsTotal))feedbackElement.dataset.contacts=String(contactsTotal)
+ const t=pose.palm,approach=Math.min(1,Math.max(0,t*2)),retreat=Math.max(0,(t-.5)*2)
+ style(palmElement,'opacity',t>=0&&!reduced.value?String(1-retreat):'0');style(palmElement,'transform',`translate(${(1-approach)*12+retreat*4}px,${-(1-approach)*12-retreat*4}px) rotate(${(1-approach)*-35+retreat*15}deg)`)
+ style(printElement,'opacity',now-lastContact<500?String(.72*(1-(now-lastContact)/500)):'0')
+ data('phase',interaction.phase);data('queue',String(interaction.queued));data('contacts',String(contactsTotal));data('bodyYaw',String(pose.yaw));data('activation',String(activation));data('renderDrawCalls',String(modelChanged?(software?.info.render.calls??gl?.info.render.calls??0):0));data('rasterFrames',String(software?.info.frames??0));data('canvasUploads',String(software?.info.totalUploads??0))
+ // A real callback observation is separate from raster work or canvas uploads.
+ // Keep this observation even when exact pixels are unchanged.
+ if(host.value)host.value.dataset.renderMs=String(performance.now()-started)
  reportPending()
  if(!ready.value){ready.value=true;host.value!.dataset.readyAt=String(now);emit('ready');if(props.focusOnReady)void nextTick(()=>hit.value?.focus())}
  if(decorativeActive.value||interaction.busy||now-lastContact<500||activation<1)frame=requestAnimationFrame(render)
 }
 async function buildScene(){
  try{
+  feedbackElement=host.value!.querySelector<HTMLElement>('.mascot-feedback')??undefined;palmElement=feedbackElement?.querySelector<SVGElement>('.pixel-palm')??undefined;printElement=feedbackElement?.querySelector<SVGElement>('.palm-print')??undefined
   scene=new Scene();camera=new OrthographicCamera(-12,12,35,-1,.1,300);camera.position.set(0,0,100);camera.lookAt(0,0,0)
   scene.add(new AmbientLight(0xffffff,2.1));const light=new DirectionalLight(0xffffff,1.2);light.position.set(-40,80,70);scene.add(light)
   try{gl=new WebGLRenderer({alpha:true,antialias:false,powerPreference:'low-power'});gl.setPixelRatio(1);gl.setSize(48,72);gl.setClearColor(0,0)
@@ -109,5 +126,5 @@ defineExpose({flush,closeStage})
  </section>
 </template>
 <style scoped>
-.mascot-stage{position:absolute;inset:0;width:48px;height:72px;-webkit-app-region:no-drag;isolation:isolate}.figure-strip{position:relative;width:48px;height:72px;overflow:visible;touch-action:none;opacity:0}.ready .figure-strip{animation:kamu-in .38s ease-out both}.figure-strip :deep(canvas){position:absolute;inset:0;display:block;width:48px;height:72px;pointer-events:none;image-rendering:pixelated}.mascot-hit{position:absolute;inset:0;z-index:2;padding:0;border:0;border-radius:8px;background:transparent;cursor:pointer;touch-action:manipulation}.mascot-hit:focus-visible{outline:2px solid var(--accent);outline-offset:2px;background:color-mix(in srgb,var(--accent) 8%,transparent)}.menu-tool{position:absolute;right:-8px;bottom:0;z-index:35;border:1px solid var(--border);background:var(--card-solid,var(--bg-2));color:var(--text-dim);width:20px;height:16px;padding:0;border-radius:5px;line-height:10px;cursor:pointer;font-size:15px}.menu-tool:hover,.menu-tool:focus-visible{color:var(--accent);outline:2px solid var(--accent)}.sound-panel{position:absolute;left:0;top:calc(100% + 4px);z-index:9100;width:230px;padding:14px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--card-solid,var(--bg-2));box-shadow:var(--shadow-lg);display:grid;gap:10px;font-size:12px}.sound-panel strong{display:flex;justify-content:space-between}.sound-panel strong span{color:var(--accent)}.sound-panel label{display:flex;align-items:center;gap:7px}.sound-panel input{width:110px;accent-color:var(--accent)}.sound-panel b{min-width:30px}.sound-panel>div{display:flex;justify-content:flex-end;gap:4px}.sound-panel p{margin:0;color:var(--danger);overflow-wrap:anywhere}.fallback-note{position:absolute;inset:0;display:grid;place-items:center;font-size:10px;color:var(--text-dim)}.mascot-feedback{position:absolute;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;pointer-events:none;z-index:30}.mascot-feedback svg{position:absolute;inset:0;width:100%;height:100%;shape-rendering:crispEdges;opacity:0}.pixel-palm{transform-origin:70% 90%}.palm-print{fill:#cf674e;filter:drop-shadow(0 0 1px #46221e)}.reduced.ready .figure-strip{animation:kamu-in .1s ease-out both}.hidden *{animation-play-state:paused!important}@keyframes kamu-in{from{opacity:0;transform:translateY(-7px) scale(.65)}to{opacity:1;transform:none}}
+.mascot-stage{position:absolute;inset:0;width:48px;height:72px;-webkit-app-region:no-drag;isolation:isolate}.figure-strip{position:relative;width:48px;height:72px;overflow:visible;touch-action:none;opacity:0;contain:layout style;will-change:opacity,transform}.ready .figure-strip{animation:kamu-in .38s ease-out both}.figure-strip :deep(canvas){position:absolute;inset:0;display:block;width:48px;height:72px;pointer-events:none;image-rendering:pixelated;transform:translateZ(0);will-change:transform}.mascot-hit{position:absolute;inset:0;z-index:2;padding:0;border:0;border-radius:8px;background:transparent;cursor:pointer;touch-action:manipulation}.mascot-hit:focus-visible{outline:2px solid var(--accent);outline-offset:2px;background:color-mix(in srgb,var(--accent) 8%,transparent)}.menu-tool{position:absolute;right:-8px;bottom:0;z-index:35;border:1px solid var(--border);background:var(--card-solid,var(--bg-2));color:var(--text-dim);width:20px;height:16px;padding:0;border-radius:5px;line-height:10px;cursor:pointer;font-size:15px}.menu-tool:hover,.menu-tool:focus-visible{color:var(--accent);outline:2px solid var(--accent)}.sound-panel{position:absolute;left:0;top:calc(100% + 4px);z-index:9100;width:230px;padding:14px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--card-solid,var(--bg-2));box-shadow:var(--shadow-lg);display:grid;gap:10px;font-size:12px}.sound-panel strong{display:flex;justify-content:space-between}.sound-panel strong span{color:var(--accent)}.sound-panel label{display:flex;align-items:center;gap:7px}.sound-panel input{width:110px;accent-color:var(--accent)}.sound-panel b{min-width:30px}.sound-panel>div{display:flex;justify-content:flex-end;gap:4px}.sound-panel p{margin:0;color:var(--danger);overflow-wrap:anywhere}.fallback-note{position:absolute;inset:0;display:grid;place-items:center;font-size:10px;color:var(--text-dim)}.mascot-feedback{position:absolute;left:0;top:0;will-change:translate;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;pointer-events:none;z-index:30}.mascot-feedback svg{position:absolute;inset:0;width:100%;height:100%;shape-rendering:crispEdges;opacity:0}.pixel-palm{transform-origin:70% 90%}.palm-print{fill:#cf674e;filter:drop-shadow(0 0 1px #46221e)}.reduced.ready .figure-strip{animation:kamu-in .1s ease-out both}.hidden *{animation-play-state:paused!important}@keyframes kamu-in{from{opacity:0;transform:translateY(-7px) scale(.65)}to{opacity:1;transform:none}}
 </style>
