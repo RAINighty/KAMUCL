@@ -22,8 +22,8 @@ function summarize(events,marker){
 }
 
 module.exports=async function startMascotTimeline(h,environment){
- const enabled=environment.gpu.platform==='darwin'&&/swiftshader|llvmpipe|lavapipe|softpipe|software/i.test(environment.rendererGpu.unmaskedRenderer||environment.rendererGpu.renderer)
- if(!enabled)return{enabled:false,end:async()=>{},stop:async()=>({enabled:false,reason:'only native Darwin software renderer tracing is enabled'})}
+ const enabled=process.env.KAMUCL_MASCOT_TRACE==='1'&&environment.gpu.platform==='darwin'&&/swiftshader|llvmpipe|lavapipe|softpipe|software/i.test(environment.rendererGpu.unmaskedRenderer||environment.rendererGpu.renderer)
+ if(!enabled)return{enabled:false,end:async()=>{},stop:async()=>({enabled:false,reason:'diagnostic tracing is explicit opt-in; normal acceptance retains its original first interaction without tracing overhead'})}
  const summaryFile=path.resolve('out/mascot-header-timeline.json'),rawFile=path.resolve('out/mascot-header-timeline-raw.json')
  const proof={version:h.version,enabled,source:'real Chrome Tracing ReturnAsStream captured concurrently with the original first-leader Page.startScreencast; no changed FPS threshold, window size, extra warmup or recreated timestamps',instrumentation:'Tracing has its own overhead. This is a diagnostic run, not an uninstrumented FPS comparison. Trace startup/end add protocol work around the during phase; before/during/after cannot be claimed to have exactly equal instrumentation.',categories,environment,startedAt:new Date().toISOString(),complete:false,errors:[],rawFile}
  const save=()=>fs.writeFileSync(summaryFile,JSON.stringify(proof,null,2))
