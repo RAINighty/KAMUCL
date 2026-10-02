@@ -36,6 +36,14 @@ function evidenceStage(value) {
   return value
 }
 
+// Counterfactual phases must share the final LOGO footprint. This is an actual
+// renderer/CSS readiness observation, never an extra warm-up or fixed delay.
+function introSettled(state) {
+  return state.activation === 1 && state.introAnimations === 0 &&
+    Number.isFinite(state.footprint?.width) && state.footprint.width > 0 &&
+    Number.isFinite(state.footprint?.height) && state.footprint.height > 0
+}
+
 async function diagnostic(h, options = {}) {
   const { call, evaluate, main, nav, wait, recordScreencast, version } = h
   assert.equal(await main('process.platform'), 'darwin', 'recorder counterfactual requires Darwin')
@@ -50,7 +58,7 @@ async function diagnostic(h, options = {}) {
   const persist = () => fs.writeFileSync(file, JSON.stringify(proof, null, 2))
   const native = () => main(`(${nativeSnapshot.toString()})(testElectron)`)
   const saved = () => evaluate("window.kamucl.invoke('mascots:state')")
-  const snapshot = () => evaluate(`(()=>{const e=document.querySelector('.mascot-stage'),b=document.querySelector('[data-hit=kamu]');return{now:performance.now(),timeOrigin:performance.timeOrigin,open:!!e,readyAt:Number(e?.dataset.readyAt),phase:e?.dataset.phase,queue:Number(e?.dataset.queue),contacts:Number(e?.dataset.contacts),sounds:Number(e?.dataset.soundsPlayed),disabled:b?.disabled,hidden:document.hidden,focus:document.hasFocus(),visibility:document.visibilityState,backend:e?.dataset.renderBackend,bufferPreparation:e?.dataset.audioPreparation}})()`)
+  const snapshot = () => evaluate(`(()=>{const e=document.querySelector('.mascot-stage'),b=document.querySelector('[data-hit=kamu]'),strip=e?.querySelector('.figure-strip'),r=strip?.getBoundingClientRect();return{now:performance.now(),timeOrigin:performance.timeOrigin,open:!!e,readyAt:Number(e?.dataset.readyAt),activation:Number(e?.dataset.activation),introAnimations:strip?.getAnimations().filter(a=>a.playState!=='finished'&&a.playState!=='idle').length,footprint:r?{width:r.width,height:r.height}:null,phase:e?.dataset.phase,queue:Number(e?.dataset.queue),contacts:Number(e?.dataset.contacts),sounds:Number(e?.dataset.soundsPlayed),disabled:b?.disabled,hidden:document.hidden,focus:document.hasFocus(),visibility:document.visibilityState,backend:e?.dataset.renderBackend,bufferPreparation:e?.dataset.audioPreparation}})()`)
   const until = async (label, predicate) => {
     const start = Date.now(); let s
     do { s = await snapshot(); if (await predicate(s)) return s; await wait(50) } while (Date.now() - start < 10000)
@@ -81,6 +89,7 @@ async function diagnostic(h, options = {}) {
     assertSameWindow(proof.nativeInitial, proof.nativeInitial)
     ownsStage = true; await click('.brand-avatar')
     proof.ready = await until('same stage ready', s => s.open && !s.disabled && s.readyAt > 0 && s.bufferPreparation === 'ended' && s.phase === 'front' && s.queue === 0)
+    proof.introComplete = await until('actual LOGO introduction finished', introSettled)
     assert.equal(await evaluate('!!window.__kamuCompositorDiag'), false, 'cannot overwrite another observer')
     observerAttempted = true
     proof.observer = await evaluate(`(${installRendererObserver.toString()})()`)
@@ -91,6 +100,8 @@ async function diagnostic(h, options = {}) {
       assert.equal(entry.before.readyAt, proof.ready.readyAt, 'same live stage required')
       assert.equal(entry.before.backend, proof.ready.backend, 'same rendering backend required')
       assert.equal(entry.before.phase, 'front'); assert.equal(entry.before.queue, 0)
+      assert(introSettled(entry.before), 'counterfactual must begin after actual introduction')
+      assert.deepEqual(entry.before.footprint, proof.introComplete.footprint, 'counterfactual footprint must stay unchanged')
       assert(!entry.before.hidden && entry.before.focus, 'real visible focused document required')
       assert.deepEqual(entry.savedBefore.sound, proof.preferencesBefore)
       entry.beforeScreenshot = captureNative(name + '-before', entry.nativeBefore)
@@ -158,3 +169,4 @@ module.exports.runPhaseCapture = runPhaseCapture
 module.exports.nativeSnapshot = nativeSnapshot
 module.exports.assertSameWindow = assertSameWindow
 module.exports.evidenceStage = evidenceStage
+module.exports.introSettled = introSettled

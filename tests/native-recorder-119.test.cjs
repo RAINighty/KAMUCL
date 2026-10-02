@@ -1,7 +1,16 @@
 const test = require('node:test'), assert = require('node:assert/strict')
-const { runPhaseCapture, nativeSnapshot, assertSameWindow, evidenceStage } = require('../scripts/verify-kamu-native-recorder-119.cjs')
+const { runPhaseCapture, nativeSnapshot, assertSameWindow, evidenceStage, introSettled } = require('../scripts/verify-kamu-native-recorder-119.cjs')
 const { withRestoration } = require('../scripts/verify-kamu-native-compositor-119.cjs')
 const { redactEvents } = require('../scripts/native-compositor-trace-119.cjs')
+
+test('counterfactual observes both model activation and CSS introduction instead of delaying or accepting an intermediate footprint', () => {
+  const ready = { activation: 1, introAnimations: 0, footprint: { width: 48, height: 72 } }
+  assert.equal(introSettled(ready), true)
+  assert.equal(introSettled({ ...ready, activation: .9 }), false)
+  assert.equal(introSettled({ ...ready, introAnimations: 1 }), false)
+  assert.equal(introSettled({ ...ready, introAnimations: undefined }), false)
+  assert.equal(introSettled({ ...ready, footprint: null }), false)
+})
 
 test('APP and DMG evidence cannot collide; standalone diagnostics get separate immutable identities', () => {
   assert.equal(evidenceStage('app'), 'app'); assert.equal(evidenceStage('dmg'), 'dmg')
