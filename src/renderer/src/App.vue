@@ -1076,8 +1076,8 @@ onMounted(async () => {
     window.addEventListener(type, listener as EventListener, true)
     offs.push(() => window.removeEventListener(type, listener as EventListener, true))
   }
-  // 注册全局整合包导入入口（供首页快速操作等任意页面触发）
-  store.importHandler = (filePath: string) => void openModpackImport(filePath)
+  // 所有通用导入入口使用同一内容分类，避免整合包内的存档抢占流程。
+  store.importHandler = (filePath: string) => void routeSingleImport(filePath, filePath.split(/[\\/]/).pop() ?? filePath)
   window.addEventListener('pointerdown', onGlobalPointerDown, true)
   offs.push(() => window.removeEventListener('pointerdown', onGlobalPointerDown, true))
   offs.push(
