@@ -17,6 +17,7 @@ import {KamuInteraction} from '../src/shared/kamuInteraction'
 import * as Three from 'three'
 import {PreviewPlayer} from '../src/renderer/src/skinModel'
 import {prepareFeedbackImages} from '../src/renderer/src/mascotFeedback'
+import {MascotFrameDriver} from '../src/renderer/src/mascotFrameDriver'
 
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no});return{promise,resolve,reject}}
 let mascotSetupBundle:Promise<string>|undefined
@@ -27,7 +28,7 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
  }}]}).then(bundle=>bundle.outputFiles[0].text)
  const state=deferred<any>(),unlock=deferred<void>(),notices:string[]=[],images:any[]=[],events:any[]=[],plays:number[]=[],hidden=vue.ref(false),counts={unlocks:0,audioDisposed:0,rendererCreated:0,rendererDisposed:0,contextLost:0,attached:0,removed:0,rigs:0,frames:0,unsubscribed:0,compile:0,draw:0,fences:0,deleted:0,checks:0,flush:0,focus:0,software:0,rasters:0,softwareDisposed:0}
  let now=100,fenceStatus=0,lost=false,nextFrame=0,nextTimer=0,softwareFails=options.softwareFails
- const frames=new Map<number,(time:number)=>void>(),timers=new Map<number,{callback:()=>void;at:number}>(),listeners=new Map<string,(event:any)=>void>()
+ const frames=new Map<number,(time:number)=>void>(),timers=new Map<number,{callback:()=>void;at:number}>(),frameTimers=new Map<number,{callback:()=>void;at:number}>(),listeners=new Map<string,(event:any)=>void>()
  const context={SYNC_GPU_COMMANDS_COMPLETE:1,ALREADY_SIGNALED:2,CONDITION_SATISFIED:3,WAIT_FAILED:4,TIMEOUT_EXPIRED:0,getExtension:()=>null,getParameter:()=> 'lifecycle fixture native GPU',isContextLost:()=>lost,fenceSync:()=>{counts.fences++;return{}},deleteSync:()=>counts.deleted++,clientWaitSync:(_sync:any,flags:number,timeout:number)=>{assert.equal(flags,0);assert.equal(timeout,0,'readiness must not synchronously wait');counts.checks++;return fenceStatus},flush:()=>counts.flush++}
  let mounted!:()=>Promise<void>,unmounted!:()=>void
  class Renderer{
@@ -51,6 +52,7 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
   if(name==='../store')return{toast:(message:string)=>notices.push(message)}
   if(name==='../mascotAudio')return{MascotAudio:AudioFixture}
   if(name==='../mascotFeedback')return{prepareFeedbackImages}
+  if(name==='../mascotFrameDriver')return{MascotFrameDriver}
   if(name==='../skinModel')return{PreviewPlayer:options.model?class extends PreviewPlayer{constructor(){super();counts.rigs++}}:class{constructor(){counts.rigs++}}}
   if(name==='../mascotBatch')return{createMascotAtlas:()=>{if(!options.model)throw Error('unexpected post-unmount atlas allocation');return new Texture()},MascotBatchRenderer}
   if(name==='../mascotSoftware')return{MascotSoftwareRenderer:class{domElement={remove:()=>counts.removed++};info={render:{calls:1},frames:0,totalUploads:0};constructor(){if(!options.model||softwareFails)throw Error('software unavailable');counts.software++}setSize(){}render(){counts.rasters++;this.info.frames++;this.info.totalUploads++}dispose(){counts.softwareDisposed++}}}
@@ -58,14 +60,14 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
   return nodeRequire(name)
  }
  const windowFixture={kamucl:{invoke:()=>state.promise,on:()=>()=>counts.unsubscribed++,send:()=>{}}}
- new Function('require','module','exports','window','Image','requestAnimationFrame','cancelAnimationFrame','performance','setTimeout','clearTimeout',await mascotSetupBundle)(requireFixture,mod,mod.exports,windowFixture,ImageFixture,(callback:any)=>{counts.frames++;frames.set(++nextFrame,callback);return nextFrame},(id:number)=>frames.delete(id),{now:()=>now},(callback:any,delay:number)=>{timers.set(++nextTimer,{callback,at:now+delay});return nextTimer},(id:number)=>timers.delete(id))
+ new Function('require','module','exports','window','Image','requestAnimationFrame','cancelAnimationFrame','performance','setTimeout','clearTimeout',await mascotSetupBundle)(requireFixture,mod,mod.exports,windowFixture,ImageFixture,(callback:any)=>{counts.frames++;frames.set(++nextFrame,callback);return nextFrame},(id:number)=>frames.delete(id),{now:()=>now},(callback:any,delay:number)=>{(delay===40?frameTimers:timers).set(++nextTimer,{callback,at:now+delay});return nextTimer},(id:number)=>{timers.delete(id);frameTimers.delete(id)})
  const scope=vue.effectScope(),setup=scope.run(()=>mod.exports.default.setup({focusOnReady:true},{expose:()=>{},emit:(...event:any[])=>events.push(event)}))
  const palmStyles=new Map<string,string>(),printStyles=new Map<string,string>()
  const feedbackImages=['palm','print'].map(name=>{const gate=deferred<void>();return{gate,src:'',decodeCalls:0,complete:true,naturalWidth:15,naturalHeight:15,style:{setProperty:(key:string,value:string)=>(name==='palm'?palmStyles:printStyles).set(key,value)},decode(){this.decodeCalls++;return options.feedbackDeferred?this.gate.promise:Promise.resolve()},addEventListener(){},removeEventListener(){},removeAttribute(){this.src=''}}})
  const feedback={dataset:{},style:{setProperty:()=>{}},querySelector:(selector:string)=>feedbackImages[selector==='.pixel-palm'?0:1]}
  setup.host.value={dataset:{},querySelector:()=>feedback};setup.viewport.value={prepend:()=>counts.attached++}
  setup.hit.value={focus:()=>counts.focus++}
- return{state,unlock,counts,images,feedbackImages,notices,setup,events,plays,palmStyles,printStyles,hidden,context,frames,timers,listeners,clock:()=>now,setSoftwareFailure:(value:boolean)=>softwareFails=value,mount:()=>mounted(),unmount:()=>{unmounted();setup.host.value=undefined;setup.viewport.value=undefined;scope.stop()},signal:(status=context.CONDITION_SATISFIED)=>fenceStatus=status,lose:()=>{lost=true;listeners.get('webglcontextlost')?.({preventDefault:()=>{}})},runFrame:(elapsed=16,rafTimestamp?:number)=>{now+=elapsed;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(rafTimestamp??now)},expire:()=>{now+=3001;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback()}}}
+ return{state,unlock,counts,images,feedbackImages,notices,setup,events,plays,palmStyles,printStyles,hidden,context,frames,timers,frameTimers,listeners,clock:()=>now,setSoftwareFailure:(value:boolean)=>softwareFails=value,mount:()=>mounted(),unmount:()=>{unmounted();setup.host.value=undefined;setup.viewport.value=undefined;scope.stop()},signal:(status=context.CONDITION_SATISFIED)=>fenceStatus=status,lose:()=>{lost=true;listeners.get('webglcontextlost')?.({preventDefault:()=>{}})},runFrame:(elapsed=16,rafTimestamp?:number)=>{now+=elapsed;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(rafTimestamp??now)},runWatchdog:(elapsed=40)=>{now+=elapsed;for(const[id,timer]of[...frameTimers])if(timer.at<=now){frameTimers.delete(id);timer.callback()}},expire:()=>{now+=3001;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback()}}}
 }
 test('real mascot setup cannot allocate after unmount overtakes state or audio initialization',async()=>{
  for(const gate of ['state','audio']){
@@ -252,8 +254,29 @@ test('hidden close still drains all accepted contacts unbounded without hidden s
  try{
   f.signal();f.runFrame();for(let i=0;i<10;i++)f.setup.slap()
   f.hidden.value=true;const draws=f.counts.draw;await f.setup.flush()
-  assert.equal(f.setup.state.value.counts.kamu,10);assert.equal(f.plays.length,0);assert.equal(f.counts.draw,draws);assert.equal(f.frames.size,0);assert.equal(f.setup.busy.value,false)
+  assert.equal(f.setup.state.value.counts.kamu,10);assert.equal(f.plays.length,0);assert.equal(f.counts.draw,draws);assert.equal(f.frames.size,0);assert.equal(f.frameTimers.size,0);assert.equal(f.setup.busy.value,false)
  }finally{f.unmount()}
+})
+
+test('compiled mascot watchdog renders actual queued palms on host rAF starvation and stops at rest or hiding',async()=>{
+ const f=await mountedMascotModel()
+ try{
+  f.signal();f.runFrame();f.setup.decorativeActive.value=false;f.runFrame(400)
+  assert.equal(f.frames.size,0);assert.equal(f.frameTimers.size,0,'idle pose has no background watchdog poll')
+  for(let i=0;i<10;i++)f.setup.slap()
+  const observed=new Set<number>()
+  for(let i=0;i<100&&f.frameTimers.size;i++){
+   f.runWatchdog();assert.equal(f.setup.host.value.dataset.frameCallbackKind,'watchdog');assert.equal(Number(f.setup.host.value.dataset.framePendingAge)>=40,true)
+   assert.equal(f.setup.host.value.dataset.rafTimestamp,'NaN','a real timer callback is not advertised as a received native rAF')
+   if(f.setup.host.value.dataset.phase==='slap'&&Number(f.palmStyles.get('opacity'))>0)observed.add(Number(f.setup.host.value.dataset.contacts))
+  }
+  assert.equal(f.setup.state.value.counts.kamu,10);assert.equal(f.plays.length,10);assert.equal(f.setup.interaction.busy,false);assert.equal(f.frameTimers.size,0);assert.equal(f.frames.size,0)
+  for(let contact=1;contact<=10;contact++)assert(observed.has(contact),'real watchdog frames retain palm contact '+contact)
+  assert(f.plays.slice(1).every((at,index)=>at-f.plays[index]>=100),'the unchanged presentation budget still separates actual sounds')
+  f.setup.slap();assert.equal(f.frameTimers.size,1);f.hidden.value=true;const before=f.counts.draw;f.runWatchdog(1000)
+  assert.equal(f.counts.draw,before);assert.equal(f.frameTimers.size,0);assert.equal(f.frames.size,0)
+ }finally{f.unmount()}
+ assert.equal(f.frameTimers.size,0)
 })
 
 test('actual handprint SVG keeps its pixel silhouette and readable outline without a first-contact filter surface',async()=>{

@@ -139,6 +139,7 @@ import './mascot-software.test'
 import './mascot-capture-budget.test'
 
 import './mascot-frame.test'
+import './mascot-frame-driver.test'
 import './kamu-interaction-119.test'
 import './import-probe-119.test'
 import './pcl-menu-frame-119.test'

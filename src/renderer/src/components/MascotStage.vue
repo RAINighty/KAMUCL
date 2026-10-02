@@ -11,6 +11,7 @@ import {MascotAudio} from '../mascotAudio'
 import {createMascotAtlas,MascotBatchRenderer} from '../mascotBatch'
 import {MascotSoftwareRenderer} from '../mascotSoftware'
 import {prepareFeedbackImages} from '../mascotFeedback'
+import {MascotFrameDriver,type MascotFrame} from '../mascotFrameDriver'
 import skinUrl from '../assets/mascot-skins/kamu.png'
 import palmUrl from '../assets/mascot-feedback/pixel-palm.png'
 import printUrl from '../assets/mascot-feedback/palm-print.png'
@@ -28,7 +29,8 @@ let previousPose:number[]|undefined
 const writtenStyles=new WeakMap<Element,Map<string,string>>(),writtenData=new Map<string,string>()
 function style(element:HTMLElement|SVGElement|undefined,key:string,value:string){if(!element)return;let values=writtenStyles.get(element);if(!values){values=new Map();writtenStyles.set(element,values)}if(values.get(key)===value)return;element.style.setProperty(key,value);values.set(key,value)}
 function data(key:string,value:string){if(!host.value||writtenData.get(key)===value)return;host.value.dataset[key]=value;writtenData.set(key,value)}
-let frame=0,disposed=false,activated=0,lastContact=-1000,contactsTotal=0,reported=false
+let disposed=false,activated=0,lastContact=-1000,contactsTotal=0,reported=false
+const frameDriver=new MascotFrameDriver(render,{now:()=>performance.now(),requestAnimationFrame:callback=>requestAnimationFrame(callback),cancelAnimationFrame:id=>cancelAnimationFrame(id),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:id=>clearTimeout(id)})
 let cancelImage:undefined|(()=>void)
 let gpuContext:WebGL2RenderingContext|undefined,gpuFence:WebGLSync|undefined,gpuFrame=0,gpuStarted=0,gpuDeadline:ReturnType<typeof setTimeout>|undefined
 let contextCanvas:HTMLCanvasElement|undefined
@@ -92,10 +94,10 @@ function keyDown(event:KeyboardEvent){if(event.key===' '||event.key==='Enter'){e
 function soundChanged(value:Partial<{muted:boolean;volume:number}>){state.value.sound=normalizeMascotSound({...sound.value,...value});soundRevision++;audio.update();void audio.unlock();queueSave()}
 async function resetCounts(){try{await flush();state.value=await window.kamucl.invoke('mascots:reset',true,'kamu') as MascotState;confirmReset.value=false;menu.value=false;await nextTick(()=>menuButton.value?.focus())}catch(error){toast(errText(error),'error')}}
 function closeMenu(){menu.value=false;confirmReset.value=false;void nextTick(()=>menuButton.value?.focus())}
-function wake(){if(!disposed&&!hidden.value&&player&&!frame)frame=requestAnimationFrame(render)}
-function render(rafTimestamp:number){
+function wake(){if(!disposed&&!hidden.value&&player)frameDriver.request()}
+function render(delivery:MascotFrame){
  const now=performance.now()
- frame=0;if(disposed||hidden.value||!player)return
+ if(disposed||hidden.value||!player)return
  // Host delivery may lag behind the rAF timestamp and recover on the next frame.
  // Phase, contact playback and feedback use the same actual callback clock.
  const started=now,pose=interaction.advance(now,reduced.value,50);recordContacts(pose.contacts,now);busy.value=interaction.busy
@@ -126,13 +128,14 @@ function render(rafTimestamp:number){
  style(palmElement,'opacity',t>=0&&!reduced.value?String(1-retreat):'0');style(palmElement,'transform',`translate(${(1-approach)*12+retreat*4}px,${-(1-approach)*12-retreat*4}px) rotate(${(1-approach)*-35+retreat*15}deg)`)
  style(printElement,'opacity',now-lastContact<500?String(.72*(1-(now-lastContact)/500)):'0')
  data('phase',interaction.phase);data('queue',String(interaction.queued));data('contacts',String(contactsTotal));data('bodyYaw',String(pose.yaw));data('activation',String(activation));data('renderDrawCalls',String(modelChanged?(software?.info.render.calls??gl?.info.render.calls??0):0));data('rasterFrames',String(software?.info.frames??0));data('canvasUploads',String(software?.info.totalUploads??0))
- data('rafTimestamp',String(rafTimestamp));data('renderNow',String(now))
+ data('rafTimestamp',delivery.kind==='raf'?String(delivery.rafTimestamp):'NaN');data('renderNow',String(now))
+ data('frameCallbackKind',delivery.kind);data('frameFallbacks',String(delivery.fallbacks));data('frameCallbackGap',String(delivery.gap));data('framePendingAge',String(delivery.pendingAge))
  // A real callback observation is separate from raster work or canvas uploads.
  // Keep this observation even when exact pixels are unchanged.
  if(host.value)host.value.dataset.renderMs=String(performance.now()-started)
  reportPending()
  if(!ready.value){if(software){data('gpuReadyStatus','software-first-raster');publishReady(now)}else confirmGpuDraw();return}
- if(decorativeActive.value||interaction.busy||now-lastContact<500||activation<1)frame=requestAnimationFrame(render)
+ if(decorativeActive.value||interaction.busy||now-lastContact<500||activation<1)frameDriver.request()
 }
 async function prepareScene(){
  if(disposed||hidden.value||!initialStateReady||!host.value)return
@@ -184,10 +187,10 @@ async function buildScene(){
   activated=performance.now();wake()
  }catch(error){if(!disposed){supported.value=false;persistError.value='像素预览无法加载：'+errText(error)}}
 }
-watch(hidden,value=>{if(value){interaction.pause(performance.now());cancelAnimationFrame(frame);frame=0;cancelGpuReady();cancelFeedback?.();audio.pause();void save().catch(()=>{})}else{interaction.resume(performance.now());if(!ready.value)previousPose=undefined;void audio.unlock();if(!feedbackReady)void prepareScene();else wake()}},{flush:'sync'})
+watch(hidden,value=>{if(value){interaction.pause(performance.now());frameDriver.cancel();cancelGpuReady();cancelFeedback?.();audio.pause();void save().catch(()=>{})}else{interaction.resume(performance.now());if(!ready.value)previousPose=undefined;void audio.unlock();if(!feedbackReady)void prepareScene();else wake()}},{flush:'sync'})
 watch(decorativeActive,wake);watch(reduced,wake)
 onMounted(async()=>{try{const initial=await window.kamucl.invoke('mascots:state') as MascotState;if(disposed)return;state.value=initial;await audio.unlock();if(disposed)return;initialStateReady=true;await prepareScene()}catch(error){if(!disposed){persistError.value=errText(error);toast(errText(error),'error')}}})
-onUnmounted(()=>{disposed=true;cancelFeedback?.();palmElement?.removeAttribute('src');printElement?.removeAttribute('src');cancelImage?.();cancelGpuReady();unsubscribe();clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);batchRenderer?.dispose();player?.dispose();for(const texture of textures)texture.dispose();releaseGl();software?.dispose();software?.domElement.remove();void audio.dispose()})
+onUnmounted(()=>{disposed=true;frameDriver.dispose();cancelFeedback?.();palmElement?.removeAttribute('src');printElement?.removeAttribute('src');cancelImage?.();cancelGpuReady();unsubscribe();clearTimeout(saveTimer);clearTimeout(retryTimer);batchRenderer?.dispose();player?.dispose();for(const texture of textures)texture.dispose();releaseGl();software?.dispose();software?.domElement.remove();void audio.dispose()})
 defineExpose({flush,closeStage})
 </script>
 <template>
