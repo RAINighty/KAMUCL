@@ -9,7 +9,7 @@ import {PreviewPlayer} from '../skinModel'
 import {MascotAudio} from '../mascotAudio'
 import {createMascotAtlas,MascotBatchRenderer} from '../mascotBatch'
 
-const emit=defineEmits<{close:[]}>(),{reduced,hidden,decorativeActive}=useMotion()
+const emit=defineEmits<{close:[];softwareRenderer:[software:boolean]}>(),{reduced,hidden,decorativeActive}=useMotion()
 const props=defineProps<{focusOnReady?:boolean}>()
 const host=ref<HTMLElement>(),strip=ref<HTMLElement>(),ready=ref(false),supported=ref(true),closing=ref(false),menu=ref(false),confirmReset=ref(false),persistError=ref('')
 const state=ref<MascotState>({counts:{},order:MASCOTS.map(m=>m.id),sound:normalizeMascotSound()})
@@ -144,6 +144,9 @@ function render(now:number){
 async function buildScene(){
  try{
   gl=new WebGLRenderer({alpha:true,antialias:false,powerPreference:'low-power'});gl.setPixelRatio(Math.min(devicePixelRatio||1,2));gl.setClearColor(0,0);strip.value!.prepend(gl.domElement)
+  // Software GL shares CPU time with backdrop rasterization. Preserve theme
+  // colors, while temporarily yielding decorative frost to this interaction.
+  try{const context=gl.getContext(),debug=context.getExtension('WEBGL_debug_renderer_info'),renderer=String(context.getParameter(debug?.UNMASKED_RENDERER_WEBGL??context.RENDERER));emit('softwareRenderer',/swiftshader|llvmpipe|lavapipe|softpipe|software/i.test(renderer))}catch{emit('softwareRenderer',false)}
   scene=new Scene();camera=new OrthographicCamera(-100,100,34,0,.1,300);camera.position.set(0,0,100);camera.lookAt(0,0,0)
   scene.add(new AmbientLight(0xffffff,2.1));const light=new DirectionalLight(0xffffff,1.2);light.position.set(-40,80,70);scene.add(light)
   await Promise.all(MASCOTS.map(async mascot=>{

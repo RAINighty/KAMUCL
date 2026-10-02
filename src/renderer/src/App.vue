@@ -9,7 +9,8 @@ import ModpackSupplement from './components/ModpackSupplement.vue'
 import { instanceCenter, openInstanceCenter } from './instanceCenter'
 import { loadExitNotices, clearNotices } from './store'
 import { useNavigationBubble } from './composables/useNavigationBubble'
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
+import { MASCOT_INTERACTIVE } from './mascotInteraction'
 import type { Component } from 'vue'
 import { backgroundImageEffect } from '@shared/appearancePolicy'
 import { taskProgressPercent } from '@shared/taskProgress'
@@ -71,10 +72,13 @@ const RecordingsView = defineAsyncComponent(() => import('./views/RecordingsView
 const ProjectionsView = defineAsyncComponent(() => import('./views/ProjectionsView.vue'))
 const MascotStage = defineAsyncComponent(() => import('./components/MascotStage.vue'))
 const mascotOpen = ref(false)
+const mascotSoftware = ref(false)
+// Temporarily prioritize the active header interaction over decorative previews.
+provide(MASCOT_INTERACTIVE, computed(() => mascotOpen.value))
 const mascotRef = ref<{flush:()=>Promise<void>}>()
 const mascotKeyboard = ref(false)
 function openMascots(event:MouseEvent){mascotKeyboard.value=event.detail===0;mascotOpen.value=true}
-function closeMascots(){mascotOpen.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.brand-avatar')?.focus())}
+function closeMascots(){mascotOpen.value=false;mascotSoftware.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.brand-avatar')?.focus())}
 const PacksView = defineAsyncComponent(() => import('./views/PacksView.vue'))
 const ShadersView = defineAsyncComponent(() => import('./views/ShadersView.vue'))
 const KeysView = defineAsyncComponent(() => import('./views/KeysView.vue'))
@@ -1243,7 +1247,7 @@ onUnmounted(() => {
   <div data-ui="App:870373af1ab7" v-if="bgStyle" class="app-bg" :style="bgStyle"></div>
   <div data-ui="App:e8c1fdc22711"
     class="shell"
-    :class="{ 'edit-mode': store.editMode, 'has-bg': !!bgStyle }"
+    :class="{ 'edit-mode': store.editMode, 'has-bg': !!bgStyle, 'mascots-software': mascotOpen && mascotSoftware }"
 
   >
     <!-- ============ 左侧边栏（宽度 --sidebar-w） ============ -->
@@ -1341,7 +1345,7 @@ onUnmounted(() => {
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" /></svg>
         </button>
-        <div class="topbar-spacer"><MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @close="closeMascots"/><CreatorMotto v-else :disabled="store.editMode" /></div>
+        <div class="topbar-spacer"><MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @software-renderer="mascotSoftware=$event" @close="closeMascots"/><CreatorMotto v-else :disabled="store.editMode" /></div>
 
         <div data-ui="App:5f4d42b34aae" class="top-actions">
           <button data-ui="App:e7efd70d16b8" v-if="store.currentView !== 'home'" class="top-btn dl-toggle" @click="dlOpen = !dlOpen">
@@ -2080,6 +2084,7 @@ onUnmounted(() => {
   .top-actions .top-btn { white-space: nowrap; flex-shrink: 0; padding-inline: 6px; gap: 4px; }
 }
 .topbar.mascots-open{gap:8px;padding-inline:12px}
+.shell.mascots-software :deep(*){backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 .topbar.mascots-open .topbar-spacer{overflow:visible}
 @media(max-width:1150px){
   .topbar.mascots-open .top-actions{gap:2px}

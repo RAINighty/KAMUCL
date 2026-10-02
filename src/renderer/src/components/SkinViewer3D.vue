@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // SPDX-License-Identifier: MIT
 // KAMUCL preview lifecycle and interaction; geometry is skinview3d v3.4.2 (MIT).
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
+import { MASCOT_INTERACTIVE } from '../mascotInteraction'
 import { AmbientLight, DirectionalLight, Mesh, NearestFilter, PerspectiveCamera, Raycaster, Scene, SRGBColorSpace, Texture, Vector2, WebGLRenderer } from 'three'
 import type { SkinFace } from '@shared/skinPixels'
 import { useMotion } from '../motion'
@@ -12,6 +13,9 @@ import { createFallbackSkin } from '../fallbackSkin'
 import { SkinGestureOwner } from '../skinEditorInteraction'
 const props = withDefaults(defineProps<{ src?: string; cape?: string; variant?: 'classic' | 'slim'; animation?: 'walk' | 'idle'; paused?: boolean; editCanvas?: HTMLCanvasElement; revision?: number; editMode?: 'draw' | 'rotate'; editDisabled?: boolean; layer?: 'inner' | 'outer'; hiddenParts?: string[] }>(), { src:'', cape:'', variant:'classic', animation:'walk', paused:false })
 const emit = defineEmits<{ stroke: [active: boolean]; pixel: [x: number, y: number, face: SkinFace]; gap: []; rotate: [] }>()
+const interactive = inject(MASCOT_INTERACTIVE, undefined)
+// Editing and camera gestures continue; only decorative walking yields priority.
+const effectivePaused = computed(() => props.paused || (!!interactive?.value && !props.editCanvas))
 const gestures = new SkinGestureOwner()
 const raycaster = new Raycaster()
 const { decorativeActive, hidden } = useMotion()
@@ -92,13 +96,13 @@ function render(now:number): void {
   if (closed || !gl) return
   const dt = clamp((now-previous)/1000,0,.05), k = 1-Math.exp(-14*dt)
   previous = now
-  if (!props.paused && decorativeActive.value) { seconds += dt; blend += ((props.animation === 'walk' ? 1 : 0)-blend)*Math.min(1,dt*6) }
+  if (!effectivePaused.value && decorativeActive.value) { seconds += dt; blend += ((props.animation === 'walk' ? 1 : 0)-blend)*Math.min(1,dt*6) }
   yaw += (targetYaw-yaw)*k; pitch += (targetPitch-pitch)*k; zoom += (targetZoom-zoom)*k
   player.pose(seconds,props.editCanvas ? 0 : blend,yaw)
   const d=distance/zoom
   camera.position.set(0,16+Math.sin(pitch)*d,Math.cos(pitch)*d); camera.lookAt(0,16,0)
   gl.render(world,camera)
-  if ((!props.paused && decorativeActive.value) || dragging.value || Math.abs(targetYaw-yaw)+Math.abs(targetPitch-pitch)+Math.abs(targetZoom-zoom)>.0001) frame=requestAnimationFrame(render)
+  if ((!effectivePaused.value && decorativeActive.value) || dragging.value || Math.abs(targetYaw-yaw)+Math.abs(targetPitch-pitch)+Math.abs(targetZoom-zoom)>.0001) frame=requestAnimationFrame(render)
 }
 function down(event:PointerEvent):void {
   if (props.editDisabled || !supported.value || !gestures.begin(event, !!props.editCanvas, props.editMode)) return
@@ -157,7 +161,7 @@ watch(()=>props.revision,()=>{ if (skin) skin.needsUpdate=true; wake() })
 watch([()=>props.layer,()=>props.hiddenParts],()=>{finishGesture();applyVisibility()},{deep:true})
 watch([()=>props.editMode,()=>props.editDisabled],finishGesture,{flush:'sync'})
 watch(()=>props.cape,()=>void updateCape())
-watch([()=>props.paused,()=>props.animation],wake)
+watch([effectivePaused,()=>props.animation],wake)
 onUnmounted(()=>{
   finishGesture()
   closed=true;skinRequest++;capeRequest++;cancelAnimationFrame(frame);clearTimeout(bootTimer);finishBoot()
