@@ -127,6 +127,8 @@ async function verifyFiles(id) {
       const getRect = user.func('GetWindowRect', 'bool', ['uintptr', koffi.out(koffi.pointer(rectType))]), isVisible = user.func('bool __stdcall IsWindowVisible(uintptr_t)'), isIconic = user.func('bool __stdcall IsIconic(uintptr_t)'), foreground = user.func('uintptr_t __stdcall GetForegroundWindow()'), restore = user.func('bool __stdcall ShowWindow(uintptr_t,int)'), focus = user.func('bool __stdcall SetForegroundWindow(uintptr_t)')
       const rect = {}; assert(getRect(native.MainWindowHandle, rect)); proof.nativeWindow.beforeCapture = { visible: isVisible(native.MainWindowHandle), iconic: isIconic(native.MainWindowHandle), bounds: rect }
       restore(native.MainWindowHandle, 9); focus(native.MainWindowHandle); await wait(750)
+      const captureOwnedWindow=async()=>{
+        assert(getRect(native.MainWindowHandle,rect),'Owned window still exists');
       const capture = await main(`(async()=>{const e=process.mainModule.require('electron'),sources=await e.desktopCapturer.getSources({types:['window'],thumbnailSize:{width:1280,height:800}}),s=sources.find(s=>s.id.startsWith('window:${native.MainWindowHandle}:'));if(!s)return{found:false,gameSources:sources.filter(s=>s.name.includes('Minecraft')).map(s=>({id:s.id,name:s.name})),sourceCount:sources.length};const fs=process.mainModule.require('node:fs');fs.writeFileSync(${JSON.stringify(path.join(root, 'game-window.png'))},s.thumbnail.toPNG());return{found:true,id:s.id,size:s.thumbnail.getSize()}})()`)
       proof.gameWindowCapture = capture
       if (!capture.found || !capture.size.width) {
@@ -143,10 +145,28 @@ async function verifyFiles(id) {
         proof.windowCaptureFallback = fallback; assert(fallback.found && fallback.size.width > 0, 'Actual owned window cropped capture must be available')
         }
       }
+      }
+      // Resource/atlas logs can precede the actual title screen. Preserve every
+      // native capture time and wait for two real menu-like button-band frames.
+      // This does not click the game or open any imported user world.
+      const sharp=require('sharp'),menuBands=require('./pcl-title-frame-119.cjs')
+      proof.titleFrameObservations=[];let menuFrames=0
+      for(let attempt=0;attempt<120;attempt++){
+        await captureOwnedWindow()
+        const bytes=fs.readFileSync(path.join(root,'game-window.png')),raw=await sharp(bytes).removeAlpha().raw().toBuffer({resolveWithObject:true}),observed=menuBands(raw.info.width,raw.info.height,raw.data)
+        proof.titleFrameObservations.push({at:Date.now(),attempt,...observed,sha256:digest(bytes)});save()
+        if(!attempt)fs.writeFileSync(path.join(root,'first-title-attempt.png'),bytes)
+        menuFrames=observed.menuLike?menuFrames+1:0
+        if(menuFrames>=2){proof.mainMenuCaptured=true;break}
+        assert(fs.existsSync(path.join(profile,'running-game.json')),'Game must remain running while waiting for title screen')
+        await wait(1000)
+      }
+      assert(proof.mainMenuCaptured,'Owned game title menu did not appear; preserve original loading frames')
+
     }
   } else proof.gameLaunch = { covered: false, reason: 'explicit QA no-launch option' }
   proof.complete = true; proof.finishedAt = new Date().toISOString(); save()
-  const publicSummary = { version: proof.version, product: proof.product, startedAt: proof.startedAt, finishedAt: proof.finishedAt, archiveSHA256: proof.archiveSHA256, mainSHA256: proof.runtime.mainSHA256, fixtureTransport: false, realServices: true, classification: proof.classification.kind, mcVersion: proof.metadata.mcVersion, loader: proof.metadata.loader, loaderVersion: proof.metadata.loaderVersion, counts: proof.counts, manifestFilesVerified: proof.manifestFiles.length, verifiedAlgorithms: ['sha1', 'sha512'], overrideGroups: proof.overrideGroups, overrideByteEquality: proof.overrideByteEquality, originalArchiveUnchanged: true, gameAudioAndTextureInitialization: !!proof.gameRenderReady, nativeGameWindow: !!proof.nativeWindow, gameStillRunningAfterTenSeconds: proof.gameStillRunning, capturedOwnedGameWindow: !!proof.windowCaptureFallback?.found || !!(proof.gameWindowCapture?.found && proof.gameWindowCapture.size?.width), captureAPI: proof.windowCaptureFallback?.api || "Electron desktopCapturer window thumbnail", captureSize: proof.windowCaptureFallback?.size || proof.gameWindowCapture?.size, screenshotSHA256: fs.existsSync(path.join(root, 'game-window.png')) ? digest(fs.readFileSync(path.join(root, 'game-window.png'))) : null, complete: true, limitations: ['Actual imported world play is not covered; no world was opened.', 'Offline QA account; Microsoft authentication is not covered.', 'Native game initialization is tested on this Windows host only.'] }
+  const publicSummary = { version: proof.version, product: proof.product, startedAt: proof.startedAt, finishedAt: proof.finishedAt, archiveSHA256: proof.archiveSHA256, mainSHA256: proof.runtime.mainSHA256, fixtureTransport: false, realServices: true, classification: proof.classification.kind, mcVersion: proof.metadata.mcVersion, loader: proof.metadata.loader, loaderVersion: proof.metadata.loaderVersion, counts: proof.counts, manifestFilesVerified: proof.manifestFiles.length, verifiedAlgorithms: ['sha1', 'sha512'], overrideGroups: proof.overrideGroups, overrideByteEquality: proof.overrideByteEquality, originalArchiveUnchanged: true, gameAudioAndTextureInitialization: !!proof.gameRenderReady, nativeGameWindow: !!proof.nativeWindow, mainMenuCaptured: !!proof.mainMenuCaptured, titleFrameObservations: proof.titleFrameObservations, gameStillRunningAfterTenSeconds: proof.gameStillRunning, capturedOwnedGameWindow: !!proof.windowCaptureFallback?.found || !!(proof.gameWindowCapture?.found && proof.gameWindowCapture.size?.width), captureAPI: proof.windowCaptureFallback?.api || "Electron desktopCapturer window thumbnail", captureSize: proof.windowCaptureFallback?.size || proof.gameWindowCapture?.size, screenshotSHA256: fs.existsSync(path.join(root, 'game-window.png')) ? digest(fs.readFileSync(path.join(root, 'game-window.png'))) : null, complete: true, limitations: ['Actual imported world play is not covered; no world was opened.', 'Offline QA account; Microsoft authentication is not covered.', 'Native game initialization is tested on this Windows host only.'] }
   fs.writeFileSync(path.join(root, 'safe-summary.json'), JSON.stringify(publicSummary, null, 2))
   console.log(JSON.stringify({ proofFile, complete: proof.complete, counts: proof.counts, game: proof.gameRenderReady }))
 })().catch(error => { proof.error = String(error.stack || error); proof.finishedAt = new Date().toISOString(); save(); console.error(error); process.exitCode = 1 }).finally(async () => {
