@@ -173,26 +173,7 @@ main().finally(async()=>{
   const recordingManifest=path.join('out',`mascot-${mascotProofRevision}-${mascotRecordingKind}-screencast-black-orange`,'recording.json');assert(fresh(recordingManifest),'successful GUI run is missing current actual screencast');const recording=JSON.parse(fs.readFileSync(recordingManifest));assert.equal(recording.version,version)
   const cadenceFile=path.join('out','mascot-header-screencast-live.json');assert(fresh(cadenceFile),'successful GUI run is missing current native display cadence proof');const cadence=JSON.parse(fs.readFileSync(cadenceFile)),budget=require('./mascot-capture-budget.cjs')({activeDisplay:cadence.activeDisplay},recording.fps);assert.equal(cadence.actualFps,recording.fps,'native display cadence must refer to this exact recording');assert.equal(cadence.minimumFps,budget.minimumFps,'wrapper and GUI must use the same native display capture target');assert.equal(cadence.passed,budget.passed,'benchmark passed result must match actual capture');assert.equal(cadence.frameRatePassed,budget.passed,'capture result cannot hide a below-target benchmark');assert(recording.frames.length>=2&&Number.isFinite(recording.fps)&&recording.fps>0&&recording.elapsed>0,'capture evidence must include multiple real frames and valid timing');performanceBenchmark={...budget,status:budget.passed?'passed':'below-target'};if(!budget.passed)console.warn('BENCHMARK BELOW TARGET: native compositor capture '+recording.fps+' fps < '+budget.minimumFps+' fps; functional completeness is reported independently')
   complete=true
-  // One separate, disposable Intel APP diagnostic after the complete normal
-  // run. Its original SCK frames and failures never replace baseline evidence.
-  // Keep workflow permissions/budget and all formal capture assertions intact.
-  if(version==='1.1.9'&&arch==='x64'&&stage==='app'&&process.env.CI==='true'){
-   const began=Date.now();observerABA119={classification:'Independent instrumentation-only observer A/B/A; not formal acceptance',startedAt:new Date(began).toISOString(),timeoutMs:180000,complete:false,normalAcceptanceChanged:false}
-   console.log('DIAGNOSTIC observer ABA start '+observerABA119.startedAt)
-   try{execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_SKIP_EXTENSION_BASE:'1',KAMUCL_UI_MODULE:'native-compositor',KAMUCL_OBSERVER_ABA119:'1',KAMUCL_TEST_THEME:'black-orange'},stdio:'inherit',timeout:observerABA119.timeoutMs});observerABA119.processExitCode=0}
-   catch(error){observerABA119.error={name:error.name,code:error.code??null,status:error.status??null,signal:error.signal??null};console.warn('DIAGNOSTIC observer ABA failed; original formal results remain unchanged',observerABA119.error)}
-   finally{
-    observerABA119.finishedAt=new Date().toISOString();observerABA119.elapsedMs=Date.now()-began;observerABA119.directories=[]
-    for(const name of fs.readdirSync('out').filter(name=>/^kamu-observer-aba-119-[0-9a-f-]{36}-black-orange$/.test(name))){
-     const source=path.join('out',name),ledger=path.join(source,'observer-aba.json');if(!fresh(ledger))continue
-     const result=JSON.parse(fs.readFileSync(ledger));if(Date.parse(result.startedAt)<began)continue
-     const target=path.join(extensionProof,name),copy=(from,to)=>{fs.mkdirSync(to,{recursive:true});for(const entry of fs.readdirSync(from,{withFileTypes:true})){assert(!entry.isSymbolicLink(),'no symlink in diagnostic evidence');const src=path.join(from,entry.name),dst=path.join(to,entry.name);if(entry.isDirectory())copy(src,dst);else if(/\.(?:json|bgra|png|log)$/.test(entry.name))fs.copyFileSync(src,dst)}}
-     copy(source,target);observerABA119.directories.push({name,complete:result.complete===true,source:'Original independent UUID directory; compiled helper digest retained in compile ledger, helper binary and request marker text excluded'})
-    }
-    observerABA119.complete=observerABA119.processExitCode===0&&observerABA119.directories.length===1&&observerABA119.directories.every(entry=>entry.complete)
-    fs.writeFileSync(path.join(extensionProof,'observer-aba-preflight.json'),JSON.stringify(observerABA119,null,2));console.log('DIAGNOSTIC observer ABA end '+observerABA119.finishedAt+' elapsedMs='+observerABA119.elapsedMs)
-   }
-  }
+
  }catch(error){extensionError=String(error);throw error}
  finally{
   // Failed GUI runs must retain their last real layout/visibility snapshot and
@@ -218,6 +199,27 @@ main().finally(async()=>{
   for(const name of fs.readdirSync('out'))if(/^(?:extension-118-skin-palette-state-(?:native|compositor)-failure-black-orange|skin-palette-export-119-black-orange-(?:\d+|latest-success))\.png$/.test(name)&&fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}
   if(fs.existsSync(shots))for(const name of fs.readdirSync(shots))if(name.startsWith('extension-')&&name.endsWith('.png')&&fresh(path.join(shots,name))){fs.copyFileSync(path.join(shots,name),path.join(extensionProof,name));copied.push(name)}
   fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,functionalComplete:complete,performanceBenchmark,performancePassed:performanceBenchmark?.passed??null,nativeVideoEvidence,observerABA119,acceptance:'functional results only; independent visual, interaction and motion review is separate',error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
+  // One separate, disposable Intel APP diagnostic after archiving the normal
+  // result, including its original failure. Diagnostics cannot replace it.
+  // Keep workflow permissions/budget and all formal capture assertions intact.
+  if(version==='1.1.9'&&arch==='x64'&&stage==='app'&&process.env.CI==='true'){
+   const began=Date.now();observerABA119={classification:'Independent instrumentation-only observer A/B/A; not formal acceptance',startedAt:new Date(began).toISOString(),timeoutMs:180000,complete:false,normalAcceptanceChanged:false}
+   console.log('DIAGNOSTIC observer ABA start '+observerABA119.startedAt)
+   try{execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_SKIP_EXTENSION_BASE:'1',KAMUCL_UI_MODULE:'native-compositor',KAMUCL_OBSERVER_ABA119:'1',KAMUCL_TEST_THEME:'black-orange'},stdio:'inherit',timeout:observerABA119.timeoutMs});observerABA119.processExitCode=0}
+   catch(error){observerABA119.error={name:error.name,code:error.code??null,status:error.status??null,signal:error.signal??null};console.warn('DIAGNOSTIC observer ABA failed; original formal results remain unchanged',observerABA119.error)}
+   finally{
+    observerABA119.finishedAt=new Date().toISOString();observerABA119.elapsedMs=Date.now()-began;observerABA119.directories=[]
+    try{for(const name of fs.readdirSync('out').filter(name=>/^kamu-observer-aba-119-[0-9a-f-]{36}-black-orange$/.test(name))){
+     const source=path.join('out',name),ledger=path.join(source,'observer-aba.json');if(!fresh(ledger))continue
+     const result=JSON.parse(fs.readFileSync(ledger));if(Date.parse(result.startedAt)<began)continue
+     const target=path.join(extensionProof,name),copy=(from,to)=>{fs.mkdirSync(to,{recursive:true});for(const entry of fs.readdirSync(from,{withFileTypes:true})){assert(!entry.isSymbolicLink(),'no symlink in diagnostic evidence');const src=path.join(from,entry.name),dst=path.join(to,entry.name);if(entry.isDirectory())copy(src,dst);else if(/\.(?:json|bgra|png|log)$/.test(entry.name))fs.copyFileSync(src,dst)}}
+     copy(source,target);observerABA119.directories.push({name,complete:result.complete===true,source:'Original independent UUID directory; compiled helper digest retained in compile ledger, helper binary and request marker text excluded'})
+    }}catch(error){observerABA119.collectionError=String(error);console.warn('DIAGNOSTIC evidence collection failed; original formal result remains unchanged',observerABA119.collectionError)}
+    observerABA119.complete=!observerABA119.collectionError&&observerABA119.processExitCode===0&&observerABA119.directories.length===1&&observerABA119.directories.every(entry=>entry.complete)
+    try{fs.writeFileSync(path.join(extensionProof,'observer-aba-preflight.json'),JSON.stringify(observerABA119,null,2))}catch(error){console.warn('DIAGNOSTIC summary write failed; original formal result remains unchanged',String(error))}console.log('DIAGNOSTIC observer ABA end '+observerABA119.finishedAt+' elapsedMs='+observerABA119.elapsedMs)
+   }
+  }
+
  }
  console.log('FUNCTIONAL PASS native macOS '+arch+' extension GUI '+version+'; capture benchmark '+performanceBenchmark.status)
 }).catch(e=>{console.error(e);process.exitCode=1})
