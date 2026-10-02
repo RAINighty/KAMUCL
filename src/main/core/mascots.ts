@@ -40,5 +40,5 @@ export function registerMascotsIpc(){
  // Preserve the 1.1.6 IPC for older in-process callers.
  ipcMain.handle('mascots:slap',(event,id)=>{owner(event);if(!ids.includes(id))throw new Error('人物标识无效');return serialize(async()=>write(addMascotHits(await read(),[id]) as SavedState))})
  ipcMain.handle('mascots:sound',(event,value)=>{owner(event);if(typeof value?.muted!=='boolean'||typeof value?.volume!=='number'||!Number.isFinite(value.volume))throw new Error('音效设置无效');return serialize(async()=>{const state=await read();state.sound=normalizeMascotSound(value);return write(state)})})
- ipcMain.handle('mascots:reset',(event,confirmed)=>{owner(event);if(confirmed!==true)throw new Error('请确认重置计数');return serialize(async()=>{const state=await read();state.counts={};state.order=[...ids];return write(state)})})
+ ipcMain.handle('mascots:reset',(event,confirmed,scope)=>{owner(event);if(confirmed!==true)throw new Error('请确认重置计数');if(scope!==undefined&&scope!=='kamu')throw new Error('重置范围无效');return serialize(async()=>{const state=await read();if(scope==='kamu')state.counts.kamu=0;else{state.counts={};state.order=[...ids]}return write(state)})})
 }

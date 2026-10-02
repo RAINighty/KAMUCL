@@ -88,7 +88,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
     const selectedModule=process.env.KAMUCL_UI_MODULE||process.env.KAMUCL_117_MODULE;
     // Run the unchanged motion gate before longer editing fixtures, so a native
     // failure yields render diagnostics without an unrelated earlier UI race.
-    for(const [id,file] of [['header','verify-mascot-header-ui.cjs'],['skin118','verify-skin-editor-ui.cjs'],['palette','verify-skin-palette-ui.cjs'],['gallery','verify-gallery-favorites-ui.cjs'],['gallery118','verify-gallery-favorites-118-ui.cjs']]){
+    for(const [id,file] of [['header','verify-mascot-header-ui.cjs'],['skin118','verify-skin-editor-ui.cjs'],['palette','verify-skin-palette-ui.cjs'],['gallery','verify-gallery-favorites-ui.cjs'],['gallery118','verify-gallery-favorites-118-ui.cjs'],...(/\b1\.1\.9\b/.test(version)?[['import119','verify-import-routing-119-ui.cjs'],['selection119','verify-selection-ui-119.cjs']]:[])]){
       if(!selectedModule||selectedModule===id)await require('./'+file)({...harness,screenshot:name=>harness.screenshot(name.startsWith('extension-')?name:'extension-118-'+name)});
     }
   }

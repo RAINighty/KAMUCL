@@ -211,6 +211,9 @@ test('real file-backed IPC batches are idempotent, ordered, durable, and reject 
   await assert.rejects(()=>invoke('mascots:batch',{...batch,hits:['q3']}),/已被使用/)
   await Promise.all(Array.from({length:10},(_,i)=>invoke('mascots:batch',{batchId:'ordered-'+i,hits:['milo']})))
   await invoke('mascots:sound',{muted:true,volume:.21});const saved=JSON.parse(await fs.readFile(path.join(root,'mascot-counts.json'),'utf8'));assert.equal(saved.counts.milo,11);assert.equal(saved.receipts.length,11);assert.deepEqual(saved.sound,{muted:true,volume:.21})
+  await invoke('mascots:batch',{batchId:'kamu-before-reset',hits:['kamu','kamu']})
+  await invoke('mascots:reset',true,'kamu');const kamuReset=await invoke('mascots:state');assert.equal(kamuReset.counts.kamu,0);assert.equal(kamuReset.counts.q3,5);assert.equal(kamuReset.counts.milo,11);assert.deepEqual(kamuReset.sound,{muted:true,volume:.21})
+  assert.throws(()=>invoke('mascots:reset',true,'milo'),/范围无效/)
   await invoke('mascots:reset',true);assert.equal((await invoke('mascots:state')).counts.q3,0);assert.deepEqual((await invoke('mascots:state')).sound,{muted:true,volume:.21})
   // A delayed acknowledgement retry must also stay idempotent after reset.
   await invoke('mascots:batch',batch);assert.equal((await invoke('mascots:state')).counts.q3,0)

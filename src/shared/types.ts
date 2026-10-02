@@ -864,6 +864,7 @@ export const IPC = {
   bridgeInstalled: 'bridge:installed', // (versionId: string) => boolean
 
   // 整合包
+  importProbe: 'import:probe', // (inputPath: string) => ImportProbeResult
   modpackProbe: 'modpack:probe', // (filePath: string) => ModpackInfo  只解析不安装（供导入确认弹窗）
   modpackSupplyFiles: 'modpack:supplyFiles',
   modpackOpenFile: 'modpack:openFile',
@@ -1103,6 +1104,12 @@ export interface WorldImportInfo {
   candidates: WorldCandidateInfo[]
   warnings: string[]
 }
+
+export type ImportProbeResult =
+  | { kind: 'modpack'; info: ModpackInfo }
+  | { kind: 'world'; info: WorldImportInfo }
+  | { kind: 'mod' }
+  | { kind: 'unsupported'; message: string }
 
 export interface WorldImportOptions {
   candidateId: string

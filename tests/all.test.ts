@@ -139,3 +139,5 @@ import './mascot-software.test'
 import './mascot-capture-budget.test'
 
 import './mascot-frame.test'
+import './kamu-interaction-119.test'
+import './import-probe-119.test'

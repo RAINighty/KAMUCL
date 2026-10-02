@@ -41,6 +41,7 @@ import IconPickerModal from '../components/IconPickerModal.vue'
 import SelectMenu from '../components/SelectMenu.vue'
 import RecordingModPicker from '../components/RecordingModPicker.vue'
 import FavoriteModsPicker from '../components/FavoriteModsPicker.vue'
+import UiGlyph from '../components/UiGlyph.vue'
 const favoritesReady = ref(true)
 import ThumbnailPickerModal from '../components/ThumbnailPickerModal.vue'
 import type {
@@ -1418,8 +1419,9 @@ async function confirmIsolation() {
     <!-- 安装模态框 -->
     <Teleport to="body">
       <div v-if="modal.open" class="modal-mask" @pointerdown.self="modal.open = false">
-        <div class="modal">
-          <h3 class="modal-title">安装 {{ modal.version?.id }}</h3>
+        <div class="modal game-install-modal" role="dialog" aria-modal="true" :aria-label="`安装 ${modal.version?.id}`">
+          <header class="install-header"><h3 class="modal-title">安装 {{ modal.version?.id }}</h3><button class="icon-btn" aria-label="关闭安装窗口" data-modal-dismiss @click="modal.open=false"><UiGlyph name="close" /></button></header>
+          <div class="install-content">
 
           <p class="modal-label">选择模组加载器</p>
           <div class="loader-options">
@@ -1428,9 +1430,10 @@ async function confirmIsolation() {
               :key="opt.value"
               class="loader-option"
               :class="{ active: modal.loader === opt.value }"
+              :aria-pressed="modal.loader === opt.value"
               @click="modal.loader = opt.value"
             >
-              {{ opt.label }}
+              <UiGlyph :name="opt.value || 'none'" :size="23" />{{ opt.label }}
             </button>
           </div>
 
@@ -1449,16 +1452,7 @@ async function confirmIsolation() {
 
             <!-- Fabric 联动：Fabric API 自动选择 -->
             <template v-if="modal.loader === 'fabric'">
-              <div class="fapi-head">
-                <p class="modal-label">Fabric API</p>
-                <label class="fapi-switch">
-                  <span class="muted">同时安装（大多数 Fabric 模组需要）</span>
-                  <span class="switch">
-                    <input v-model="modal.apiOn" type="checkbox" />
-                    <span class="switch-ui"></span>
-                  </span>
-                </label>
-              </div>
+              <label class="check-option fapi-head"><input v-model="modal.apiOn" type="checkbox" /><span><strong>Fabric API</strong><small>同时安装，多数 Fabric 模组需要此项支持。</small></span></label>
               <template v-if="modal.apiOn">
                 <div v-if="modal.loadingApi" class="loaders-loading">
                   <span class="spin"></span>
@@ -1492,11 +1486,11 @@ async function confirmIsolation() {
           />
           <p v-if="instanceError" class="loaders-error">{{ instanceError }}</p>
           <p v-else class="muted inst-hint">实例将安装为 versions/{{ effectiveInstanceName }}/，可自定义（同 MC 版本可共存多个实例）</p>
-
-          <div class="modal-actions">
-            <button class="btn btn-ghost" @click="modal.open = false">取消</button>
-            <button class="btn btn-gold" :disabled="!canConfirm" @click="confirmInstall">确认安装</button>
           </div>
+          <footer class="modal-actions install-footer">
+            <button class="btn btn-ghost" @click="modal.open = false">取消</button>
+            <button class="btn btn-gold" :disabled="!canConfirm" @click="confirmInstall"><UiGlyph name="download" />确认安装</button>
+          </footer>
         </div>
       </div>
     </Teleport>
@@ -1504,6 +1498,8 @@ async function confirmIsolation() {
 </template>
 
 <style scoped>
+.game-install-modal{width:min(620px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;overflow:hidden;display:flex;flex-direction:column;border-radius:20px}.install-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 24px 8px;flex-shrink:0}.install-header .modal-title{font-size:26px;margin:0}.install-content{padding:0 24px 20px;min-height:0;overflow:auto;scrollbar-gutter:stable}.install-footer{padding:16px 24px;margin:0!important;border-top:1px solid var(--border);flex-shrink:0}.install-footer .btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;min-width:116px;border-radius:12px}.game-install-modal .loader-options{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.game-install-modal .loader-option{flex-direction:column;gap:6px;height:72px;border-radius:14px;padding:10px 6px;font-size:13px}.game-install-modal .loader-option.active{box-shadow:0 0 14px color-mix(in srgb,var(--accent) 12%,transparent)}.game-install-modal .modal-label{font-size:14px;margin:20px 0 10px}.game-install-modal .input,.game-install-modal .select{min-height:42px;border-radius:12px;width:100%}.game-install-modal .fapi-head{justify-content:flex-start;align-items:flex-start;margin-top:18px}.game-install-modal .inst-hint{overflow-wrap:anywhere;line-height:1.7}.game-install-modal :deep(.select-menu-btn){min-height:42px;border-radius:12px}.game-install-modal :deep(.recording-picker .modal-label){font-size:14px}.game-install-modal .loaders-error{padding:9px 12px;background:var(--danger-soft);border-radius:9px;line-height:1.5}.game-install-modal .fapi-tip{line-height:1.6}
+@media(max-width:520px){.install-header{padding:16px}.install-header .modal-title{font-size:22px}.install-content{padding:0 16px 16px}.install-footer{padding:12px 16px}.game-install-modal .loader-options{grid-template-columns:repeat(3,minmax(0,1fr))}.game-install-modal .loader-option{height:62px}}
 .folder-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:20px}.folder-summary strong{display:flex;gap:10px;align-items:center}.folder-summary>.muted{font-size:12px}
 .installed-scope{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 0 20px;border-bottom:1px solid var(--border);margin-bottom:12px}.installed-scope>div:first-child{flex:1;min-width:240px}.installed-scope p{font-size:12px;margin:6px 0 0}.installed-scope :deep(.select-menu-btn){min-width:220px;max-width:420px;flex:1}.inst-path{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 

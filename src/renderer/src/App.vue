@@ -34,7 +34,7 @@ import {
   onUpdateSlowHint,
   pauseTask,
   probeModpack,
-  probeWorld,
+  probeImport,
   resetSettingsToDefaults,
   resumeTask,
   selectFile,
@@ -72,13 +72,13 @@ const RecordingsView = defineAsyncComponent(() => import('./views/RecordingsView
 const ProjectionsView = defineAsyncComponent(() => import('./views/ProjectionsView.vue'))
 const MascotStage = defineAsyncComponent(() => import('./components/MascotStage.vue'))
 const mascotOpen = ref(false)
-const mascotSoftware = ref(false)
-// Temporarily prioritize the active header interaction over decorative previews.
+const mascotReady = ref(false)
+// Give the active logo interaction priority over decorative skin previews.
 provide(MASCOT_INTERACTIVE, computed(() => mascotOpen.value))
 const mascotRef = ref<{flush:()=>Promise<void>}>()
 const mascotKeyboard = ref(false)
-function openMascots(event:MouseEvent){mascotKeyboard.value=event.detail===0;mascotOpen.value=true}
-function closeMascots(){mascotOpen.value=false;mascotSoftware.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.brand-avatar')?.focus())}
+function openMascots(event:MouseEvent){mascotKeyboard.value=event.detail===0;mascotReady.value=false;mascotOpen.value=true}
+function closeMascots(){mascotOpen.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.brand-avatar')?.focus())}
 const PacksView = defineAsyncComponent(() => import('./views/PacksView.vue'))
 const ShadersView = defineAsyncComponent(() => import('./views/ShadersView.vue'))
 const KeysView = defineAsyncComponent(() => import('./views/KeysView.vue'))
@@ -498,31 +498,19 @@ const worldModal = reactive({
   info: null as WorldImportInfo | null
 })
 
-async function routeSingleImport(filePath: string, displayName: string) {
-  if (/\.mrpack$/i.test(displayName)) {
-    await openModpackImport(filePath)
-    return
+let importProbeRevision = 0
+async function routeSingleImport(filePath: string, _displayName: string) {
+  const revision = ++importProbeRevision
+  try {
+    const result = await probeImport(filePath)
+    if (revision !== importProbeRevision) return
+    if (result.kind === 'modpack') await openModpackImport(filePath, result.info)
+    else if (result.kind === 'world') Object.assign(worldModal, { filePath, info: result.info, open: true })
+    else if (result.kind === 'mod') Object.assign(modDrop, { files: [filePath], open: true })
+    else toast(result.message, 'error')
+  } catch (e) {
+    if (revision === importProbeRevision) toast('导入识别失败：' + errText(e), 'error')
   }
-  if (!/\.jar$/i.test(displayName)) {
-    try {
-      const info = await probeWorld(filePath)
-      if (info) {
-        worldModal.filePath = filePath
-        worldModal.info = info
-        worldModal.open = true
-        return
-      }
-    } catch (e) {
-      toast('存档识别失败：' + errText(e), 'error')
-      return
-    }
-  }
-  if (/\.zip$/i.test(displayName)) {
-    await openModpackImport(filePath)
-    return
-  }
-  modDrop.files = [filePath]
-  modDrop.open = true
 }
 
 // ---------------- 整合包导入确认弹窗 ----------------
@@ -622,7 +610,7 @@ function onMpConflictActionChange() {
 }
 
 /** 拿到文件路径后先 probe 解析，弹确认框；解析失败在框内展示错误 */
-async function openModpackImport(filePath: string) {
+async function openModpackImport(filePath: string, knownInfo?: ModpackInfo) {
   if (!filePath) return
   Object.assign(mpModal, {
     open: true,
@@ -638,7 +626,7 @@ async function openModpackImport(filePath: string) {
     confirmReplace: false
   })
   try {
-    const info = await probeModpack(filePath)
+    const info = knownInfo ?? await probeModpack(filePath)
     // 防止解析期间用户又发起了另一次导入，旧结果覆盖新弹窗
     if (mpModal.filePath === filePath) {
       mpModal.info = info
@@ -692,13 +680,13 @@ function confirmModpackImport() {
   })
 }
 
-/** 顶栏「导入」按钮：系统文件选择框选整合包 */
+/** 顶栏「导入」与拖入文件共用内容识别。 */
 async function onImportClick() {
   try {
     const p = await selectFile()
     if (p) void routeSingleImport(p, p.split(/[\\/]/).pop() ?? p)
   } catch (e) {
-    toast('整合包安装失败：' + errText(e), 'error')
+    toast('导入失败：' + errText(e), 'error')
   }
 }
 
@@ -1247,14 +1235,17 @@ onUnmounted(() => {
   <div data-ui="App:870373af1ab7" v-if="bgStyle" class="app-bg" :style="bgStyle"></div>
   <div data-ui="App:e8c1fdc22711"
     class="shell"
-    :class="{ 'edit-mode': store.editMode, 'has-bg': !!bgStyle, 'mascots-software': mascotOpen && mascotSoftware }"
+    :class="{ 'edit-mode': store.editMode, 'has-bg': !!bgStyle }"
 
   >
     <!-- ============ 左侧边栏（宽度 --sidebar-w） ============ -->
     <aside data-ui="App:25064d2bb910" class="sidebar" data-edit="sidebar">
       <!-- Logo 区 -->
       <div data-ui="App:fc5fc8ba7e96" class="logo-area">
-        <button class="brand-avatar" :class="{'avatar-open':mascotOpen}" aria-label="打开七人互动彩蛋" :aria-expanded="mascotOpen" @click="openMascots"><img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" /></button>
+        <div class="brand-slot">
+        <button class="brand-avatar" :class="{'avatar-open':mascotOpen&&mascotReady}" aria-label="打开卡慕互动彩蛋" :aria-expanded="mascotOpen" @click="openMascots"><img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" /></button>
+        <MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @ready="mascotReady=true" @close="closeMascots"/>
+        </div>
         <div data-ui="App:7494cda29e47" class="logo-text">
           <span data-ui="App:c396a9ff34cb" class="logo-name">KAMUCL</span>
           <span data-ui="App:31accf043a9a" class="logo-version">v{{ appVersion }}</span>
@@ -1335,7 +1326,7 @@ onUnmounted(() => {
     <!-- ============ 右侧（顶栏 + 内容） ============ -->
     <div data-ui="App:f900e94b908a" class="main-area">
       <!-- 顶部栏（可拖拽） -->
-      <header data-ui="App:db645f1637b0" class="topbar" :class="{'mascots-open':mascotOpen}" data-edit="topbar" @pointerdown="onTopbarPointerDown">
+      <header data-ui="App:db645f1637b0" class="topbar"  data-edit="topbar" @pointerdown="onTopbarPointerDown">
         <button data-ui="App:3cd32ab47022"
           v-if="canGoBack && store.currentView !== 'home'"
           class="top-back"
@@ -1345,7 +1336,7 @@ onUnmounted(() => {
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" /></svg>
         </button>
-        <div class="topbar-spacer"><MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @software-renderer="mascotSoftware=$event" @close="closeMascots"/><CreatorMotto v-else :disabled="store.editMode" /></div>
+        <div class="topbar-spacer"><CreatorMotto :disabled="store.editMode" /></div>
 
         <div data-ui="App:5f4d42b34aae" class="top-actions">
           <button data-ui="App:e7efd70d16b8" v-if="store.currentView !== 'home'" class="top-btn dl-toggle" @click="dlOpen = !dlOpen">
@@ -1735,7 +1726,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.brand-avatar{display:block;background:transparent;border:0;padding:0;border-radius:12px;cursor:pointer;transition:opacity .25s,transform .35s;flex-shrink:0}.brand-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.brand-avatar.avatar-open{opacity:0;transform:scale(.5) rotate(-12deg);pointer-events:none}
+.brand-slot{position:relative;z-index:5;width:48px;height:72px;flex-shrink:0;display:grid;place-items:center}.brand-avatar{display:block;background:transparent;border:0;padding:0;border-radius:12px;cursor:pointer;transition:opacity .38s,transform .38s;flex-shrink:0}.brand-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.brand-avatar.avatar-open{opacity:0;transform:translateY(-14px) scale(.65);pointer-events:none}
 /* 配置不兼容弹窗 */
 .cfg-mismatch-mask { z-index: 9600; display: grid; place-items: center; }
 .cfg-mismatch-modal { width: min(460px, 90vw); padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
@@ -2087,17 +2078,6 @@ onUnmounted(() => {
   .top-actions { flex-shrink: 0; }
   .top-actions .top-btn { white-space: nowrap; flex-shrink: 0; padding-inline: 6px; gap: 4px; }
 }
-.topbar.mascots-open{gap:8px;padding-inline:12px}
-.shell.mascots-software :deep(*){backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
-.topbar.mascots-open .topbar-spacer{overflow:visible}
-@media(max-width:1150px){
-  .topbar.mascots-open .top-actions{gap:2px}
-  .topbar.mascots-open .top-btn{font-size:0;gap:0;width:28px;padding:0}
-  .topbar.mascots-open .top-icon-btn,.topbar.mascots-open .win-btn{width:28px;flex-shrink:0}
-  .topbar.mascots-open .top-divider{margin-inline:2px}
-  .topbar.mascots-open .top-back{width:28px;flex-shrink:0}
-}
-
 .top-actions {
   display: flex;
   align-items: center;

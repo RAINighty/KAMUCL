@@ -1,4 +1,5 @@
 import { registerRecordingsIpc } from './core/recordingsIpc'
+import { probeImport } from './core/importProbe'
 import { registerSkinEditorIpc } from './core/skinEditorIpc'
 import { registerModFavoritesIpc } from './core/modFavorites'
 import { registerSupplementalModsIpc } from './core/supplementalMods'
@@ -545,6 +546,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
     await shell.openExternal(await community.curseForgeFilePage(file.projectID, file.fileID))
   })
   // 只解析不安装：导入确认弹窗展示包信息用
+  ipcMain.handle(IPC.importProbe, (_e, inputPath: string) => probeImport(String(inputPath ?? '')))
   ipcMain.handle(IPC.modpackProbe, (_e, filePath: string) =>
     modpacks.probeModpack(String(filePath ?? ''))
   )

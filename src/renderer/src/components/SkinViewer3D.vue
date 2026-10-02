@@ -25,6 +25,7 @@ const container = ref<HTMLDivElement | null>(null), supported = ref(true), dragg
 let gl: WebGLRenderer | undefined, world: Scene, camera: PerspectiveCamera, player: PreviewPlayer
 let resize: ResizeObserver | undefined, frame = 0, closed = false, skinRequest = 0, capeRequest = 0
 let skin: Texture | null = null, cape: Texture | null = null
+let ambient: AmbientLight | undefined, keyLight: DirectionalLight | undefined
 let yaw = -.35, pitch = 0, zoom = 1, targetYaw = yaw, targetPitch = pitch, targetZoom = zoom
 let previous = 0, seconds = 0, blend = 1, distance = 50, pointerX = 0, pointerY = 0
 const clamp = (n:number,min:number,max:number) => Math.max(min,Math.min(max,n))
@@ -140,14 +141,16 @@ function wheel(event:WheelEvent):void {
   targetZoom=clamp(targetZoom*Math.exp(-event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?100:1)*.0012),.5,3);wake()
 }
 function resetView():void { finishGesture();targetYaw=-.35;targetPitch=0;targetZoom=1;wake() }
+function zoomBy(factor: number):void { if(props.editDisabled || !Number.isFinite(factor) || factor <= 0)return;finishGesture();targetZoom=clamp(targetZoom*factor,.5,3);wake() }
+function setLighting(studio: boolean):void { if(ambient)ambient.intensity=studio?2:1.35;if(keyLight){keyLight.intensity=studio?1:1.6;keyLight.position.set(studio?-15:35,30,50)}wake() }
 function visibility():void { if(document.hidden){finishGesture();cancelAnimationFrame(frame);frame=0}else wake() }
 onMounted(()=>{
   try {
     gl=new WebGLRenderer({alpha:true,antialias:true});gl.setPixelRatio(Math.min(devicePixelRatio||1,2));gl.setClearColor(0,0)
     container.value!.appendChild(gl.domElement)
     world=new Scene();camera=new PerspectiveCamera(45,1,.5,500);player=new PreviewPlayer()
-    world.add(player,new AmbientLight(0xffffff,2))
-    const light=new DirectionalLight(0xffffff,1);light.position.set(-15,30,50);world.add(light)
+    ambient=new AmbientLight(0xffffff,2);world.add(player,ambient)
+    keyLight=new DirectionalLight(0xffffff,1);keyLight.position.set(-15,30,50);world.add(keyLight)
     skin=texture(createFallbackSkin());player.skin.map=skin;player.skin.setOuterLayerVisible(false)
     resize=new ResizeObserver(fit);resize.observe(container.value!);fit()
     document.addEventListener('visibilitychange',visibility)
@@ -170,7 +173,7 @@ onUnmounted(()=>{
   player?.dispose();skin?.dispose();cape?.dispose();gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove()
 })
 function view(angle: number, elevation = 0) { finishGesture();targetYaw=angle; targetPitch=clamp(elevation,-Math.PI*5/12,Math.PI*5/12); yaw=angle; pitch=targetPitch; wake() }
-defineExpose({resetView,view,finishGesture})
+defineExpose({resetView,view,finishGesture,zoomBy,setLighting})
 </script>
 <template>
   <div ref="container" class="viewer3d" :class="{dragging,editing:!!editCanvas, rotating:dragging && gestures.active?.operation==='rotate'}" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up" @lostpointercapture="up" @wheel="wheel" @auxclick.prevent @dblclick="!editCanvas && resetView()">

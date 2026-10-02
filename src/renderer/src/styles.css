@@ -114,6 +114,50 @@ html[data-platform="darwin"] .shell { border-radius: 0; }
   padding: 0;
 }
 
+/* Keep native checkbox state, events, keyboard activation and indeterminate
+   semantics; only replace the platform-dependent visual treatment. */
+input[type='checkbox']:not(:where(.switch input, .connection-toggle input)) {
+  appearance: none;
+  -webkit-appearance: none;
+  /* Legacy scoped list styles used 14–17px sizes; the shared size token owns
+     these dimensions across both Teleport dialogs and ordinary page lists. */
+  width: var(--check-size, 20px) !important;
+  height: var(--check-size, 20px) !important;
+  min-width: var(--check-size, 20px) !important;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  vertical-align: middle;
+  border: 1.5px solid color-mix(in srgb, var(--text-dim) 65%, var(--border));
+  border-radius: 6px;
+  background-color: var(--card-2);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 76%;
+  cursor: pointer;
+  transition: background-color var(--motion-fast), border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+input[type='checkbox']:not(:where(.switch input, .connection-toggle input)):hover:not(:disabled) { border-color: var(--accent); }
+input[type='checkbox']:not(:where(.switch input, .connection-toggle input)):checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m5 12 4.5 4.5L19 7' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+input[type='checkbox']:not(:where(.switch input, .connection-toggle input)):indeterminate {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 12h12' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+input[type='checkbox']:not(:where(.switch input, .connection-toggle input)):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+input[type='checkbox']:not(:where(.switch input, .connection-toggle input)):disabled { opacity: .45; cursor: not-allowed; }
+.check-option { display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--card-2); cursor: pointer; }
+.check-option:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); background: color-mix(in srgb, var(--accent-soft) 40%, var(--card-2)); }
+.check-option input { --check-size: 26px; margin-top: 2px; }
+.check-option strong { display: block; font-size: var(--text-md); font-weight: 600; }
+.check-option small { display: block; margin-top: 4px; color: var(--text-dim); font-size: var(--text-xs); line-height: 1.6; }
+.check-option:has(input:disabled) { cursor: default; }
+@media (prefers-reduced-motion: reduce) { input[type='checkbox'] { transition: none; } }
+
 html,
 body,
 #app {

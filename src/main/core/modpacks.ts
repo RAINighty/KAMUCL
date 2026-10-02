@@ -857,6 +857,18 @@ function requestedGameFolder(input?: string): string {
 export async function probeModpack(filePath: string): Promise<ModpackInfo> {
   packLog.debug(`解析整合包元信息：${path.basename(filePath)}`)
   const zip = openPackZip(filePath)
+  return modpackInfo(zip, filePath)
+}
+
+/** A recognized pack must never fall through to its bundled worlds, even when malformed. */
+export async function probeRecognizedModpack(filePath: string): Promise<ModpackInfo | null> {
+  const zip = openPackZip(filePath)
+  const names = new Set(zip.getEntries().map(entry => normEntry(entry.entryName)))
+  if (!names.has('modrinth.index.json') && !names.has('manifest.json') && !detectFullpackEntry(zip)) return null
+  return modpackInfo(zip, filePath)
+}
+
+function modpackInfo(zip: AdmZip, filePath: string): ModpackInfo {
   const detected = detectPack(zip)
   const fileName = packFileName(filePath)
   if (detected.format === 'fullpack') {

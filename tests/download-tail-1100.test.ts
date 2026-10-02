@@ -45,9 +45,17 @@ test('小文件持续低速会续传到备用源，最后唯一来源仍可正�
 test('分片重试重新访问镜像入口，不被第一次跳转的慢节点锁住', { timeout: 6000 }, async () => {
   const body = crypto.randomBytes(2 * 1024 * 1024), saved = slowSpeedThresholds.largeWindowMs
   slowSpeedThresholds.largeWindowMs = 150
-  let redirects = 0; const starts: number[] = []
+  let redirects = 0, slowShardIssued = false; const starts: number[] = [], mirrorStarts: number[] = []
   const f = await fixture((req, res) => {
-    if (req.url === '/mirror') { res.writeHead(302, { location: ++redirects === 1 ? '/slow-node' : '/healthy-node' }); res.end(); return }
+    if (req.url === '/mirror') {
+      const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range!); assert(range)
+      const start = Number(range[1]); mirrorStarts.push(start); redirects++
+      // Parallel shards can reach the server in either order. Bind the stalled
+      // prefix to shard zero so the exact 8192-byte continuation is deterministic.
+      const slow = start === 0 && !slowShardIssued
+      if (slow) slowShardIssued = true
+      res.writeHead(302, { location: slow ? '/slow-node' : '/healthy-node' }); res.end(); return
+    }
     const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range!); assert(range)
     const start = Number(range[1]), end = Number(range[2]); starts.push(start)
     res.writeHead(206, { 'content-length': end - start + 1, 'content-range': `bytes ${start}-${end}/${body.length}` })
@@ -56,7 +64,9 @@ test('分片重试重新访问镜像入口，不被第一次跳转的慢节点�
   })
   try {
     await downloadFile(f.url + '/mirror', path.join(f.root, 'large'), undefined, hash(body), 'official', AbortSignal.timeout(3000), [], { size: body.length })
-    assert(redirects >= 3); assert(starts.includes(8192)); assert.equal(hash(fs.readFileSync(path.join(f.root, 'large'))), hash(body))
+    assert(redirects >= 3); assert(starts.includes(8192))
+    assert(mirrorStarts.includes(8192), 'the resumed shard must revisit the mirror entry rather than pinning its first redirect')
+    assert.equal(hash(fs.readFileSync(path.join(f.root, 'large'))), hash(body))
   } finally { slowSpeedThresholds.largeWindowMs = saved; await f.close() }
 })
 
