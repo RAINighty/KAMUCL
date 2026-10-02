@@ -18,6 +18,9 @@ if (arch === 'x64') {
 const child = spawn(path.join(app, 'Contents/MacOS/KAMUCL'), ['--remote-debugging-port=9230', '--inspect=9231'], { env, stdio: ['ignore', log, log] })
 const wait = ms => new Promise(r => setTimeout(r, ms))
 let ws, mainWs, evaluate, gamePid, gameFolder, debuggerProcess, events = []
+const captureObserver = require('./mac-game-capture-observer.cjs').createGameCaptureObserver({
+  proof, getGamePID: () => gamePid, launcherPID: child.pid
+})
 async function connectRenderer() {
   let page
   for (let i = 0; i < 60; i++) {
@@ -47,6 +50,7 @@ async function evaluateMain(expression){
   })
 }
 async function main() {
+  await captureObserver.start()
   await connectRenderer()
   const folder = await evaluate(`(async()=>{
     window.__gameTestEvents=[];
@@ -133,7 +137,7 @@ async function main() {
   await wait(10000)
   events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
   assert(!events.some(e => e.name === 'launchState' && ['error', 'exited'].includes(e.value.status)), 'game exited during initialization')
-  execFileSync('/usr/sbin/screencapture', ['-x', '-D', '1', path.join(proof, 'minecraft.png')])
+  await captureObserver.capture('minecraft.png', gamePid)
   // Observe the real new-window handshake and the main process's own state replay.
   // Connecting CDP (and its fixed initial settle delay) does not imply that async
   // account/instance/assets boot tasks have emitted boot:renderer-ready yet.
@@ -166,7 +170,7 @@ async function main() {
       return { gameAlive, main, renderer }
     }
   })
-  execFileSync('/usr/sbin/screencapture', ['-x', '-D', '1', path.join(proof, 'dock-reopen.png')])
+  await captureObserver.capture('dock-reopen.png', child.pid)
   assert(dockReopen.ready, 'Dock reopen forgot the live game: within 10 seconds require real current-window boot/state replay, live owned PID and visible 游戏运行中; original observations saved')
   await evaluate(`window.__gameTestEvents=[];for(const name of ['launchLog','launchState'])window.kamucl.on('event:'+name,value=>window.__gameTestEvents.push({name,value}));`)
   const helper=path.join(app,'Contents/Resources/app.asar.unpacked/out/main/MacGameWindow')
@@ -185,7 +189,7 @@ async function main() {
   }
   assert(worldStarted,'demo world did not start')
   await wait(10000) // Let the client finish its terrain transition before capturing it.
-  execFileSync('/usr/sbin/screencapture',['-x','-D','1',path.join(proof,'minecraft-world.png')])
+  await captureObserver.capture('minecraft-world.png', gamePid)
   execFileSync(helper,['close',String(gamePid),'6000'],{timeout:8000})
   let exited=false
   for(let i=0;i<90;i++){
@@ -206,6 +210,7 @@ async function main() {
   console.log('PASS actual Minecraft window', arch, version)
 }
 main().catch(e => { console.error(e); process.exitCode = 1 }).finally(async () => {
+  try {
   try { if (evaluate) events.push(...await evaluate('window.__gameTestEvents.splice(0)')) } catch {}
   fs.writeFileSync(path.join(proof, 'events.json'), JSON.stringify(events, null, 2))
   if (process.exitCode) {
@@ -238,4 +243,7 @@ main().catch(e => { console.error(e); process.exitCode = 1 }).finally(async () =
   // Collect independent animation/tools/update evidence even if gameplay failed;
   // any failure still fails this required workflow step.
   try{await require('./verify-mac-extra.cjs')(app,arch)}catch(e){console.error(e);process.exitCode=1}
+  } finally {
+    try { await captureObserver.stop() } catch (e) { console.error(e); process.exitCode = 1 }
+  }
 })

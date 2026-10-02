@@ -18,6 +18,8 @@ import * as Three from 'three'
 import {PreviewPlayer} from '../src/renderer/src/skinModel'
 import {prepareFeedbackImages} from '../src/renderer/src/mascotFeedback'
 import {MascotFrameDriver} from '../src/renderer/src/mascotFrameDriver'
+import {KamuPalmAnimation} from '../src/renderer/src/kamuPalmAnimation'
+import {animationElement} from './palm-animation-fixture'
 
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no});return{promise,resolve,reject}}
 let mascotSetupBundle:Promise<string>|undefined
@@ -53,6 +55,7 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
   if(name==='../mascotAudio')return{MascotAudio:AudioFixture}
   if(name==='../mascotFeedback')return{prepareFeedbackImages}
   if(name==='../mascotFrameDriver')return{MascotFrameDriver}
+  if(name==='../kamuPalmAnimation')return{KamuPalmAnimation}
   if(name==='../skinModel')return{PreviewPlayer:options.model?class extends PreviewPlayer{constructor(){super();counts.rigs++}}:class{constructor(){counts.rigs++}}}
   if(name==='../mascotBatch')return{createMascotAtlas:()=>{if(!options.model)throw Error('unexpected post-unmount atlas allocation');return new Texture()},MascotBatchRenderer}
   if(name==='../mascotSoftware')return{MascotSoftwareRenderer:class{domElement={remove:()=>counts.removed++};info={render:{calls:1},frames:0,totalUploads:0};constructor(){if(!options.model||softwareFails)throw Error('software unavailable');counts.software++}setSize(){}render(){counts.rasters++;this.info.frames++;this.info.totalUploads++}dispose(){counts.softwareDisposed++}}}
@@ -62,12 +65,12 @@ async function mascotLifecycleFixture(options:{model?:boolean;softwareFails?:boo
  const windowFixture={kamucl:{invoke:()=>state.promise,on:()=>()=>counts.unsubscribed++,send:()=>{}}}
  new Function('require','module','exports','window','Image','requestAnimationFrame','cancelAnimationFrame','performance','setTimeout','clearTimeout',await mascotSetupBundle)(requireFixture,mod,mod.exports,windowFixture,ImageFixture,(callback:any)=>{counts.frames++;frames.set(++nextFrame,callback);return nextFrame},(id:number)=>frames.delete(id),{now:()=>now},(callback:any,delay:number)=>{(delay===40?frameTimers:timers).set(++nextTimer,{callback,at:now+delay});return nextTimer},(id:number)=>{timers.delete(id);frameTimers.delete(id)})
  const scope=vue.effectScope(),setup=scope.run(()=>mod.exports.default.setup({focusOnReady:true},{expose:()=>{},emit:(...event:any[])=>events.push(event)}))
- const palmStyles=new Map<string,string>(),printStyles=new Map<string,string>()
- const feedbackImages=['palm','print'].map(name=>{const gate=deferred<void>();return{gate,src:'',decodeCalls:0,complete:true,naturalWidth:15,naturalHeight:15,style:{setProperty:(key:string,value:string)=>(name==='palm'?palmStyles:printStyles).set(key,value)},decode(){this.decodeCalls++;return options.feedbackDeferred?this.gate.promise:Promise.resolve()},addEventListener(){},removeEventListener(){},removeAttribute(){this.src=''}}})
+ const palmEffects=animationElement(()=>now),printEffects=animationElement(()=>now),palmStyles=palmEffects.styles,printStyles=printEffects.styles
+ const feedbackImages=['palm','print'].map(name=>{const gate=deferred<void>();return{...(name==='palm'?palmEffects:printEffects).element,gate,src:'',decodeCalls:0,complete:true,naturalWidth:15,naturalHeight:15,decode(){this.decodeCalls++;return options.feedbackDeferred?this.gate.promise:Promise.resolve()},addEventListener(){},removeEventListener(){},removeAttribute(){this.src=''}}})
  const feedback={dataset:{},style:{setProperty:()=>{}},querySelector:(selector:string)=>feedbackImages[selector==='.pixel-palm'?0:1]}
  setup.host.value={dataset:{},querySelector:()=>feedback};setup.viewport.value={prepend:()=>counts.attached++}
  setup.hit.value={focus:()=>counts.focus++}
- return{state,unlock,counts,images,feedbackImages,notices,setup,events,plays,palmStyles,printStyles,hidden,context,frames,timers,frameTimers,listeners,clock:()=>now,setSoftwareFailure:(value:boolean)=>softwareFails=value,mount:()=>mounted(),unmount:()=>{unmounted();setup.host.value=undefined;setup.viewport.value=undefined;scope.stop()},signal:(status=context.CONDITION_SATISFIED)=>fenceStatus=status,lose:()=>{lost=true;listeners.get('webglcontextlost')?.({preventDefault:()=>{}})},runFrame:(elapsed=16,rafTimestamp?:number)=>{now+=elapsed;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(rafTimestamp??now)},runWatchdog:(elapsed=40)=>{now+=elapsed;for(const[id,timer]of[...frameTimers])if(timer.at<=now){frameTimers.delete(id);timer.callback()}},expire:()=>{now+=3001;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback()}}}
+ return{state,unlock,counts,images,feedbackImages,notices,setup,events,plays,palmStyles,printStyles,hidden,context,frames,timers,frameTimers,listeners,clock:()=>now,advanceClock:(elapsed:number)=>now+=elapsed,setSoftwareFailure:(value:boolean)=>softwareFails=value,mount:()=>mounted(),unmount:()=>{unmounted();setup.host.value=undefined;setup.viewport.value=undefined;scope.stop()},signal:(status=context.CONDITION_SATISFIED)=>fenceStatus=status,lose:()=>{lost=true;listeners.get('webglcontextlost')?.({preventDefault:()=>{}})},runFrame:(elapsed=16,rafTimestamp?:number)=>{now+=elapsed;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(rafTimestamp??now)},runWatchdog:(elapsed=40)=>{now+=elapsed;for(const[id,timer]of[...frameTimers])if(timer.at<=now){frameTimers.delete(id);timer.callback()}},runDueWatchdog:()=>{const due=[...frameTimers.entries()].sort((a,b)=>a[1].at-b[1].at)[0];assert(due,'actual pending frame deadline required');now=due[1].at;frameTimers.delete(due[0]);due[1].callback();return now},expire:()=>{now+=3001;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback()}}}
 }
 test('real mascot setup cannot allocate after unmount overtakes state or audio initialization',async()=>{
  for(const gate of ['state','audio']){
@@ -238,14 +241,13 @@ test('visible contact, palm and sound use actual callback time despite delayed r
    assert.equal(Number(f.setup.host.value.dataset.renderNow),actual);assert.equal(Number(f.setup.host.value.dataset.rafTimestamp),timestamp,'keep host-supplied timing as an independent observation')
    assert.equal(f.plays.length-before,expected.contacts.length);assert(expected.contacts.length<=1)
    for(const contact of expected.contacts){lastContact=contact;contacts++;assert.equal(f.plays.at(-1),actual,'contact source starts on this same actual callback clock')}
-   const opacity=expected.palm>=0?1-Math.max(0,(expected.palm-.5)*2):0
-   assert(Math.abs(Number(f.palmStyles.get('opacity'))-opacity)<1e-10,'presented palm advances on actual contact clock')
-   const print=actual-lastContact<500?.72*(1-(actual-lastContact)/500):0
+   if(expected.contacts.length){assert.equal(expected.palm,.5);const animation=f.feedbackImages[0].getAnimations().at(-1)!;assert.equal(animation.frames[0].opacity,1,'actual contact starts at the canonical centre');assert.equal(animation.frames[0].transform,'translate(0px,0px) rotate(0deg)');assert.equal(animation.options.duration,75);assert.equal(animation.createdAt,actual,'native animation starts in the actual contact callback');assert.equal(Number(f.setup.host.value.dataset.contactAt),actual)}
+   const print=f.clock()-lastContact<500?.72*(1-(f.clock()-lastContact)/500):0
    assert(Math.abs(Number(f.printStyles.get('opacity'))-print)<1e-10)
    assert.equal(Number(f.setup.host.value.dataset.contacts),contacts)
   }
   assert.equal(shadow.busy,false);assert.equal(f.plays.length,10);assert.equal(f.setup.state.value.counts.kamu,10)
-  const intervals=f.plays.slice(1).map((at,index)=>at-f.plays[index]);assert(intervals.every(interval=>interval>=100),'visible 50ms frame budget preserves at least 100ms between actual contacts: '+intervals.join(','))
+  const intervals=f.plays.slice(1).map((at,index)=>at-f.plays[index]);assert(intervals.every(interval=>interval>=150),'canonical visible contact preserves 75ms retreat plus the next approach: '+intervals.join(','))
  }finally{f.unmount()}
 })
 
@@ -253,9 +255,43 @@ test('hidden close still drains all accepted contacts unbounded without hidden s
  const f=await mountedMascotModel()
  try{
   f.signal();f.runFrame();for(let i=0;i<10;i++)f.setup.slap()
-  f.hidden.value=true;const draws=f.counts.draw;await f.setup.flush()
+  f.hidden.value=true;const draws=f.counts.draw,animations=f.feedbackImages.map(image=>image.getAnimations().length);await f.setup.flush()
   assert.equal(f.setup.state.value.counts.kamu,10);assert.equal(f.plays.length,0);assert.equal(f.counts.draw,draws);assert.equal(f.frames.size,0);assert.equal(f.frameTimers.size,0);assert.equal(f.setup.busy.value,false)
+  assert.deepEqual(f.feedbackImages.map(image=>image.getAnimations().length),animations,'Infinity hidden drain never creates a compositor palm or print')
  }finally{f.unmount()}
+})
+
+test('actual Stage pauses compositor effects while hidden, resumes their held times, and releases them on unmount',async()=>{
+ const f=await mountedMascotModel()
+ try{
+  f.signal();f.runFrame();f.runFrame(400);for(let i=0;i<2;i++)f.setup.slap()
+  while(!f.plays.length)f.runFrame(33)
+  const palm=f.feedbackImages[0].getAnimations().at(-1)!,print=f.feedbackImages[1].getAnimations().at(-1)!
+  f.hidden.value=true;const held=[palm.currentTime,print.currentTime],before=[f.plays.length,f.setup.state.value.counts.kamu,f.setup.interaction.queued]
+  assert.equal(palm.playState,'paused');assert.equal(print.playState,'paused');assert.equal(f.frames.size,0);assert.equal(f.frameTimers.size,0)
+  f.advanceClock(10000);assert.deepEqual([palm.currentTime,print.currentTime],held);assert.deepEqual([f.plays.length,f.setup.state.value.counts.kamu,f.setup.interaction.queued],before)
+  f.hidden.value=false;assert.equal(palm.playState,'running');assert.equal(print.playState,'running');assert.deepEqual([palm.currentTime,print.currentTime],held)
+  f.advanceClock(25);assert.deepEqual([palm.currentTime,print.currentTime],held.map(time=>Number(time)+25),'actual animation resumes without a JS render callback')
+ }finally{f.unmount()}
+ assert(f.feedbackImages.every(image=>image.getAnimations().length===0));assert.equal(f.frames.size,0);assert.equal(f.frameTimers.size,0)
+})
+
+test('context loss and failed model recovery keep both timeline and compositor paused until a real first raster',async()=>{
+ const f=await mountedMascotModel({softwareFails:true})
+ try{
+  f.signal();f.runFrame();f.runFrame(400);for(let i=0;i<2;i++)f.setup.slap()
+  while(!f.plays.length)f.runFrame(33)
+  const palm=f.feedbackImages[0].getAnimations().at(-1)!,print=f.feedbackImages[1].getAnimations().at(-1)!
+  f.lose();assert.equal(f.setup.ready.value,false);assert.equal(f.setup.supported.value,false);assert.equal(palm.playState,'paused');assert.equal(print.playState,'paused')
+  const held=[palm.currentTime,print.currentTime],before=[f.plays.length,f.setup.state.value.counts.kamu,f.setup.interaction.queued]
+  f.hidden.value=true;f.advanceClock(10000);f.hidden.value=false;f.runFrame(1000)
+  assert.equal(f.setup.ready.value,false);assert.deepEqual([palm.currentTime,print.currentTime],held,'visible alone is not model readiness');assert.deepEqual([f.plays.length,f.setup.state.value.counts.kamu,f.setup.interaction.queued],before)
+  f.setSoftwareFailure(false);f.setup.retryPreview();assert.equal(f.setup.ready.value,false);assert.equal(palm.playState,'paused')
+  f.runFrame(1000);assert.equal(f.counts.rasters,1);assert.equal(f.setup.ready.value,true);assert.equal(palm.playState,'running');assert.equal(print.playState,'running')
+  assert.deepEqual([palm.currentTime,print.currentTime],held);assert.deepEqual([f.plays.length,f.setup.state.value.counts.kamu,f.setup.interaction.queued],before)
+  f.runFrame(25);assert.equal(f.plays.length,1,'model recovery does not replay the existing contact or consume the next one early')
+ }finally{f.unmount()}
+ assert(f.feedbackImages.every(image=>image.getAnimations().length===0));assert.equal(f.counts.softwareDisposed,1)
 })
 
 test('compiled mascot watchdog renders actual queued palms on host rAF starvation and stops at rest or hiding',async()=>{
@@ -266,7 +302,10 @@ test('compiled mascot watchdog renders actual queued palms on host rAF starvatio
   for(let i=0;i<10;i++)f.setup.slap()
   const observed=new Set<number>()
   for(let i=0;i<100&&f.frameTimers.size;i++){
-   f.runWatchdog();assert.equal(f.setup.host.value.dataset.frameCallbackKind,'watchdog');assert.equal(Number(f.setup.host.value.dataset.framePendingAge)>=40,true)
+   const requestedAt=f.clock(),deadline=[...f.frameTimers.values()][0].at
+   assert.equal(deadline,requestedAt+40,'native timer is requested at exactly the unchanged 40ms deadline')
+   if(i%2)f.runWatchdog(41);else f.runDueWatchdog()
+   assert.equal(f.setup.host.value.dataset.frameCallbackKind,'watchdog');assert.equal(Number(f.setup.host.value.dataset.renderNow),i%2?requestedAt+41:deadline)
    assert.equal(f.setup.host.value.dataset.rafTimestamp,'NaN','a real timer callback is not advertised as a received native rAF')
    if(f.setup.host.value.dataset.phase==='slap'&&Number(f.palmStyles.get('opacity'))>0)observed.add(Number(f.setup.host.value.dataset.contacts))
   }

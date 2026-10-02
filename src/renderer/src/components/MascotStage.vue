@@ -12,6 +12,7 @@ import {createMascotAtlas,MascotBatchRenderer} from '../mascotBatch'
 import {MascotSoftwareRenderer} from '../mascotSoftware'
 import {prepareFeedbackImages} from '../mascotFeedback'
 import {MascotFrameDriver,type MascotFrame} from '../mascotFrameDriver'
+import {KamuPalmAnimation} from '../kamuPalmAnimation'
 import skinUrl from '../assets/mascot-skins/kamu.png'
 import palmUrl from '../assets/mascot-feedback/pixel-palm.png'
 import printUrl from '../assets/mascot-feedback/palm-print.png'
@@ -24,6 +25,7 @@ const audio=new MascotAudio(()=>sound.value,(played,voices)=>{if(host.value){hos
 let gl:WebGLRenderer|undefined,software:MascotSoftwareRenderer|undefined,batchRenderer:MascotBatchRenderer|undefined,scene:Scene,camera:OrthographicCamera,player:PreviewPlayer|undefined,waist:Group,pelvis:Object3D
 const textures:Texture[]=[],feet:Array<{mesh:Mesh;corners:Vector3[]}>=[],parts:Mesh[]=[],point=new Vector3(),projected=new Vector3()
 let feedbackElement:HTMLElement|undefined,palmElement:HTMLImageElement|undefined,printElement:HTMLImageElement|undefined
+let palmAnimation:KamuPalmAnimation|undefined
 let feedbackReady=false,feedbackPending=false,initialStateReady=false,restartFeedback=false,cancelFeedback:undefined|(()=>void)
 let previousPose:number[]|undefined
 const writtenStyles=new WeakMap<Element,Map<string,string>>(),writtenData=new Map<string,string>()
@@ -37,13 +39,13 @@ let contextCanvas:HTMLCanvasElement|undefined
 function cancelGpuReady(){cancelAnimationFrame(gpuFrame);gpuFrame=0;clearTimeout(gpuDeadline);gpuDeadline=undefined;if(gpuFence){gpuContext?.deleteSync(gpuFence);gpuFence=undefined}gpuContext=undefined}
 function publishReady(now:number){
  if(disposed||hidden.value||!feedbackReady||!player||!host.value||ready.value)return
- ready.value=true;activated=now;interaction.resume(now);host.value.dataset.readyAt=String(now);emit('ready')
+ ready.value=true;activated=now;interaction.resume(now);palmAnimation?.resume();host.value.dataset.readyAt=String(now);emit('ready')
  if(props.focusOnReady)void nextTick(()=>{if(!disposed&&!hidden.value&&ready.value)hit.value?.focus()})
  wake()
 }
 function releaseGl(){if(contextCanvas){contextCanvas.removeEventListener('webglcontextlost',contextLost);contextCanvas=undefined}gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove();gl=undefined}
 function useSoftware(reason:string){
- cancelGpuReady();ready.value=false;interaction.pause(performance.now());data('gpuReadyFallback',reason);data('gpuReadyStatus','software-pending');releaseGl()
+ cancelGpuReady();ready.value=false;interaction.pause(performance.now());palmAnimation?.pause();data('gpuReadyFallback',reason);data('gpuReadyStatus','software-pending');releaseGl()
  try{software??=new MascotSoftwareRenderer();software.setSize(48,72,1);if(disposed||!viewport.value){software.dispose();software=undefined;return}viewport.value.prepend(software.domElement);data('renderBackend','canvas2d-depth');emit('render-mode',true);supported.value=true;previousPose=undefined;wake()}
  catch(error){supported.value=false;data('gpuReadyStatus','failed');persistError.value='像素预览无法加载：'+errText(error)}
 }
@@ -101,6 +103,7 @@ function render(delivery:MascotFrame){
  // Host delivery may lag behind the rAF timestamp and recover on the next frame.
  // Phase, contact playback and feedback use the same actual callback clock.
  const started=now,pose=interaction.advance(now,reduced.value,50);recordContacts(pose.contacts,now);busy.value=interaction.busy
+ if(ready.value)palmAnimation?.present({cycleId:pose.cycleId,palm:pose.palm,contactAt:pose.contacts.length?now:undefined,reduced:reduced.value})
  const activation=ready.value?Math.min(1,(now-activated)/(reduced.value?100:380)):0,ease=activation*activation*(3-2*activation)
  const idle=ready.value&&decorativeActive.value?Math.sin(now*.002)*.016:0,pop=Math.max(0,1-(now-lastContact)/210)*Math.sin(Math.min(1,Math.max(0,(now-lastContact)/210))*Math.PI)
  const waistAngle=Math.sin(pose.yaw/2)*.28+pop*.12,headAngle=-waistAngle+idle,armAngle=-.04+pop*.15,scale=.75+ease*.25
@@ -124,9 +127,8 @@ function render(delivery:MascotFrame){
  // The palm's own transform remains relative to this projected pelvis position.
  style(feedbackElement,'translate',`${(projected.x+1)*24}px ${(1-projected.y)*36}px`)
  if(feedbackElement&&feedbackElement.dataset.contacts!==String(contactsTotal))feedbackElement.dataset.contacts=String(contactsTotal)
- const t=pose.palm,approach=Math.min(1,Math.max(0,t*2)),retreat=Math.max(0,(t-.5)*2)
- style(palmElement,'opacity',t>=0&&!reduced.value?String(1-retreat):'0');style(palmElement,'transform',`translate(${(1-approach)*12+retreat*4}px,${-(1-approach)*12-retreat*4}px) rotate(${(1-approach)*-35+retreat*15}deg)`)
- style(printElement,'opacity',now-lastContact<500?String(.72*(1-(now-lastContact)/500)):'0')
+ data('cycleId',String(pose.cycleId));if(pose.contacts.length)data('contactAt',String(now))
+ const feedback=palmAnimation?.snapshot();if(feedback){data('palmAnimationCurrentTime',String(feedback.palmCurrentTime));data('printAnimationCurrentTime',String(feedback.printCurrentTime));data('palmAnimationPlayState',feedback.palmPlayState);data('printAnimationPlayState',feedback.printPlayState)}
  data('phase',interaction.phase);data('queue',String(interaction.queued));data('contacts',String(contactsTotal));data('bodyYaw',String(pose.yaw));data('activation',String(activation));data('renderDrawCalls',String(modelChanged?(software?.info.render.calls??gl?.info.render.calls??0):0));data('rasterFrames',String(software?.info.frames??0));data('canvasUploads',String(software?.info.totalUploads??0))
  data('rafTimestamp',delivery.kind==='raf'?String(delivery.rafTimestamp):'NaN');data('renderNow',String(now))
  data('frameCallbackKind',delivery.kind);data('frameFallbacks',String(delivery.fallbacks));data('frameCallbackGap',String(delivery.gap));data('framePendingAge',String(delivery.pendingAge))
@@ -153,6 +155,7 @@ async function prepareScene(){
    if(disposed||hidden.value)return
    feedbackReady=true;data('feedbackPreparation','decoded');supported.value=true
   }
+  palmAnimation??=new KamuPalmAnimation(palmElement,printElement,event=>{data(event.role==='palm'?'palmAnimationPhase':'printAnimationPhase',event.phase);data(event.role==='palm'?'palmAnimationAt':'printAnimationAt',String(event.at))},()=>performance.now())
   if(!player)await buildScene();else wake()
  }catch(error){if(!disposed&&!hidden.value){supported.value=false;data('feedbackPreparation','failed');persistError.value='互动反馈无法加载：'+errText(error)}}
  finally{cancelFeedback=undefined;feedbackPending=false;const restart=restartFeedback;restartFeedback=false;if(restart&&!disposed&&!hidden.value&&!feedbackReady)void prepareScene()}
@@ -187,10 +190,10 @@ async function buildScene(){
   activated=performance.now();wake()
  }catch(error){if(!disposed){supported.value=false;persistError.value='像素预览无法加载：'+errText(error)}}
 }
-watch(hidden,value=>{if(value){interaction.pause(performance.now());frameDriver.cancel();cancelGpuReady();cancelFeedback?.();audio.pause();void save().catch(()=>{})}else{interaction.resume(performance.now());if(!ready.value)previousPose=undefined;void audio.unlock();if(!feedbackReady)void prepareScene();else wake()}},{flush:'sync'})
+watch(hidden,value=>{if(value){interaction.pause(performance.now());palmAnimation?.pause();frameDriver.cancel();cancelGpuReady();cancelFeedback?.();audio.pause();void save().catch(()=>{})}else{if(ready.value){interaction.resume(performance.now());palmAnimation?.resume()}else previousPose=undefined;void audio.unlock();if(!feedbackReady)void prepareScene();else wake()}},{flush:'sync'})
 watch(decorativeActive,wake);watch(reduced,wake)
 onMounted(async()=>{try{const initial=await window.kamucl.invoke('mascots:state') as MascotState;if(disposed)return;state.value=initial;await audio.unlock();if(disposed)return;initialStateReady=true;await prepareScene()}catch(error){if(!disposed){persistError.value=errText(error);toast(errText(error),'error')}}})
-onUnmounted(()=>{disposed=true;frameDriver.dispose();cancelFeedback?.();palmElement?.removeAttribute('src');printElement?.removeAttribute('src');cancelImage?.();cancelGpuReady();unsubscribe();clearTimeout(saveTimer);clearTimeout(retryTimer);batchRenderer?.dispose();player?.dispose();for(const texture of textures)texture.dispose();releaseGl();software?.dispose();software?.domElement.remove();void audio.dispose()})
+onUnmounted(()=>{disposed=true;frameDriver.dispose();palmAnimation?.dispose();cancelFeedback?.();palmElement?.removeAttribute('src');printElement?.removeAttribute('src');cancelImage?.();cancelGpuReady();unsubscribe();clearTimeout(saveTimer);clearTimeout(retryTimer);batchRenderer?.dispose();player?.dispose();for(const texture of textures)texture.dispose();releaseGl();software?.dispose();software?.domElement.remove();void audio.dispose()})
 defineExpose({flush,closeStage})
 </script>
 <template>
