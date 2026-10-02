@@ -8,7 +8,7 @@ import {build} from 'esbuild'
 import sharp from 'sharp'
 import {MASCOTS,MascotSweepGate,addMascotHits,mascotHull,mascotShapeContains,mascotWalkFrame,normalizeMascotSound,type MascotHitRect} from '../src/shared/mascots'
 import {MascotAudio,slapSamples} from '../src/renderer/src/mascotAudio'
-import {BoxGeometry,FrontSide,Matrix3,Mesh,MeshStandardMaterial,Texture,Vector3} from 'three'
+import {BoxGeometry,FrontSide,Matrix3,Mesh,MeshLambertMaterial,MeshStandardMaterial,Texture,Vector3} from 'three'
 import {MascotBatchRenderer,mascotAtlasUV} from '../src/renderer/src/mascotBatch'
 
 test('mascot batch preserves all 42 animated meshes, world positions, inverse-transpose normals and skin UVs',()=>{
@@ -17,6 +17,11 @@ test('mascot batch preserves all 42 animated meshes, world positions, inverse-tr
   const mesh=new Mesh(new BoxGeometry(8,12,4),material);mesh.position.set(skinIndex*24,part*3,-part);mesh.rotation.set(part*.14,skinIndex*.2,part*.03);mesh.scale.set(1.42,.68,1.1);mesh.updateMatrixWorld(true);return mesh
  }))
  const batch=new MascotBatchRenderer(skins,atlas);batch.update()
+ assert(batch.mesh.material instanceof MeshStandardMaterial,'hardware uses the original material')
+ const softwareBatch=new MascotBatchRenderer(skins,atlas,true);softwareBatch.update()
+ assert(softwareBatch.mesh.material instanceof MeshLambertMaterial);assert.equal(softwareBatch.mesh.material.map,atlas);assert.equal(softwareBatch.mesh.material.side,material.side)
+ for(const key of ['position','normal','uv'])assert.deepEqual(softwareBatch.mesh.geometry.getAttribute(key).array,batch.mesh.geometry.getAttribute(key).array,'software retains '+key)
+ assert.deepEqual(softwareBatch.mesh.geometry.getIndex()!.array,batch.mesh.geometry.getIndex()!.array);assert.equal(material.map,original);softwareBatch.dispose()
  const geometry=batch.mesh.geometry,positions=geometry.getAttribute('position'),normals=geometry.getAttribute('normal'),uvs=geometry.getAttribute('uv'),index=geometry.getIndex()!
  assert.equal(positions.count,1008);assert.equal(index.count,1512);assert.equal(geometry.groups.length,0,'one indexed material draw, not 42 groups');assert.equal(batch.mesh.material.map,atlas);assert.equal(batch.mesh.material.roughness,material.roughness);assert.equal(batch.mesh.material.metalness,material.metalness);assert.equal(batch.mesh.material.side,material.side);assert.equal(material.map,original);assert.notEqual(batch.mesh.material,material)
  for(const sample of [0,1]){

@@ -20,7 +20,7 @@ type Part={name:string;mesh:Mesh;corners:Vector3[]}
 type Rig={waist:Group;pelvis:Object3D;parts:Part[];feet:Part[];phase:number;dom:{button:HTMLElement|null;label:HTMLElement|null;feedback:HTMLElement|null;palms:HTMLElement[];prints:HTMLElement[]}}
 const rigs=new Map<string,Rig>(),walks=new Map<string,{from:number;to:number;start:number;duration:number;phase:number}>(),palms=new Map<string,Array<{start:number;contact:number}>>()
 const APPROACH_MS=80,PALM_MS=150,PRINT_MS=500
-let gl:WebGLRenderer|undefined,scene:Scene,camera:OrthographicCamera,resize:ResizeObserver|undefined,frame=0,lastFrame=0,closed=false,slot=20,height=60,width=400,scale=1,hiddenAt=0
+let gl:WebGLRenderer|undefined,scene:Scene,camera:OrthographicCamera,resize:ResizeObserver|undefined,frame=0,closed=false,slot=20,height=60,width=400,scale=1,hiddenAt=0,softwareRenderer=false
 let batchRenderer:MascotBatchRenderer|undefined
 const parentRotation=new Quaternion(),faceRotation=new Quaternion(),faceEuler=new Euler(),scratch=new Vector3()
 let rectangles:MascotHitRect[]=[],displayOrder=MASCOTS.map(m=>m.id) as string[]
@@ -97,8 +97,8 @@ function render(now:number){
  frame=0;if(closed||hidden.value||!gl)return
  const renderStarted=performance.now()
  const reacting=[...palms.values()].some(queue=>queue.some(palm=>now-palm.contact<PRINT_MS)),walking=!reduced.value&&[...walks.values()].some(walk=>now-walk.start<walk.duration)
- if(decorativeActive.value&&!reacting&&!walking&&now-lastFrame<32){frame=requestAnimationFrame(render);return}
- lastFrame=now
+ // Follow the compositor cadence: a fixed 32ms cutoff loses legitimate ticks
+ // on approximately 30Hz displays. Hidden/reduced rest still stops scheduling.
  const worldWidth=slot*7,rects:MascotHitRect[]=[],modelBounds:Array<{id:string;top:number;bottom:number;left:number;right:number}>=[],poses:unknown[]=[]
  const project=(p:Vector3)=>{p.project(camera);return{x:(p.x+1)*width/2,y:(1-p.y)*height/2,z:p.z}}
  for(const [id,player] of players){
@@ -146,7 +146,7 @@ async function buildScene(){
   gl=new WebGLRenderer({alpha:true,antialias:false,powerPreference:'low-power'});gl.setPixelRatio(Math.min(devicePixelRatio||1,2));gl.setClearColor(0,0);strip.value!.prepend(gl.domElement)
   // Software GL shares CPU time with backdrop rasterization. Preserve theme
   // colors, while temporarily yielding decorative frost to this interaction.
-  try{const context=gl.getContext(),debug=context.getExtension('WEBGL_debug_renderer_info'),renderer=String(context.getParameter(debug?.UNMASKED_RENDERER_WEBGL??context.RENDERER));emit('softwareRenderer',/swiftshader|llvmpipe|lavapipe|softpipe|software/i.test(renderer))}catch{emit('softwareRenderer',false)}
+  try{const context=gl.getContext(),debug=context.getExtension('WEBGL_debug_renderer_info'),renderer=String(context.getParameter(debug?.UNMASKED_RENDERER_WEBGL??context.RENDERER));softwareRenderer=/swiftshader|llvmpipe|lavapipe|softpipe|software/i.test(renderer)}catch{softwareRenderer=false}emit('softwareRenderer',softwareRenderer)
   scene=new Scene();camera=new OrthographicCamera(-100,100,34,0,.1,300);camera.position.set(0,0,100);camera.lookAt(0,0,0)
   scene.add(new AmbientLight(0xffffff,2.1));const light=new DirectionalLight(0xffffff,1.2);light.position.set(-40,80,70);scene.add(light)
   await Promise.all(MASCOTS.map(async mascot=>{
@@ -169,7 +169,7 @@ async function buildScene(){
   }))
   if(closed)return
   const atlas=createMascotAtlas(MASCOTS.map(m=>players.get(m.id)!.skin.map!.image as HTMLImageElement));textures.push(atlas)
-  batchRenderer=new MascotBatchRenderer(MASCOTS.map(m=>rigs.get(m.id)!.parts.map(part=>part.mesh)),atlas);scene.add(batchRenderer.mesh)
+  batchRenderer=new MascotBatchRenderer(MASCOTS.map(m=>rigs.get(m.id)!.parts.map(part=>part.mesh)),atlas,softwareRenderer);scene.add(batchRenderer.mesh);host.value!.dataset.material=batchRenderer.mesh.material.type
   resize=new ResizeObserver(fit);resize.observe(strip.value!);fit();ready.value=true;wake()
  }catch{supported.value=false;ready.value=true;gl?.dispose();gl=undefined}
 }

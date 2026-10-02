@@ -70,14 +70,17 @@ test('TURN tolerates lost-bind ROLE_CONFLICT and UDP blackhole switches to frame
   const tcp = net.createServer(), sockets = new Set<net.Socket>()
   let udp = dgram.createSocket('udp4'), port = 0
   t.after(() => { for (const socket of sockets) socket.destroy(); if (tcp.listening) tcp.close(); try { udp.close() } catch {} })
-  // TCP's ephemeral allocator does not reserve the same UDP port on Windows.
-  // Bind UDP first and retry only OS port collisions; register cleanup before either bind.
+  // TCP and UDP have separate Windows exclusions. Allocate TCP first, then
+  // reserve its UDP counterpart; either bind may fail and must be retried.
   for (let attempt = 0; ; attempt++) {
-    udp.bind(0, '127.0.0.1'); await once(udp, 'listening'); port = udp.address().port
-    try { tcp.listen(port, '127.0.0.1'); await once(tcp, 'listening'); break }
+    try {
+      tcp.listen(0, '127.0.0.1'); await once(tcp, 'listening'); port = (tcp.address() as net.AddressInfo).port
+      udp.bind(port, '127.0.0.1'); await once(udp, 'listening'); break
+    }
     catch (error) {
       if (attempt >= 9 || !['EADDRINUSE', 'EACCES'].includes((error as NodeJS.ErrnoException).code || '')) throw error
-      udp.close(); udp = dgram.createSocket('udp4')
+      if (tcp.listening) await new Promise<void>(resolve => tcp.close(() => resolve()))
+      try { udp.close() } catch {} ; udp = dgram.createSocket('udp4')
     }
   }
   let udpBinds = 0, tcpBinds = 0
