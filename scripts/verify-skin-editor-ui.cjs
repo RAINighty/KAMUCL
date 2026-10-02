@@ -3,25 +3,26 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
   const theme=process.env.KAMUCL_TEST_THEME||'black-orange', proof={version,theme,complete:false,layouts:[],occlusions:[],nativeBusy:false,queuedCancellation:false,uploadBusy:false},output=path.join(root,'skin-editor-118.png')
   const persist=()=>fs.writeFileSync('out/skin-editor-ui-'+theme+'.json',JSON.stringify({...proof,recordedAt:new Date().toISOString()},null,2))
-  const until=async(label,expression,onWaiting)=>{let state;for(let i=0;i<80;i++){state=await evaluate(expression);if(state&&((typeof state==='object'&&'ready'in state)?state.ready:true))return state;if(onWaiting)await onWaiting(state);await wait(80)}proof.failure={label,state};persist();console.error('Skin readiness diagnostics',JSON.stringify(proof.failure));await screenshot('skin-failure-'+label.replace(/[^a-z0-9]/gi,'-').slice(0,75));throw Error(label+' was not ready: '+JSON.stringify(state))}
+  const until=async(label,expression,onWaiting,maxAttempts=80)=>{let state;for(let i=0;i<maxAttempts;i++){state=await evaluate(expression);if(state&&((typeof state==='object'&&'ready'in state)?state.ready:true))return state;if(onWaiting)await onWaiting(state);await wait(80)}proof.failure={label,state};persist();console.error('Skin readiness diagnostics',JSON.stringify(proof.failure));await screenshot('skin-failure-'+label.replace(/[^a-z0-9]/gi,'-').slice(0,75));throw Error(label+' was not ready: '+JSON.stringify(state))}
   const key=async(value,modifiers=0)=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:value,code:value==='Escape'?'Escape':value==='Tab'?'Tab':value,modifiers,windowsVirtualKeyCode:value==='Escape'?27:value==='Tab'?9:undefined});await wait(80)}
   const clickText=async(scope,text)=>{
     const selector=await evaluate(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)});if(!e)throw Error('Missing skin button: '+${JSON.stringify(text)});e.dataset.skinCoordinate='target';return '[data-skin-coordinate="target"]'})()`)
     await coordinateClick(selector);await evaluate(`document.querySelector('[data-skin-coordinate="target"]')?.removeAttribute('data-skin-coordinate')`)
   }
   const coordinateClick=async selector=>{
-    await until('visible click '+selector,`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return{ready:false,exists:false,innerWidth,innerHeight};if(!e.closest('[inert]'))e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y),signature=JSON.stringify([r.left,r.top,r.right,r.bottom,innerWidth,innerHeight]),stable=window.__skin118ClickSignature===signature;window.__skin118ClickSignature=signature;const toast=hit?.closest('.toast'),close=toast?.querySelector('.toast-close'),c=close?.getBoundingClientRect();return{ready:stable&&!e.disabled&&!e.closest('[inert]')&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&e.contains(hit),exists:true,disabled:!!e.disabled,inert:!!e.closest('[inert]'),rect:{left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height},innerWidth,innerHeight,viewport:{width:visualViewport?.width,height:visualViewport?.height,scale:visualViewport?.scale},hit:hit?{tag:hit.tagName,classes:hit.className,aria:hit.getAttribute('aria-label'),text:hit.textContent?.trim().slice(0,120)}:null,toast:toast?.textContent?.trim(),dismiss:close&&c&&!close.disabled&&c.left>=0&&c.top>=0&&c.right<=innerWidth&&c.bottom<=innerHeight&&close.contains(document.elementFromPoint(c.left+c.width/2,c.top+c.height/2))?{x:c.left+c.width/2,y:c.top+c.height/2}:null}})()`,async state=>{
-      // Dismiss an actually covering notification through its real visible close button.
-      if(!state?.dismiss)return
-      proof.occlusions.push({selector,...state});persist();await screenshot('skin-notification-occlusion-'+proof.occlusions.length)
-      // A notification can expire while capturing its evidence. Its former
-      // close coordinates may now belong to the editor entry underneath.
-      const fresh=await evaluate(`(()=>{const toast=[...document.querySelectorAll('.toast')].find(e=>e.textContent.trim()===${JSON.stringify(state.toast)}),close=toast?.querySelector('.toast-close'),r=close?.getBoundingClientRect();return close&&r&&!close.disabled&&r.width>0&&r.height>0&&close.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))?{x:r.left+r.width/2,y:r.top+r.height/2}:null})()`)
-      proof.occlusions.at(-1).freshDismiss=fresh;persist()
-      if(!fresh)return
-      for(const [type,buttons]of [['mouseMoved',0],['mousePressed',1],['mouseReleased',0]])await call('Input.dispatchMouseEvent',{type,...fresh,button:type==='mouseMoved'?'none':'left',buttons,clickCount:type==='mouseMoved'?0:1})
-      await wait(250)
-    })
+    const pendingToasts=new Map()
+    await until('visible click '+selector,`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return{ready:false,exists:false,innerWidth,innerHeight};if(!e.closest('[inert]'))e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y),signature=JSON.stringify([r.left,r.top,r.right,r.bottom,innerWidth,innerHeight,e.contains(hit)]),stable=window.__skin118ClickSignature===signature;window.__skin118ClickSignature=signature;const toast=hit?.closest('.toast'),close=toast?.querySelector('.toast-close'),c=close?.getBoundingClientRect();return{ready:stable&&!e.disabled&&!e.closest('[inert]')&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&e.contains(hit),exists:true,disabled:!!e.disabled,inert:!!e.closest('[inert]'),rect:{left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height},innerWidth,innerHeight,viewport:{width:visualViewport?.width,height:visualViewport?.height,scale:visualViewport?.scale},hit:hit?{tag:hit.tagName,classes:hit.className,aria:hit.getAttribute('aria-label'),text:hit.textContent?.trim().slice(0,120)}:null,toast:toast?.textContent?.trim(),dismiss:close&&c&&!close.disabled&&c.left>=0&&c.top>=0&&c.right<=innerWidth&&c.bottom<=innerHeight&&close.contains(document.elementFromPoint(c.left+c.width/2,c.top+c.height/2))?{x:c.left+c.width/2,y:c.top+c.height/2}:null}})()`,async state=>{
+      // Success/error notifications expire naturally after 3/8 seconds. Never
+      // click a timed toast: even a fresh hit-test can race its removal before
+      // the separate CDP press, accidentally opening the underlying editor.
+      if(!state?.toast||pendingToasts.has(state.toast))return
+      const record={selector,...state,handling:'wait for natural notification expiry; no close click',startedAt:Date.now()}
+      pendingToasts.set(state.toast,record);proof.occlusions.push(record);persist()
+      await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:4,y:state.innerHeight-4,button:'none',buttons:0})
+      await screenshot('skin-notification-occlusion-'+proof.occlusions.length)
+    },150)
+    for(const record of pendingToasts.values()){record.resolvedAt=Date.now();record.waitedMs=record.resolvedAt-record.startedAt}
+    if(pendingToasts.size)persist()
     const p=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`)
     for(const [type,buttons]of [['mouseMoved',0],['mousePressed',1],['mouseReleased',0]])await call('Input.dispatchMouseEvent',{type,...p,button:type==='mouseMoved'?'none':'left',buttons,clickCount:type==='mouseMoved'?0:1})
     await wait(90)
