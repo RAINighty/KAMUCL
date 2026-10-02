@@ -52,7 +52,9 @@ export function downloadCandidates(urls: string[], mirror: MirrorPref): string[]
 export type HttpFailureKind = 'unavailable' | 'transient' | 'fatal'
 export function classifyHttpStatus(status: number): HttpFailureKind {
   if ([404,410].includes(status)) return 'unavailable'
-  return [408,425,429].includes(status) || (status >= 500 && status < 600 && ![501,505].includes(status)) ? 'transient' : 'fatal'
+  // Downloads never send conditional validators. A bodyless 304 cannot satisfy
+  // the file contract; retry it within the existing budget, then fail normally.
+  return [304,408,425,429].includes(status) || (status >= 500 && status < 600 && ![501,505].includes(status)) ? 'transient' : 'fatal'
 }
 export class DownloadHttpError extends Error {
   constructor(readonly status: number, readonly url: string) { super(`HTTP ${status}: ${url}`); this.name = 'DownloadHttpError' }
