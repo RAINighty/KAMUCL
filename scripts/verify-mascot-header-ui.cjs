@@ -131,6 +131,9 @@ module.exports=async function verifyMascotHeader(h){
  fs.writeFileSync('out/mascot-header-overlap-live.json',JSON.stringify(proof.walkingOverlap,null,2))
  assert(atomic.candidate,'a real walking pass must expose a farther silhouette edge')
  const expectedOverlap={...atomic.before};for(const step of atomic.events){if(step.label==='first')expectedOverlap[atomic.candidate.near]++;if(step.label==='visibleEdge'||step.label==='reentry')expectedOverlap[atomic.candidate.far]++;assert.equal(step.isTrusted,false);assert.deepEqual(step.counts,expectedOverlap,'walking overlap '+step.label+' has exact visible-person counts')}
+ // The controlled same-frame probe also advanced the actual product gate.
+ // Keep its last trajectory point instead of bridging from a stale CDP point.
+ pointerPoint={...atomic.events.at(-1).point}
  await awaitCounts('covered walking person becomes hittable at its exposed edge and on reentry',expectedOverlap)
  // Attempt trusted CDP input as well. Both endpoints must remain valid in the
  // post-input live frame; a moving edge that invalidates a coordinate is recorded
@@ -153,8 +156,29 @@ module.exports=async function verifyMascotHeader(h){
  let overlapSettled;for(let i=0;i<50;i++){overlapSettled=await feedbackSnapshot();if(!overlapSettled.poses.some(p=>p.walking))break;await wait(50)}assert(!overlapSettled.poses.some(p=>p.walking),'walking overlap fixture settles before independent full-body band sweeps')
  const bodySweeps=[]
  for(const part of ['rightArm','leftLeg']){
-  const band=await evaluate(`(()=>{const strip=document.querySelector('.figure-strip').getBoundingClientRect(),parts=JSON.parse(document.querySelector('.mascot-stage').dataset.silhouettes),p=parts.find(p=>p.part===${JSON.stringify(part)});return{left:strip.left+1,right:strip.right-1,y:strip.top+(${JSON.stringify(part)}==='leftLeg'?p.bottom-.7:(p.top+p.bottom)/2)}})()`),beforeBand=await evaluate("window.kamucl.invoke('mascots:state')")
-  if(pointerPoint)await move(pointerPoint.x,-5);await move(band.left,band.y);await move(band.right,band.y);const expected=Object.fromEntries(Object.entries(beforeBand.counts).map(([id,count])=>[id,count+1]));await awaitCounts('whole-person '+part+' sparse sweep',expected);bodySweeps.push({part,band,live:await feedbackSnapshot()})
+  const preparation={part,previousPointer:pointerPoint?{...pointerPoint}:null,path:[],samples:[]}
+  // Leave vertically, then move sideways wholly above the strip. Positioning
+  // is a real trajectory and may legitimately hit while leaving; establish the
+  // independent band baseline only AFTER that positioning and save completion.
+  const outsideLeft=await evaluate('document.querySelector(".figure-strip").getBoundingClientRect().left+1')
+  if(pointerPoint){await move(pointerPoint.x,-5);preparation.path.push({...pointerPoint})}
+  await move(outsideLeft,-5);preparation.path.push({...pointerPoint})
+  const outside=await persistenceSnapshot(),baselineCounts=Object.fromEntries(outside.local.buttons.map(b=>[b.id,b.count]));preparation.outside=outside
+  await awaitCounts('whole-person '+part+' outside positioning baseline',baselineCounts)
+  let settled=false,signature='',stableSince=0
+  for(let i=0;i<60;i++){
+   const live=await feedbackSnapshot(),saved=await evaluate("window.kamucl.invoke('mascots:state')"),now=Date.now(),aligned=live.poses.every(p=>!p.walking&&p.position===p.target&&p.target===saved.order.indexOf(p.id)),current=JSON.stringify({poses:live.poses.map(p=>({id:p.id,position:p.position,target:p.target})),order:saved.order,counts:saved.counts})
+   const matched=aligned&&Object.entries(baselineCounts).every(([id,count])=>(saved.counts[id]||0)===count)
+   if(!matched||current!==signature)stableSince=now
+   signature=current;settled=matched&&now-stableSince>=300;preparation.samples.push({time:now,matched,stableMs:now-stableSince,poses:live.poses,counts:saved.counts,order:saved.order})
+   fs.writeFileSync('out/mascot-header-body-sweep-live.json',JSON.stringify({version,completed:bodySweeps,preparation},null,2))
+   if(settled)break;await wait(50)
+  }
+  assert(settled,part+' band geometry must match saved order and stay settled beyond the delayed-sort window')
+  const band=await evaluate(`(()=>{const strip=document.querySelector('.figure-strip').getBoundingClientRect(),stage=document.querySelector('.mascot-stage'),parts=JSON.parse(stage.dataset.silhouettes),p=parts.find(p=>p.part===${JSON.stringify(part)});return{left:strip.left+1,right:strip.right-1,y:strip.top+(${JSON.stringify(part)}==='leftLeg'?p.bottom-.7:(p.top+p.bottom)/2),parts,poses:JSON.parse(stage.dataset.poses),strip:{left:strip.left,top:strip.top}}})()`)
+  await move(band.left,band.y);preparation.path.push({...pointerPoint});await awaitCounts('whole-person '+part+' empty left-edge entry preserves baseline',baselineCounts)
+  await move(band.right,band.y);const expected=Object.fromEntries(Object.entries(baselineCounts).map(([id,count])=>[id,count+1]));await awaitCounts('whole-person '+part+' sparse sweep',expected);bodySweeps.push({part,band,preparation,expected,live:await feedbackSnapshot()})
+  fs.writeFileSync('out/mascot-header-body-sweep-live.json',JSON.stringify({version,completed:bodySweeps},null,2))
  }
  proof.bodySweeps=bodySweeps
  for(const [w,hh,zoom] of [[960,620,1],[980,720,1.5],[1360,860,1]]){
