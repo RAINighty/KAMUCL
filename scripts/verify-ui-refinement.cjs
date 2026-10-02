@@ -91,6 +91,8 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
     if(!process.env.KAMUCL_SKIP_EXTENSION_BASE)await require('./verify-extension-ui.cjs')(harness);
     const selectedModule=process.env.KAMUCL_UI_MODULE||process.env.KAMUCL_117_MODULE;
     if(version==='1.1.9'&&selectedModule==='motion119')await require('./verify-kamu-motion-diagnostic-119.cjs')({...harness,motionDiagnosticInvocation:'standalone-cold-process'});
+    if(selectedModule==='native-trace')await require('./verify-kamu-native-trace-119.cjs')(harness);
+    if(version==='1.1.9'&&selectedModule==='feedback-scale')await require('./verify-kamu-feedback-scale-119-ui.cjs')(harness);
     // Run the unchanged motion gate before longer editing fixtures, so a native
     // failure yields render diagnostics without an unrelated earlier UI race.
     for(const [id,file] of [['header','verify-mascot-header-ui.cjs'],['skin118','verify-skin-editor-ui.cjs'],['palette','verify-skin-palette-ui.cjs'],['gallery','verify-gallery-favorites-ui.cjs'],['gallery118','verify-gallery-favorites-118-ui.cjs'],...(/\b1\.1\.9\b/.test(version)?[['import119','verify-import-routing-119-ui.cjs'],['selection119','verify-selection-ui-119.cjs']]:[])]){
