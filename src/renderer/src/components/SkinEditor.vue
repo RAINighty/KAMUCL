@@ -185,5 +185,9 @@ onBeforeUnmount(()=>{endGesture();disposed=true;clearTimeout(paletteTimer);void 
   .editor-footer .btn{min-height:30px;padding:6px 10px;font-size:12px}
   .editor-operation-status{font-size:11px;line-height:1.3}
 }
+@media(max-width:700px) and (max-height:580px){
+  .editor-model{height:clamp(240px,calc(100dvh - 164px),460px);min-height:240px}
+  .editor-model :deep(.viewer3d){min-height:120px}
+}
 .editor-operation-error{flex:1 1 100%;margin:0;max-height:72px;overflow:auto;overflow-wrap:anywhere;font-size:12px;line-height:1.6;color:var(--danger,#e77979)}
 </style>

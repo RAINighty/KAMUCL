@@ -59,11 +59,14 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   };
   if(process.env.KAMUCL_EXTENSION_GUI){
     const recordScreencast=async(name,action,duration=2200)=>{
-      const directory=path.resolve('out',name+'-'+(process.env.KAMUCL_TEST_THEME||'black-orange'));fs.mkdirSync(directory,{recursive:true});const frames=[],startedAt=Date.now();let nextAck=900000;
-      const listener=e=>{const message=JSON.parse(e.data);if(message.method!=='Page.screencastFrame')return;const frame=message.params,index=frames.length,file='frame-'+String(index).padStart(4,'0')+'.jpg';fs.writeFileSync(path.join(directory,file),Buffer.from(frame.data,'base64'));frames.push({file,receivedAt:Date.now(),...frame.metadata});ws.send(JSON.stringify({id:++nextAck,method:'Page.screencastFrameAck',params:{sessionId:frame.sessionId}}))};
+      const directory=path.resolve('out',name+'-'+(process.env.KAMUCL_TEST_THEME||'black-orange'));fs.mkdirSync(directory,{recursive:true});const frames=[],buffers=[],startedAt=Date.now();let nextAck=900000;
+      // Acknowledge before decoding or disk I/O so the capture consumer cannot
+      // throttle the native compositor; persist the original frames afterwards.
+      const listener=e=>{const message=JSON.parse(e.data);if(message.method!=='Page.screencastFrame')return;const frame=message.params,index=frames.length,file='frame-'+String(index).padStart(4,'0')+'.jpg';ws.send(JSON.stringify({id:++nextAck,method:'Page.screencastFrameAck',params:{sessionId:frame.sessionId}}));frames.push({file,receivedAt:Date.now(),...frame.metadata});buffers.push(Buffer.from(frame.data,'base64'))};
       ws.addEventListener('message',listener);
       try{await call('Page.startScreencast',{format:'jpeg',quality:95,everyNthFrame:1});await wait(100);await action();await wait(duration)}finally{await call('Page.stopScreencast');ws.removeEventListener('message',listener)}
-      const intervals=frames.slice(1).map((frame,index)=>frame.timestamp-frames[index].timestamp),elapsed=frames.length>1?frames.at(-1).timestamp-frames[0].timestamp:0,result={version,directory,source:'actual Page.startScreencast full compositor frames, acknowledged immediately; no interpolated frames',startedAt:new Date(startedAt).toISOString(),frames,elapsed,fps:elapsed?(frames.length-1)/elapsed:0,intervals};fs.writeFileSync(path.join(directory,'recording.json'),JSON.stringify(result,null,2));return result;
+      for(let i=0;i<frames.length;i++)fs.writeFileSync(path.join(directory,frames[i].file),buffers[i]);
+      const intervals=frames.slice(1).map((frame,index)=>frame.timestamp-frames[index].timestamp),elapsed=frames.length>1?frames.at(-1).timestamp-frames[0].timestamp:0,result={version,directory,source:'actual Page.startScreencast full compositor frames, acknowledged before decode and buffered in memory until recording stops; no interpolated frames',startedAt:new Date(startedAt).toISOString(),frames,elapsed,fps:elapsed?(frames.length-1)/elapsed:0,intervals};fs.writeFileSync(path.join(directory,'recording.json'),JSON.stringify(result,null,2));return result;
     };
     const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version,recordScreencast};
     if(!process.env.KAMUCL_SKIP_EXTENSION_BASE)await require('./verify-extension-ui.cjs')(harness);
