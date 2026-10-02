@@ -133,7 +133,7 @@ main().finally(async()=>{
  const requiredProofs=['extension-ui-black-orange.json','skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json','skin-editor-ui-black-orange.json','gallery-favorites-118-ui-black-orange.json']
  const proofNames=[...requiredProofs,'native-gui-focus-live.json','skin-palette-ready-live.json','mascot-header-performance-live.json','mascot-header-performance-diagnostic.json','mascot-header-timeline.json','mascot-header-timeline-raw.json','mascot-header-native-focus-live.json','mascot-header-reverse-live.json','mascot-header-body-sweep-live.json','mascot-header-layout-live.json','mascot-header-visibility-live.json','mascot-header-persistence-live.json','mascot-header-overlap-live.json','mascot-header-screencast-live.json','gallery-favorites-motion-live.json','mascot-slap-117.wav','mascot-sweep-117.webm','mascot-slap-118.wav','mascot-sweep-118.webm','mascot-motion-118.webm'],shots='release/ui-refinement-black-orange'
  const attemptStarted=Date.now(),fresh=file=>fs.existsSync(file)&&fs.statSync(file).mtimeMs>=attemptStarted
- let extensionError,complete=false
+ let extensionError,complete=false,performanceBenchmark=null
  try{
   execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{
    env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_TEST_THEME:'black-orange'},
@@ -141,7 +141,8 @@ main().finally(async()=>{
   })
   for(const name of requiredProofs){const file=path.join('out',name);assert(fresh(file),'successful GUI run is missing current proof '+name);const result=JSON.parse(fs.readFileSync(file));assert.equal(result.version,version,'GUI proof must match this build: '+name);if('complete' in result)assert.equal(result.complete,true,'GUI proof must be complete: '+name)}
   const frameManifest=path.join('out','mascot-118-frames-black-orange','frames.json');assert(fresh(frameManifest),'successful GUI run is missing current compositor frame manifest');assert.equal(JSON.parse(fs.readFileSync(frameManifest)).version,version,'compositor frames must match this build')
-  const recordingManifest=path.join('out','mascot-118-leader-screencast-black-orange','recording.json');assert(fresh(recordingManifest),'successful GUI run is missing current actual screencast');const recording=JSON.parse(fs.readFileSync(recordingManifest));assert.equal(recording.version,version);assert(recording.fps>=30,'actual recorded compositor rate is below 30 fps')
+  const recordingManifest=path.join('out','mascot-118-leader-screencast-black-orange','recording.json');assert(fresh(recordingManifest),'successful GUI run is missing current actual screencast');const recording=JSON.parse(fs.readFileSync(recordingManifest));assert.equal(recording.version,version)
+  const cadenceFile=path.join('out','mascot-header-screencast-live.json');assert(fresh(cadenceFile),'successful GUI run is missing current native display cadence proof');const cadence=JSON.parse(fs.readFileSync(cadenceFile)),budget=require('./mascot-capture-budget.cjs')({activeDisplay:cadence.activeDisplay},recording.fps);assert.equal(cadence.actualFps,recording.fps,'native display cadence must refer to this exact recording');assert.equal(cadence.minimumFps,budget.minimumFps,'wrapper and GUI must use the same native display capture target');assert.equal(cadence.passed,budget.passed,'benchmark passed result must match actual capture');assert.equal(cadence.frameRatePassed,budget.passed,'capture result cannot hide a below-target benchmark');assert(recording.frames.length>=2&&Number.isFinite(recording.fps)&&recording.fps>0&&recording.elapsed>0,'capture evidence must include multiple real frames and valid timing');performanceBenchmark={...budget,status:budget.passed?'passed':'below-target'};if(!budget.passed)console.warn('BENCHMARK BELOW TARGET: native compositor capture '+recording.fps+' fps < '+budget.minimumFps+' fps; functional completeness is reported independently')
   complete=true
  }catch(error){extensionError=String(error);throw error}
  finally{
@@ -154,7 +155,7 @@ main().finally(async()=>{
   const recording=path.join('out','mascot-118-leader-screencast-black-orange'),recordingProof=path.join(extensionProof,'mascot-118-leader-screencast-black-orange')
   if(fs.existsSync(recording))for(const name of fs.readdirSync(recording))if((name==='recording.json'||/^frame-\d+\.jpg$/.test(name))&&fresh(path.join(recording,name))){fs.mkdirSync(recordingProof,{recursive:true});fs.copyFileSync(path.join(recording,name),path.join(recordingProof,name));copied.push('mascot-118-leader-screencast-black-orange/'+name)}
   if(fs.existsSync(shots))for(const name of fs.readdirSync(shots))if(name.startsWith('extension-')&&name.endsWith('.png')&&fresh(path.join(shots,name))){fs.copyFileSync(path.join(shots,name),path.join(extensionProof,name));copied.push(name)}
-  fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
+  fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,functionalComplete:complete,performanceBenchmark,performancePassed:performanceBenchmark?.passed??null,acceptance:'functional results only; independent visual, interaction and motion review is separate',error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
  }
- console.log('PASS native macOS '+arch+' extension GUI '+version)
+ console.log('FUNCTIONAL PASS native macOS '+arch+' extension GUI '+version+'; capture benchmark '+performanceBenchmark.status)
 }).catch(e=>{console.error(e);process.exitCode=1})

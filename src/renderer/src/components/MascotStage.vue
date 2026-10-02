@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue'
 import {AmbientLight,DirectionalLight,Euler,Group,Mesh,NearestFilter,Object3D,OrthographicCamera,Quaternion,Scene,SRGBColorSpace,Texture,Vector3,WebGLRenderer} from 'three'
-import {MASCOTS,MascotSweepGate,addMascotHits,mascotHull,mascotShapeContains,mascotWalkFrame,normalizeMascotSound,sortMascots,type MascotBatch,type MascotHitRect,type MascotState} from '@shared/mascots'
+import {MASCOTS,MascotSweepGate,addMascotHits,mascotShapeContains,mascotWalkFrame,normalizeMascotSound,sortMascots,type MascotBatch,type MascotHitRect,type MascotState} from '@shared/mascots'
 import {useMotion} from '../motion'
 import {errText} from '../api'
 import {toast} from '../store'
@@ -9,6 +9,7 @@ import {PreviewPlayer} from '../skinModel'
 import {MascotAudio} from '../mascotAudio'
 import {createMascotAtlas,MascotBatchRenderer} from '../mascotBatch'
 import {MascotSoftwareRenderer} from '../mascotSoftware'
+import {MascotDomCache,appendMascotPalmTiming,createMascotFeedbackFrame,createMascotPartFrame,createMascotViewportFrame,projectMascotPoint,updateMascotFeedbackFrame,updateMascotPartFrame,updateMascotViewportFrame,type MascotFeedbackFrame,type MascotPalmTiming,type MascotPartFrame,type MascotProjectedPoint,type MascotViewportFrame} from '../mascotFrame'
 
 const emit=defineEmits<{close:[];softwareRenderer:[software:boolean]}>(),{reduced,hidden,decorativeActive}=useMotion()
 const props=defineProps<{focusOnReady?:boolean}>()
@@ -17,16 +18,19 @@ const state=ref<MascotState>({counts:{},order:MASCOTS.map(m=>m.id),sound:normali
 const sound=computed(()=>normalizeMascotSound(state.value.sound))
 const skinUrls=import.meta.glob('../assets/mascot-skins/*.png',{eager:true,import:'default'}) as Record<string,string>
 const gate=new MascotSweepGate(),players=new Map<string,PreviewPlayer>(),textures:Texture[]=[],lastHits=new Map<string,number>(),positions=new Map<string,number>()
-type Part={name:string;mesh:Mesh;corners:Vector3[]}
-type Rig={waist:Group;pelvis:Object3D;parts:Part[];feet:Part[];phase:number;dom:{button:HTMLElement|null;label:HTMLElement|null;feedback:HTMLElement|null;palms:HTMLElement[];prints:HTMLElement[]}}
-const rigs=new Map<string,Rig>(),walks=new Map<string,{from:number;to:number;start:number;duration:number;phase:number}>(),palms=new Map<string,Array<{start:number;contact:number}>>()
+type Part={name:string;mesh:Mesh;corners:Vector3[];projection:MascotPartFrame;viewport:MascotViewportFrame}
+type ModelBounds={id:string;top:number;bottom:number;left:number;right:number}
+type Pose={id:string;walking:boolean;position:number;target:number;phase:number;waistPitch:number;bodyYaw:number;headForward:number[];bodyForward:number[];footY:number;butt:{x:number;y:number};contacts:number[]}
+type Rig={waist:Group;pelvis:Object3D;parts:Part[];feet:Part[];phase:number;index:number;bounds:ModelBounds;pose:Pose;butt:MascotProjectedPoint;feedback:MascotFeedbackFrame;dom:{button:MascotDomCache;label:MascotDomCache;feedback:MascotDomCache;palms:MascotDomCache[];prints:MascotDomCache[]}}
+const rigs=new Map<string,Rig>(),walks=new Map<string,{from:number;to:number;start:number;duration:number;phase:number}>(),palms=new Map<string,MascotPalmTiming[]>()
 const APPROACH_MS=80,PALM_MS=150,PRINT_MS=500
 let gl:WebGLRenderer|undefined,scene:Scene,camera:OrthographicCamera,resize:ResizeObserver|undefined,frame=0,closed=false,slot=20,height=60,width=400,scale=1,hiddenAt=0,softwareRenderer=false
 let batchRenderer:MascotBatchRenderer|undefined
 let software:MascotSoftwareRenderer|undefined
 const hasRenderer=()=>!!gl||!!software
 const parentRotation=new Quaternion(),faceRotation=new Quaternion(),faceEuler=new Euler(),scratch=new Vector3()
-let rectangles:MascotHitRect[]=[],displayOrder=MASCOTS.map(m=>m.id) as string[]
+const rectangles:MascotHitRect[]=[],viewportFrames:MascotViewportFrame[]=[],viewportRectangles:MascotHitRect[]=[],modelBounds:ModelBounds[]=[],poses:Pose[]=[],modelFrame={height:0,width:0,models:modelBounds}
+let hostDom:MascotDomCache,displayOrder=MASCOTS.map(m=>m.id) as string[]
 let sortTimer:ReturnType<typeof setTimeout>|undefined,saveTimer:ReturnType<typeof setTimeout>|undefined,retryTimer:ReturnType<typeof setTimeout>|undefined,retryDelay=800
 let hits:string[]=[],batch:MascotBatch|undefined,flight:Promise<void>|undefined,soundRevision=0,savedSoundRevision=0,pendingReported=false
 const audio=new MascotAudio(()=>sound.value,(played,voices)=>{if(host.value){host.value.dataset.soundsPlayed=String(played);host.value.dataset.activeSounds=String(voices)}},()=>!hidden.value)
@@ -66,15 +70,16 @@ function slap(id:string){
  if(!ready.value||hidden.value||closing.value||confirmReset.value)return
  state.value=addMascotHits({...state.value,order:[...displayOrder]},[id]);hits.push(id)
  const contact=performance.now()+audio.play(reduced.value?0:APPROACH_MS)
- lastHits.set(id,contact);const queue=palms.get(id)??[];queue.push({start:contact-APPROACH_MS,contact});palms.set(id,queue.slice(-24));queueSave();scheduleSort();wake()
+ lastHits.set(id,contact);let queue=palms.get(id);if(!queue){queue=[];palms.set(id,queue)}appendMascotPalmTiming(queue,{start:contact-APPROACH_MS,contact});queueSave();scheduleSort();wake()
 }
 function move(event:PointerEvent){
  if(event.pointerType!=='mouse'||!ready.value||hidden.value||closing.value||confirmReset.value)return
  const started=performance.now()
- const bounds=strip.value!.getBoundingClientRect(),rects=rectangles.map(r=>({...r,left:r.left+bounds.left,right:r.right+bounds.left,top:r.top+bounds.top,bottom:r.bottom+bounds.top,polygon:r.polygon?.map(p=>({x:p.x+bounds.left,y:p.y+bounds.top}))}))
+ const bounds=strip.value!.getBoundingClientRect()
+ for(let i=0;i<rectangles.length;i++)updateMascotViewportFrame(viewportFrames[i],rectangles[i],bounds.left,bounds.top)
  const coalesced=event.getCoalescedEvents?.()||[],samples=coalesced.length?coalesced:[event]
- for(const sample of samples)for(const id of gate.move(sample.clientX,sample.clientY,rects))slap(id)
- if(samples[samples.length-1]!==event)for(const id of gate.move(event.clientX,event.clientY,rects))slap(id)
+ for(const sample of samples)for(const id of gate.move(sample.clientX,sample.clientY,viewportRectangles))slap(id)
+ if(samples[samples.length-1]!==event)for(const id of gate.move(event.clientX,event.clientY,viewportRectangles))slap(id)
  if(displayOrder.join()!==state.value.order.join())scheduleSort()
  if(host.value){const duration=performance.now()-started;host.value.dataset.sweepMs=String(duration);host.value.dataset.maxSweepMs=String(Math.max(Number(host.value.dataset.maxSweepMs)||0,duration))}
 }
@@ -99,16 +104,17 @@ function wake(){if(!closed&&!hidden.value&&hasRenderer()&&!frame)frame=requestAn
 function render(now:number){
  frame=0;if(closed||hidden.value||!hasRenderer())return
  const renderStarted=performance.now()
- const reacting=[...palms.values()].some(queue=>queue.some(palm=>now-palm.contact<PRINT_MS)),walking=!reduced.value&&[...walks.values()].some(walk=>now-walk.start<walk.duration)
+ let reacting=false,walking=false
+ if(!reduced.value)for(const walk of walks.values())if(now-walk.start<walk.duration){walking=true;break}
  // Follow the compositor cadence: a fixed 32ms cutoff loses legitimate ticks
  // on approximately 30Hz displays. Hidden/reduced rest still stops scheduling.
- const worldWidth=slot*7,rects:MascotHitRect[]=[],modelBounds:Array<{id:string;top:number;bottom:number;left:number;right:number}>=[],poses:unknown[]=[]
- const project=(p:Vector3)=>{p.project(camera);return{x:(p.x+1)*width/2,y:(1-p.y)*height/2,z:p.z}}
+ const worldWidth=slot*7
  for(const [id,player] of players){
   const rig=rigs.get(id)!,target=displayOrder.indexOf(id),walk=walks.get(id),movement=walk?mascotWalkFrame(walk.from,walk.to,now-walk.start,reduced.value?0:walk.duration):{position:target,progress:1,travelled:0,direction:0,walking:false}
   const next=movement.position;positions.set(id,next);player.position.set(-worldWidth/2+slot*(next+.5),0,movement.walking?(movement.direction<0?2.5:-2.5):0);player.scale.setScalar(scale)
-  const queue=(palms.get(id)??[]).filter(palm=>now-palm.contact<PRINT_MS);palms.set(id,queue)
-  const landed=queue.filter(palm=>palm.contact<=now),age=(now-(landed.at(-1)?.contact??-1000))/210,pop=!reduced.value&&age>=0&&age<1?Math.sin(age*Math.PI)*(1-age):0
+  const feedbackFrame=updateMascotFeedbackFrame(rig.feedback,palms.get(id)!,now,PALM_MS,PRINT_MS)
+  if(feedbackFrame.contacts.length)reacting=true
+  const age=(now-(feedbackFrame.lastLandedContact??-1000))/210,pop=!reduced.value&&age>=0&&age<1?Math.sin(age*Math.PI)*(1-age):0
   const walkWeight=movement.walking&&!reduced.value?Math.min(1,movement.progress*8,(1-movement.progress)*8):0
   const restYaw=2.36,walkYaw=movement.direction<0?-Math.PI/2:Math.PI/2
   player.rotation.y=restYaw+Math.atan2(Math.sin(walkYaw-restYaw),Math.cos(walkYaw-restYaw))*walkWeight;player.skin.rotation.set(0,0,0);player.skin.scale.set(1,1,1)
@@ -118,34 +124,41 @@ function render(now:number){
   player.skin.leftArm.rotation.set(-.15-step*.7+pop*.2,0,.07);player.skin.rightArm.rotation.set(-.15+step*.7+pop*.2,0,-.07)
   player.updateMatrixWorld(true)
   // The neck counters waist and walking rotation, so the actual face stays visible.
-  rig.waist.getWorldQuaternion(parentRotation);faceRotation.setFromEuler(faceEuler.set(.025,.32,decorativeActive.value&&!reduced.value?Math.sin(now*.0016+MASCOTS.findIndex(m=>m.id===id))*.015:0))
+  rig.waist.getWorldQuaternion(parentRotation);faceRotation.setFromEuler(faceEuler.set(.025,.32,decorativeActive.value&&!reduced.value?Math.sin(now*.0016+rig.index)*.015:0))
   player.skin.head.quaternion.copy(parentRotation).invert().multiply(faceRotation)
   let footY=Infinity;for(const part of rig.feet)for(const corner of part.corners)footY=Math.min(footY,scratch.copy(corner).applyMatrix4(part.mesh.matrixWorld).y)
   player.position.y+=1.6-footY;player.updateMatrixWorld(true)
-  const personShapes=rig.parts.map(part=>{
-   const points=part.corners.map(c=>project(scratch.copy(c).applyMatrix4(part.mesh.matrixWorld))),polygon=mascotHull(points)
-   return{id,part:part.name,left:Math.min(...points.map(p=>p.x)),right:Math.max(...points.map(p=>p.x)),top:Math.min(...points.map(p=>p.y)),bottom:Math.max(...points.map(p=>p.y)),depth:points.reduce((sum,p)=>sum+p.z,0)/points.length,polygon}
-  });rects.push(...personShapes)
-  const r={id,left:Math.min(...personShapes.map(r=>r.left)),right:Math.max(...personShapes.map(r=>r.right)),top:Math.min(...personShapes.map(r=>r.top)),bottom:Math.max(...personShapes.map(r=>r.bottom))};modelBounds.push(r)
-  const butt=project(rig.pelvis.getWorldPosition(scratch))
+  const r=rig.bounds;r.left=Infinity;r.right=-Infinity;r.top=Infinity;r.bottom=-Infinity
+  for(const part of rig.parts){
+   updateMascotPartFrame(part.projection,part.corners,part.mesh.matrixWorld,camera,width,height,scratch)
+   const shape=part.projection.shape
+   if(shape.left<r.left)r.left=shape.left;if(shape.right>r.right)r.right=shape.right;if(shape.top<r.top)r.top=shape.top;if(shape.bottom>r.bottom)r.bottom=shape.bottom
+  }
+  const butt=projectMascotPoint(rig.butt,rig.pelvis.getWorldPosition(scratch),camera,width,height)
   const {button,label,feedback}=rig.dom
-  if(button){button.style.left=r.left+'px';button.style.top=r.top+'px';button.style.width=(r.right-r.left)+'px';button.style.height=(r.bottom-r.top)+'px';button.dataset.lastHit=String(lastHits.get(id)??0);button.style.zIndex=String(10+Math.round(player.position.z))}
-  if(label){label.style.left=(player.position.x+worldWidth/2)/worldWidth*width+'px';label.style.width=width/7+'px';label.style.opacity=movement.walking?'0':'1'}
-  if(feedback){feedback.style.left=butt.x+'px';feedback.style.top=butt.y+'px';feedback.dataset.target='pelvis';feedback.dataset.contacts=JSON.stringify(queue.map(palm=>palm.contact))
-   const active=queue.filter(palm=>now>=palm.start&&now-palm.start<PALM_MS).slice(0,4),prints=landed.slice(-4)
-   rig.dom.palms.forEach((element,index)=>{const timing=active[index],palmAge=timing?now-timing.start:Infinity,approach=Math.min(1,palmAge/APPROACH_MS),retreat=Math.max(0,(palmAge-APPROACH_MS)/(PALM_MS-APPROACH_MS));element.style.opacity=timing&&!reduced.value?String(1-retreat):'0';element.style.transform=timing?`translate(${(1-approach)*11+retreat*5}px,${-(1-approach)*10-retreat*4}px) rotate(${(1-approach)*-30+retreat*15}deg)`:'none';element.dataset.contact=String(timing?.contact??0)})
-   rig.dom.prints.forEach((element,index)=>{const timing=prints[index],printAge=timing?now-timing.contact:Infinity;element.style.opacity=timing?String(reduced.value?.6:.72*(1-printAge/PRINT_MS)):'0';element.style.transform=`translate(${index%2}px,${Math.floor(index/2)}px)`;element.dataset.contact=String(timing?.contact??0)})
+  button.style('left',r.left,'px');button.style('top',r.top,'px');button.style('width',r.right-r.left,'px');button.style('height',r.bottom-r.top,'px');button.data('lastHit',lastHits.get(id)??0);button.style('z-index',10+Math.round(player.position.z))
+  label.style('left',(player.position.x+worldWidth/2)/worldWidth*width,'px');label.style('width',width/7,'px');label.style('opacity',movement.walking?0:1)
+  feedback.style('left',butt.x,'px');feedback.style('top',butt.y,'px')
+  if(feedbackFrame.contactsChanged)feedback.data('contacts',JSON.stringify(feedbackFrame.contacts))
+  for(let index=0;index<rig.dom.palms.length;index++){
+   const element=rig.dom.palms[index],timing=feedbackFrame.active[index],palmAge=timing?now-timing.start:Infinity,approach=Math.min(1,palmAge/APPROACH_MS),retreat=Math.max(0,(palmAge-APPROACH_MS)/(PALM_MS-APPROACH_MS))
+   element.style('opacity',timing&&!reduced.value?1-retreat:0);element.style('transform',timing?`translate(${(1-approach)*11+retreat*5}px,${-(1-approach)*10-retreat*4}px) rotate(${(1-approach)*-30+retreat*15}deg)`:'none');element.data('contact',timing?.contact??0)
+  }
+  for(let index=0;index<rig.dom.prints.length;index++){
+   const element=rig.dom.prints[index],timing=feedbackFrame.prints[index],printAge=timing?now-timing.contact:Infinity
+   element.style('opacity',timing?(reduced.value?.6:.72*(1-printAge/PRINT_MS)):0);element.data('contact',timing?.contact??0)
   }
   let actualFootY=Infinity;for(const part of rig.feet)for(const corner of part.corners)actualFootY=Math.min(actualFootY,scratch.copy(corner).applyMatrix4(part.mesh.matrixWorld).y)
-  const headForward=scratch.set(0,0,1).transformDirection(player.skin.head.matrixWorld).toArray(),bodyForward=scratch.set(0,0,1).transformDirection(player.skin.body.matrixWorld).toArray()
-  poses.push({id,walking:movement.walking,position:next,target,phase,waistPitch:rig.waist.rotation.x,bodyYaw:player.rotation.y,headForward,bodyForward,footY:actualFootY,butt:{x:butt.x,y:butt.y},contacts:queue.map(palm=>palm.contact)})
+  const pose=rig.pose;scratch.set(0,0,1).transformDirection(player.skin.head.matrixWorld).toArray(pose.headForward);scratch.set(0,0,1).transformDirection(player.skin.body.matrixWorld).toArray(pose.bodyForward)
+  pose.walking=movement.walking;pose.position=next;pose.target=target;pose.phase=phase;pose.waistPitch=rig.waist.rotation.x;pose.bodyYaw=player.rotation.y;pose.footY=actualFootY;pose.butt.x=butt.x;pose.butt.y=butt.y
  }
- rectangles=rects;batchRenderer?.update();if(software&&batchRenderer)software.render(batchRenderer.mesh,camera);else gl?.render(scene,camera)
- if(host.value){const info=software?.info??gl!.info;host.value.dataset.modelBounds=JSON.stringify({height,width,models:modelBounds});host.value.dataset.silhouettes=JSON.stringify(rects);host.value.dataset.poses=JSON.stringify(poses);host.value.dataset.renderMs=String(performance.now()-renderStarted);host.value.dataset.renderDrawCalls=String(info.render.calls);host.value.dataset.renderTriangles=String(info.render.triangles);host.value.dataset.renderUploads=String(software?software.info.uploads:0)}
+ batchRenderer?.update();if(software&&batchRenderer)software.render(batchRenderer.mesh,camera);else gl?.render(scene,camera)
+ if(host.value){const info=software?.info??gl!.info;modelFrame.height=height;modelFrame.width=width;hostDom.data('modelBounds',JSON.stringify(modelFrame));hostDom.data('silhouettes',JSON.stringify(rectangles));hostDom.data('poses',JSON.stringify(poses));hostDom.data('renderMs',performance.now()-renderStarted);hostDom.data('renderDrawCalls',info.render.calls);hostDom.data('renderTriangles',info.render.triangles);hostDom.data('renderUploads',software?software.info.uploads:0)}
  if(decorativeActive.value||reacting||walking)frame=requestAnimationFrame(render)
 }
 async function buildScene(){
  try{
+  hostDom=new MascotDomCache(host.value!)
   gl=new WebGLRenderer({alpha:true,antialias:false,powerPreference:'low-power'});gl.setPixelRatio(Math.min(devicePixelRatio||1,2));gl.setClearColor(0,0)
   // Software GL shares CPU time with backdrop rasterization. Preserve theme
   // colors, while temporarily yielding decorative frost to this interaction.
@@ -168,11 +181,15 @@ async function buildScene(){
    for(const part of [player.skin.head,player.skin.body,player.skin.leftArm,player.skin.rightArm])waist.attach(part)
    const pelvis=new Object3D();pelvis.position.set(0,-7.9,-2.3);player.skin.add(pelvis)
    const parts:Part[]=[]
-   for(const [name,part] of [['head',player.skin.head],['body',player.skin.body],['leftArm',player.skin.leftArm],['rightArm',player.skin.rightArm],['leftLeg',player.skin.leftLeg],['rightLeg',player.skin.rightLeg]] as const){part.innerLayer.traverse(object=>{if(object instanceof Mesh){object.geometry.computeBoundingBox();const b=object.geometry.boundingBox!;const corners:Vector3[]=[];for(const x of [b.min.x,b.max.x])for(const y of [b.min.y,b.max.y])for(const z of [b.min.z,b.max.z])corners.push(new Vector3(x,y,z));parts.push({name,mesh:object,corners})}})}
+   for(const [name,part] of [['head',player.skin.head],['body',player.skin.body],['leftArm',player.skin.leftArm],['rightArm',player.skin.rightArm],['leftLeg',player.skin.leftLeg],['rightLeg',player.skin.rightLeg]] as const){part.innerLayer.traverse(object=>{if(object instanceof Mesh){object.geometry.computeBoundingBox();const b=object.geometry.boundingBox!;const corners:Vector3[]=[];for(const x of [b.min.x,b.max.x])for(const y of [b.min.y,b.max.y])for(const z of [b.min.z,b.max.z])corners.push(new Vector3(x,y,z));const projection=createMascotPartFrame(mascot.id,name);parts.push({name,mesh:object,corners,projection,viewport:createMascotViewportFrame(projection.shape)})}})}
    const feedback=strip.value!.querySelector<HTMLElement>(`[data-feedback="${mascot.id}"]`)
-   rigs.set(mascot.id,{waist,pelvis,parts,feet:parts.filter(p=>p.name.endsWith('Leg')),phase:0,dom:{button:strip.value!.querySelector<HTMLElement>(`[data-hit="${mascot.id}"]`),label:strip.value!.querySelector<HTMLElement>(`[data-label="${mascot.id}"]`),feedback,palms:Array.from(feedback?.querySelectorAll<HTMLElement>('.pixel-palm')??[]),prints:Array.from(feedback?.querySelectorAll<HTMLElement>('.palm-print')??[])}})
+   const feedbackFrame=createMascotFeedbackFrame(),bounds={id:mascot.id,left:0,right:0,top:0,bottom:0},pose:Pose={id:mascot.id,walking:false,position:0,target:0,phase:0,waistPitch:0,bodyYaw:0,headForward:[0,0,0],bodyForward:[0,0,0],footY:0,butt:{x:0,y:0},contacts:feedbackFrame.contacts}
+   const dom={button:new MascotDomCache(strip.value!.querySelector<HTMLElement>(`[data-hit="${mascot.id}"]`)),label:new MascotDomCache(strip.value!.querySelector<HTMLElement>(`[data-label="${mascot.id}"]`)),feedback:new MascotDomCache(feedback),palms:Array.from(feedback?.querySelectorAll<HTMLElement>('.pixel-palm')??[],element=>new MascotDomCache(element)),prints:Array.from(feedback?.querySelectorAll<HTMLElement>('.palm-print')??[],element=>new MascotDomCache(element))}
+   dom.feedback.data('target','pelvis');dom.feedback.data('contacts','[]');for(let index=0;index<dom.prints.length;index++)dom.prints[index].style('transform',`translate(${index%2}px,${Math.floor(index/2)}px)`)
+   rigs.set(mascot.id,{waist,pelvis,parts,feet:parts.filter(p=>p.name.endsWith('Leg')),phase:0,index:MASCOTS.findIndex(m=>m.id===mascot.id),bounds,pose,butt:{x:0,y:0,z:0},feedback:feedbackFrame,dom});palms.set(mascot.id,[])
    // Rigs drive poses and visible-part hit geometry on the CPU; only their batch is rendered.
    players.set(mascot.id,player)
+   for(const part of parts){rectangles.push(part.projection.shape);viewportFrames.push(part.viewport);viewportRectangles.push(part.viewport.shape)}modelBounds.push(bounds);poses.push(pose)
   }))
   if(closed)return
   const atlas=createMascotAtlas(MASCOTS.map(m=>players.get(m.id)!.skin.map!.image as HTMLImageElement));textures.push(atlas)
@@ -180,14 +197,14 @@ async function buildScene(){
   resize=new ResizeObserver(fit);resize.observe(strip.value!);fit();ready.value=true;wake()
  }catch{supported.value=false;ready.value=true;gl?.dispose();gl=undefined;software?.dispose();software=undefined}
 }
-watch(hidden,value=>{if(value){hiddenAt=performance.now();cancelAnimationFrame(frame);frame=0;gate.reset();palms.clear();lastHits.clear();strip.value?.querySelectorAll<HTMLElement>('.mascot-feedback svg').forEach(element=>element.style.opacity='0');audio.pause();void flush().catch(()=>{})}else{const paused=hiddenAt?performance.now()-hiddenAt:0;for(const walk of walks.values())walk.start+=paused;hiddenAt=0;void audio.unlock();wake()}},{flush:'sync'})
+watch(hidden,value=>{if(value){hiddenAt=performance.now();cancelAnimationFrame(frame);frame=0;gate.reset();for(const queue of palms.values())queue.length=0;lastHits.clear();for(const rig of rigs.values()){for(const element of rig.dom.palms)element.style('opacity',0);for(const element of rig.dom.prints)element.style('opacity',0)}audio.pause();void flush().catch(()=>{})}else{const paused=hiddenAt?performance.now()-hiddenAt:0;for(const walk of walks.values())walk.start+=paused;hiddenAt=0;void audio.unlock();wake()}},{flush:'sync'})
 watch(decorativeActive,wake)
 watch(reduced,value=>{if(value)for(const walk of walks.values()){walk.duration=0;walk.start=performance.now()}wake()},{flush:'sync'})
 onMounted(async()=>{
  try{state.value=await window.kamucl.invoke('mascots:state') as MascotState;displayOrder=[...state.value.order];for(const [index,id] of displayOrder.entries())positions.set(id,index);await audio.unlock();await buildScene();if(props.focusOnReady)await nextTick(()=>strip.value?.querySelector<HTMLButtonElement>(`[data-hit="${displayOrder[0]}"]`)?.focus())}
  catch(error){persistError.value=errText(error);toast(errText(error),'error')}
 })
-onUnmounted(()=>{closed=true;unsubscribe();clearTimeout(sortTimer);clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);resize?.disconnect();gate.reset();palms.clear();walks.clear();batchRenderer?.dispose();batchRenderer=undefined;rigs.clear();for(const player of players.values())player.dispose();for(const texture of textures)texture.dispose();players.clear();gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove();software?.dispose();software?.domElement.remove();software=undefined;void audio.dispose()})
+onUnmounted(()=>{closed=true;unsubscribe();clearTimeout(sortTimer);clearTimeout(saveTimer);clearTimeout(retryTimer);cancelAnimationFrame(frame);resize?.disconnect();gate.reset();palms.clear();walks.clear();batchRenderer?.dispose();batchRenderer=undefined;rigs.clear();rectangles.length=0;viewportFrames.length=0;viewportRectangles.length=0;modelBounds.length=0;poses.length=0;for(const player of players.values())player.dispose();for(const texture of textures)texture.dispose();players.clear();gl?.dispose();gl?.forceContextLoss();gl?.domElement.remove();software?.dispose();software?.domElement.remove();software=undefined;void audio.dispose()})
 defineExpose({flush,closeStage})
 function keyDown(event:KeyboardEvent){void audio.unlock();if(event.repeat&&(event.key===' '||event.key==='Enter'))event.preventDefault()}
 </script>

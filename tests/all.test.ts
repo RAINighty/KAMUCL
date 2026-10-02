@@ -137,3 +137,5 @@ import './skin-editor-118.test'
 import './gallery-favorites-118.test'
 import './mascot-software.test'
 import './mascot-capture-budget.test'
+
+import './mascot-frame.test'
