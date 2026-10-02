@@ -42,7 +42,7 @@
 
 ## 验证与交付边界
 
-真实执行结果与独立视觉、交互、动效评分见 CURRENT_STATUS.md 及 docs/validation-1.1.8/。
+真实执行结果与独立视觉、交互、动效评分见 CURRENT_STATUS.md、docs/RELEASE_1.1.8.md 及交接包验证材料。
 隔离服务测试不能替代真实账号上传或在线平台安装；声音波形检查不能替代主观听感。
 Windows 使用便携 EXE/ZIP，macOS 使用原生 arm64/x64 APP、DMG/ZIP。
 Mac 采用 ad-hoc 签名，Apple Developer ID 签名和公证不包含在本轮交付内。

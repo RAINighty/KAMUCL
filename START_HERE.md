@@ -3,6 +3,9 @@
 本包包含皮肤编辑布局与关闭修复、回望人物与掌击走位、图片列表重排、社区收藏集中管理的源码、资源、锁文件、测试、许可证及发布成品。
 本轮功能见 `docs/FEATURES_1.1.8.md`；自由调色板与混播基础见 `docs/FEATURES_1.1.7.md`，六项功能和投影转换边界见 `docs/FEATURES_1.1.6.md`。
 实际验证状态、未覆盖项和成品摘要见 `CURRENT_STATUS.md`。
+本批详细发行记录见 `docs/RELEASE_1.1.8.md`；交接包内的真实截图、原始录屏帧、
+独立评审和源码干净构建结果位于 `release/validation-1.1.8/Delivery/`。
+浏览器验证 profile 和缓存不包含在交付材料中。
 
 - Project: KAMUCL 1.1.8。
 - Deliverable: 界面交互改进、双平台成品、完整源码和验证记录。
