@@ -72,6 +72,18 @@ module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
       await main(`testElectron.BrowserWindow.getAllWindows()[0].setSize(${width},${height});testElectron.BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(${zoom})`);await wait(250);await screenshot('skin-page-'+width+'-'+zoom+(height===684?'-compact':''));await open();await pose('正面');await evaluate(`document.querySelector('.editor-content').scrollTop=0;document.querySelector('.editor-model').scrollTop=0`);await wait(80);await screenshot('skin-editor-'+width+'-'+zoom+(height===684?'-compact':''))
       const previewHeight=await evaluate(`document.querySelector('.skin-editor canvas').getBoundingClientRect().height`);assert(previewHeight>=120,'skin canvas must remain large enough to draw: '+previewHeight);
       const partControls=await evaluate(`(()=>{const scope=document.querySelector('.editor-model').getBoundingClientRect();return [...document.querySelectorAll('.part-tools button')].map(e=>{const r=e.getBoundingClientRect();return{name:e.textContent.trim(),visible:r.width>0&&r.height>0&&r.left>=scope.left&&r.right<=scope.right&&r.top>=scope.top&&r.bottom<=scope.bottom&&r.bottom<=innerHeight}})})()`);assert.equal(partControls.length,6);assert(partControls.every(p=>p.visible),'all six part controls must be visible without preview scrolling: '+JSON.stringify(partControls));
+      if(await evaluate(`innerWidth<=700`)){
+        const fixed=()=>evaluate(`(()=>{const x=document.querySelector('.editor-close').getBoundingClientRect(),f=document.querySelector('.editor-footer').getBoundingClientRect();return{x:x.top,footer:f.top,bottom:f.bottom}})()`),beforeFixed=await fixed()
+        await coordinateClick('.palette-hex')
+        for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'a',code:'KeyA',windowsVirtualKeyCode:65,modifiers:process.platform==='darwin'?4:2})
+        await call('Input.insertText',{text:'#1177ee'});await key('Tab')
+        await until('small-window actual colour input',`document.querySelector('[aria-label="RGB R"]').value==='17'&&document.querySelector('.palette-hex').value==='#1177ee'`)
+        assert.deepEqual(await fixed(),beforeFixed,'header and footer remain fixed while scrolling to colour tools')
+        assert(await evaluate(`document.querySelector('.editor-header p').textContent.includes('已保存')`),'real colour input does not edit skin pixels')
+        await screenshot('skin-small-tools-'+width+'-'+zoom)
+        await evaluate(`document.querySelector('.editor-content').scrollTop=0;document.querySelector('.editor-model').scrollTop=0`);await wait(80)
+        ;(proof.smallTools??=[]).push({width,height,zoom,actualCoordinateInput:true,colour:'#1177ee',fixed:beforeFixed,returnedToModel:true})
+      }
       const baseline=await png(),before=await canvasShot();await gesture('middle');assert.notEqual(await canvasShot(),before,'middle drag changes actual model rendering');assert.equal(await png(),baseline,'middle rotation preserves all exported RGBA pixels')
       assert(await evaluate(`[...document.querySelectorAll('.editor-footer-history button')].every(b=>b.disabled)`),'rotation has no undo record')
       const middle=await canvasShot();await gesture('left',1);assert.notEqual(await canvasShot(),middle,'Alt-left rotates rendered model');assert.equal(await png(),baseline)
