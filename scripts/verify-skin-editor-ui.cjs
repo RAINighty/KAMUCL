@@ -145,6 +145,42 @@ module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
     }
     assert.fail('skin canvas never reached a fully visible stable viewport for compositor capture')
   }
+  async function checkHeadVisibility(width,height,zoom){
+    const record={width,height,zoom,classification:'one original trusted head-button click; read-only actual events, DOM and mounted document state',samples:[]};
+    (proof.partVisibilityObservations??=[]).push(record)
+    let installed=false
+    const observe=async label=>{
+      const actual=await evaluate('window.__skinPartObservation.snapshot()'),rgba=actual.document.rgba
+      actual.document.rgbaSHA256=crypto.createHash('sha256').update(Buffer.from(rgba)).digest('hex');delete actual.document.rgba
+      record.samples.push({label,...actual});persist();return actual
+    }
+    try{
+      await evaluate('('+installSkinFixtureDiagnostic.toString()+')()')
+      await evaluate(`(()=>{
+        const types=['pointerdown','pointerup','pointercancel','click'],events=[];
+        const snapshot=()=>({at:performance.now(),document:window.__skinFixtureDiagnostic.snapshot(),buttons:[...document.querySelectorAll('.part-tools button')].map(e=>{const r=e.getBoundingClientRect();return{name:e.textContent.trim(),pressed:e.getAttribute('aria-pressed'),disabled:!!e.disabled,inert:!!e.closest('[inert]'),rect:{x:r.x,y:r.y,width:r.width,height:r.height}}}),dialog:!!document.querySelector('.skin-close-dialog'),busy:document.querySelector('.editor-operation-status')?.textContent});
+        const observer=e=>{const b=e.target?.closest?.('.part-tools button');if(!b)return;events.push({type:e.type,at:performance.now(),trusted:e.isTrusted,name:b.textContent.trim(),button:e.button,buttons:e.buttons,x:e.clientX,y:e.clientY,pressed:b.getAttribute('aria-pressed'),disabled:!!b.disabled,inert:!!b.closest('[inert]'),documentFocus:document.hasFocus(),hidden:document.hidden})};
+        for(const type of types)document.addEventListener(type,observer,true);
+        window.__skinPartObservation={snapshot,events,finish(){for(const type of types)document.removeEventListener(type,observer,true);return events}};
+      })()`);installed=true
+      await observe('before original head click');await clickText('.part-tools','头部');await observe('after original click and unchanged coordinate settling')
+      await until('actual head visibility settled',`(()=>{const s=window.__skinPartObservation.snapshot(),b=s.buttons.find(b=>b.name==='头部');return{ready:b?.pressed==='false'&&s.document.viewer.hiddenParts.includes('head'),at:s.at,button:b,viewer:s.document.viewer,documentFocus:s.document.documentFocus,hidden:s.document.hidden,dialog:s.dialog,busy:s.busy}})()`,state=>{record.samples.push({label:'pending actual head visibility',...state});persist()})
+      await observe('actual head visibility settled')
+      const clicks=await evaluate("window.__skinPartObservation.events.filter(e=>e.type==='click'&&e.trusted&&e.name==='头部')")
+      assert.equal(clicks.length,1,'visibility must follow exactly one real original head-button click')
+      assert.equal(await evaluate(`[...document.querySelectorAll('.part-tools button')].find(b=>b.textContent.trim()==='头部').getAttribute('aria-pressed')`),'false')
+      record.complete=true
+    }catch(error){
+      record.complete=false;record.failure={at:new Date().toISOString(),message:error.message,stack:error.stack};persist()
+      try{await observe('failed original head click')}catch(observationError){record.failure.observationError=observationError.message}
+      try{const frame=await call('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false}),name='extension-118-skin-head-click-failure-'+width+'-'+height+'-'+zoom+'-'+theme+'.png';fs.writeFileSync(path.join('out',name),Buffer.from(frame.data,'base64'));record.failure.screenshot=name}catch(captureError){record.failure.captureError=captureError.message}
+      throw error
+    }finally{
+      if(installed)try{record.events=await evaluate('window.__skinPartObservation.finish()')}catch(error){record.cleanupError=error.message}
+      try{record.fixtureListenersRestored=await evaluate('window.__skinFixtureDiagnostic.finish().restoredListeners')}catch(error){record.cleanupError=error.message}
+      persist()
+    }
+  }
   const makeDirty=async()=>{
     const record={sequence:(proof.fixtureDiagnostics??=[]).length+1,classification:'single original fixture stroke; read-only document observation and original listeners forwarded',snapshots:[]};proof.fixtureDiagnostics.push(record)
     const snapshot=async(label,expression='window.__skinFixtureDiagnostic.snapshot()')=>{const actual=await evaluate(expression),rgba=actual.rgba;assert(Array.isArray(rgba)&&rgba.length===64*64*4,'diagnostic must read the actual 64 x 64 skin document');const sha256=crypto.createHash('sha256').update(Buffer.from(rgba)).digest('hex');delete actual.rgba;record.snapshots.push({label,sha256,...actual});return rgba}
@@ -224,7 +260,7 @@ module.exports=async({call,evaluate,main,nav,wait,root,screenshot,version})=>{
       await pose('正面');await gesture();const painted=await png();assert.notEqual(painted,baseline,'left stroke changes actual PNG pixels')
       await clickText('.editor-tool-rail','撤销');assert.equal(await png(),baseline,'one undo removes the full stroke');await clickText('.editor-tool-rail','重做');assert.equal(await png(),painted)
       await pose('背面');await pose('俯视');await pose('仰视');assert.equal(await png(),painted,'quick views preserve pixels')
-      await clickText('.part-tools','头部');assert.equal(await evaluate(`[...document.querySelectorAll('.part-tools button')].find(b=>b.textContent.trim()==='头部').getAttribute('aria-pressed')`),'false');await clickText('.control-heading','全部显示');assert.equal(await png(),painted,'part visibility preserves pixels')
+      await checkHeadVisibility(width,height,zoom);await clickText('.control-heading','全部显示');assert.equal(await png(),painted,'part visibility preserves pixels')
       await makeDirty();await coordinateClick('[aria-label="关闭绘制皮肤"]');await until('visible dirty confirmation',`!!document.querySelector('.skin-close-dialog')`)
       const layout=await evaluate(`(()=>{const d=document.querySelector('.skin-close-dialog'),r=d.getBoundingClientRect(),x=document.querySelector('.editor-close').getBoundingClientRect(),f=document.querySelector('.editor-footer').getBoundingClientRect();return{innerWidth,innerHeight,confirm:{left:r.left,top:r.top,right:r.right,bottom:r.bottom},x:{top:x.top,right:x.right,bottom:x.bottom},footer:{top:f.top,bottom:f.bottom},focus:document.activeElement.textContent.trim(),role:d.getAttribute('role')}})()`)
       assert(layout.confirm.top>=0&&layout.confirm.bottom<=layout.innerHeight&&layout.confirm.right<=layout.innerWidth);assert(layout.x.top>=0&&layout.x.bottom<=layout.innerHeight);assert(layout.footer.bottom<=layout.innerHeight);assert.equal(layout.role,'alertdialog');assert.equal(layout.focus,'继续绘制')
