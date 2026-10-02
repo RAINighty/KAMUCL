@@ -380,8 +380,29 @@ module.exports=async function verifyMascotHeader(h){
  const persisted=JSON.parse(fs.readFileSync(path.join(profile,'mascot-counts.json'),'utf8'));assert.deepEqual(persisted.sound,{muted:true,volume:.32})
  const closeCount=persisted.counts.q3
  assert.equal(await evaluate('document.activeElement.classList.contains("brand-avatar")'),true,'close restores LOGO keyboard focus')
- await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space'});await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space'});await wait(700)
- const focusedId=await evaluate('document.activeElement.dataset.hit');assert(focusedId,'keyboard LOGO activation focuses the first ready Minecraft hip')
+ await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space'});await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space'})
+ // Observe the real asynchronous reopening and focus handoff. Do not focus a
+ // target from the test or treat a fixed-delay snapshot as initialization ready.
+ const keyboardStarted=Date.now(),keyboardDeadline=keyboardStarted+6000
+ proof.keyboardReady={maximumMs:6000,source:'actual keyboard activation, enabled model targets, native foreground and product-owned focus handoff',samples:[],ready:false,timedOut:false}
+ let focusedId
+ while(Date.now()<keyboardDeadline){
+  const remaining=keyboardDeadline-Date.now();let timer
+  const sample=await Promise.race([
+   Promise.all([persistenceSnapshot(),nativeFocus(false),evaluate(`(()=>{const stage=document.querySelector('.mascot-stage');return{hasFocus:document.hasFocus(),hidden:document.hidden,visibilityState:document.visibilityState,modelBounds:JSON.parse(stage?.dataset.modelBounds||'[]'),audioStates:window.__mascotSoundProof.contexts.map(context=>context.state)}})()`)]).then(([snapshot,foreground,renderer])=>({snapshot,foreground,renderer,elapsedMs:Date.now()-keyboardStarted})),
+   new Promise(resolve=>{timer=setTimeout(()=>resolve(null),remaining)})
+  ]).finally(()=>clearTimeout(timer))
+  if(!sample)break
+  const {local,saved}=sample.snapshot,foreground=sample.foreground
+  sample.ready=sample.elapsedMs<=6000&&local.stageOpen&&!local.stageHidden&&local.buttons.length===7&&local.buttons.every(button=>!button.disabled)&&local.focused.hit===saved.order[0]&&!local.focused.disabled&&sample.renderer.modelBounds.models?.length===7&&sample.renderer.hasFocus&&!sample.renderer.hidden&&foreground.windowFocused&&foreground.focusedWindowId===foreground.windowId&&foreground.windowVisible&&!foreground.windowMinimized&&foreground.appHidden!==true
+  proof.keyboardReady.samples.push(sample);proof.keyboardReady.ready=sample.ready
+  fs.writeFileSync('out/mascot-header-keyboard-ready-live.json',JSON.stringify({version,...proof.keyboardReady},null,2))
+  if(sample.ready){focusedId=local.focused.hit;break}
+  await wait(Math.max(0,Math.min(50,keyboardDeadline-Date.now())))
+ }
+ proof.keyboardReady.elapsedMs=Date.now()-keyboardStarted;proof.keyboardReady.timedOut=!proof.keyboardReady.ready
+ fs.writeFileSync('out/mascot-header-keyboard-ready-live.json',JSON.stringify({version,...proof.keyboardReady},null,2))
+ assert(proof.keyboardReady.ready,'within 6 seconds keyboard LOGO activation must focus the first enabled Minecraft target with real model bounds and native foreground; original observed states retained')
  assert.equal((await evaluate("window.kamucl.invoke('mascots:state')")).counts.q3,closeCount)
  assert.equal(await evaluate('document.querySelector(".stage-tools button").getAttribute("aria-pressed")'),'true')
  const repeatBefore=await evaluate("window.kamucl.invoke('mascots:state')");await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space'});await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',autoRepeat:true});await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',autoRepeat:true});await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space'});await awaitCounts('held keyboard Space is exactly one slap',{...repeatBefore.counts,[focusedId]:repeatBefore.counts[focusedId]+1})
