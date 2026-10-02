@@ -186,6 +186,23 @@ test('hidden close still drains all accepted contacts unbounded without hidden s
  }finally{f.unmount()}
 })
 
+test('actual handprint SVG keeps its pixel silhouette and readable outline without a first-contact filter surface',async()=>{
+ const {descriptor}=parse(await fs.readFile('src/renderer/src/components/MascotStage.vue','utf8')),template=descriptor.template!.content,css=descriptor.styles.map(style=>style.content).join('\n')
+ const svg=template.match(/<svg class="palm-print"[^>]*>[\s\S]*?<\/svg>/)![0],rule=css.match(/\.palm-print\{([^}]*)\}/)![1]
+ assert(!/\bfilter\s*:|<filter\b|\bfilter\s*=/.test(rule+svg),'no CSS or SVG filter graph is created by the first visible handprint')
+ const raster=async(style:string,size:number)=>sharp(Buffer.from(svg.replace('<svg ',`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" shape-rendering="crispEdges" `).replace('</svg>',`<style>.palm-print{${style}}</style></svg>`))).ensureAlpha().raw().toBuffer()
+ for(const size of [15,160]){
+  const actual=await raster(rule,size),base=await raster('fill:#cf674e',size);let filled=0,outline=0,added=0
+  for(let i=0;i<base.length;i+=4){
+   const alpha=actual[i+3]
+   if(base[i+3]===255){assert.equal(alpha,255);assert.deepEqual([...actual.subarray(i,i+3)],[207,103,78],'stroke behind fill preserves every fully opaque original handprint pixel');filled++}
+   if(alpha===255&&actual[i]===70&&actual[i+1]===34&&actual[i+2]===30)outline++
+   if(alpha&&!base[i+3])added++
+  }
+  assert(filled>size*size*.3);assert(outline>0,'dark pixel edge stays visible against clothing');assert(added<size*size*.35,'one-unit outline does not replace the recognizable hand silhouette')
+ }
+})
+
 test('mascot batch preserves all 42 animated meshes, world positions, inverse-transpose normals and skin UVs',()=>{
  const atlas=new Texture(),original=new Texture(),material=new MeshStandardMaterial({map:original,roughness:.83,metalness:.07,side:FrontSide})
  const skins=Array.from({length:7},(_,skinIndex)=>Array.from({length:6},(_,part)=>{

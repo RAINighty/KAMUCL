@@ -10,8 +10,9 @@ module.exports=async function verifyKamuLogo(h){
  const saved=()=>evaluate("window.kamucl.invoke('mascots:state')")
  const counts=async(label,target)=>until(label,async s=>s.count===target&&s.phase==='front'&&(await saved()).counts.kamu===target)
  await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await nav('skins')
- const paneBackdrop=()=>evaluate("[...document.querySelectorAll('.page[data-design-page] .pane')].map(e=>({class:e.className,blur:getComputedStyle(e).backdropFilter}))")
+ const paneBackdrop=()=>evaluate("[...document.querySelectorAll('.shell, .shell .content .card, .shell .content .connection-panel')].map(e=>({class:e.className,blur:getComputedStyle(e).backdropFilter}))")
  proof.backdrop={before:await paneBackdrop()}
+ assert(proof.backdrop.before.length>1&&proof.backdrop.before.some(p=>p.blur!=='none'),'observe real themed glass cards before testing blur deferral; empty selectors cannot pass')
  const nativeFocus=activate=>main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/renderer/index.html'));if(${activate}&&process.platform==='darwin'){testElectron.app.focus({steal:true});w.show();w.focus()}return{platform:process.platform,windowFocused:w.isFocused(),visible:w.isVisible(),minimized:w.isMinimized(),focusedWindowId:testElectron.BrowserWindow.getFocusedWindow()?.id,windowId:w.id}})()`)
  proof.nativeFocus={before:await nativeFocus(false),activation:await nativeFocus(true),samples:[]};await call('Page.bringToFront')
  for(let i=0;i<30;i++){const native=await nativeFocus(false),renderer=await evaluate('({hasFocus:document.hasFocus(),hidden:document.hidden})');proof.nativeFocus.samples.push({native,renderer});proof.nativeFocus.ready=native.platform!=='darwin'||native.windowFocused&&native.visible&&!native.minimized&&native.focusedWindowId===native.windowId&&renderer.hasFocus;if(proof.nativeFocus.ready)break;await wait(50)}
