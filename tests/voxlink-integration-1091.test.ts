@@ -69,21 +69,30 @@ test('launch verification warm cache still rejects same-size corruption with res
 test('TURN tolerates lost-bind ROLE_CONFLICT and UDP blackhole switches to framed TCP with fragmented responses', { timeout: 18000 }, async t => {
   const tcp = net.createServer(), sockets = new Set<net.Socket>()
   let udp = dgram.createSocket('udp4'), port = 0
-  t.after(() => { for (const socket of sockets) socket.destroy(); if (tcp.listening) tcp.close(); try { udp.close() } catch {} })
+  const rejectedUdp: dgram.Socket[] = [], rejectedPorts: Array<{port:number;code:string}> = []
+  t.after(() => { for (const socket of sockets) socket.destroy(); if (tcp.listening) tcp.close(); for(const old of rejectedUdp)try{old.close()}catch{}; try { udp.close() } catch {} })
   // TCP and UDP have separate Windows exclusions. Let UDP choose its own
   // allowed port first: TCP's allocator may repeatedly choose adjacent ports
-  // inside a UDP-only exclusion range. Then reserve the TCP counterpart.
+  // inside a UDP-only exclusion range. Then reserve the TCP counterpart. Keep
+  // rejected UDP leases until both protocols bind: immediately freeing one can
+  // let Windows offer the same TCP-excluded candidate repeatedly.
   for (let attempt = 0; ; attempt++) {
+    let udpBound = false
     try {
-      udp.bind(0, '127.0.0.1'); await once(udp, 'listening'); port = udp.address().port
+      udp.bind(0, '127.0.0.1'); await once(udp, 'listening'); port = udp.address().port; udpBound = true
       tcp.listen(port, '127.0.0.1'); await once(tcp, 'listening'); break
     }
     catch (error) {
-      if (attempt >= 9 || !['EADDRINUSE', 'EACCES'].includes((error as NodeJS.ErrnoException).code || '')) throw error
+      const code = (error as NodeJS.ErrnoException).code || ''
+      rejectedPorts.push({port:udpBound?port:0,code})
+      if (attempt >= 255 || !['EADDRINUSE', 'EACCES'].includes(code)) throw error
       if (tcp.listening) await new Promise<void>(resolve => tcp.close(() => resolve()))
-      try { udp.close() } catch {} ; udp = dgram.createSocket('udp4')
+      if(udpBound)rejectedUdp.push(udp);else try { udp.close() } catch {}
+      udp = dgram.createSocket('udp4')
     }
   }
+  for(const old of rejectedUdp)try{old.close()}catch{};rejectedUdp.length=0
+  if(rejectedPorts.length)console.log(JSON.stringify({fixture:'TURN dual-protocol port reservation',rejectedPorts,port}))
   let udpBinds = 0, tcpBinds = 0
   udp.on('message', (p, from) => { if (p[3] !== 3) return; udpBinds++; const reply = Buffer.concat([p.subarray(0, 21), Buffer.from([5])]); reply[3] = 4; udp.send(reply, from.port, from.address) })
   tcp.on('connection', socket => {
