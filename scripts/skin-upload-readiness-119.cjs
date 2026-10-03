@@ -19,11 +19,13 @@ function installUploadFixture() {
   catch(error){request.outcome='error';request.error=String(error);throw error}
   finally{request.returned=true;request.returnedAt=Date.now();request.returnedOrder=++state.sequence}
  });
+ state.fixtureUploadEntry=ipc._invokeHandlers.get('skin:editorUpload');
  ipc.removeHandler('skin:profile');ipc.handle('skin:profile',()=>{
   state.profiles.push({call:++globalThis.editorProfileCalls,at:Date.now(),order:++state.sequence});
   // This is the existing isolated fixture account. Ledger never includes it.
   return {username:globalThis.uiAccount.username,skins:[{id:'fixture',variant:'classic',dataUrl:globalThis.uiSkin,url:''}],capes:[]};
  });
+ state.fixtureProfileEntry=ipc._invokeHandlers.get('skin:profile');
  return {installed:true,originalBusyListeners:state.originalBusyListeners.length};
 }
 function uploadMainState(stage,profileBefore=0) {
@@ -52,11 +54,14 @@ function cleanupUploadFixture() {
  const s=globalThis.editorUploadObservation,ipc=globalThis.testElectron.ipcMain;
  if(!s?.installed)throw Error('Upload QA observer was not installed');
  ipc.removeListener('window:skinEditorBusy',s.busyListener);
- ipc.removeHandler('skin:editorUpload');ipc.handle('skin:editorUpload',s.originalUpload);
- ipc.removeHandler('skin:profile');ipc.handle('skin:profile',s.originalProfile);
+ const uploadEntryOwned=ipc._invokeHandlers.get('skin:editorUpload')===s.fixtureUploadEntry,profileEntryOwned=ipc._invokeHandlers.get('skin:profile')===s.fixtureProfileEntry;
+ // The product's patched handle() wraps listeners. Restore the exact saved Map
+ // entries in this disposable QA scope; do not wrap again or replace outsiders.
+ if(uploadEntryOwned)ipc._invokeHandlers.set('skin:editorUpload',s.originalUpload);
+ if(profileEntryOwned)ipc._invokeHandlers.set('skin:profile',s.originalProfile);
  s.installed=false;
  const current=ipc.listeners('window:skinEditorBusy');
- return {ready:!current.includes(s.busyListener)&&s.originalBusyListeners.every(fn=>current.includes(fn))&&current.length===s.originalBusyListeners.length&&ipc._invokeHandlers.get('skin:editorUpload')===s.originalUpload&&ipc._invokeHandlers.get('skin:profile')===s.originalProfile,
-  observerRemoved:!current.includes(s.busyListener),originalBusyListenersPreserved:s.originalBusyListeners.every(fn=>current.includes(fn)),busyListenerCountBefore:s.originalBusyListeners.length,busyListenerCountAfter:current.length,uploadHandlerRestored:ipc._invokeHandlers.get('skin:editorUpload')===s.originalUpload,profileHandlerRestored:ipc._invokeHandlers.get('skin:profile')===s.originalProfile};
+ return {ready:uploadEntryOwned&&profileEntryOwned&&!current.includes(s.busyListener)&&s.originalBusyListeners.every(fn=>current.includes(fn))&&current.length===s.originalBusyListeners.length&&ipc._invokeHandlers.get('skin:editorUpload')===s.originalUpload&&ipc._invokeHandlers.get('skin:profile')===s.originalProfile,
+  uploadEntryOwned,profileEntryOwned,observerRemoved:!current.includes(s.busyListener),originalBusyListenersPreserved:s.originalBusyListeners.every(fn=>current.includes(fn)),busyListenerCountBefore:s.originalBusyListeners.length,busyListenerCountAfter:current.length,uploadHandlerRestored:ipc._invokeHandlers.get('skin:editorUpload')===s.originalUpload,profileHandlerRestored:ipc._invokeHandlers.get('skin:profile')===s.originalProfile};
 }
 module.exports={installUploadFixture,uploadMainState,uploadRendererState,cleanupUploadFixture};

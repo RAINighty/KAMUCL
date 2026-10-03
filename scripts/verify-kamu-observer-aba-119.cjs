@@ -11,7 +11,20 @@ function observerCases(){return[
  {name:'queries-B-no-feedback-queries',group:'queries',role:'B',options:{probeClocks:true,queryFeedback:false,measureProbe:true}},
  {name:'queries-A-restored',group:'queries',role:'A',options:{probeClocks:true,queryFeedback:true,measureProbe:true}}
 ]}
+function assertNormalMotion(state){
+ assert.equal(state.motion?.noPreference,true,'observer ABA requires actual no-preference media')
+ assert.equal(state.motion?.reduced,false,'observer ABA cannot run in reduced-motion media')
+ assert.equal(state.motion?.stageReduced,false,'same actual ready stage must retain normal palm rendering')
+}
+async function requireNormalMotion(call,evaluate){
+ await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]})
+ const actual=await evaluate("({noPreference:matchMedia('(prefers-reduced-motion: no-preference)').matches,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches})")
+ assert.equal(actual.noPreference,true,'requested media must actually take effect before opening LOGO')
+ assert.equal(actual.reduced,false,'reduced-motion media must actually be off before opening LOGO')
+ return {requested:'no-preference',actual}
+}
 function assertSameStage(reference,next){
+ assertNormalMotion(reference.state);assertNormalMotion(next.state)
  assertSameWindow(reference.native,next.native)
  assert.equal(next.state.readyAt,reference.state.readyAt,'ABA must retain the same actually prepared mascot')
  assert.equal(next.state.backend,reference.state.backend,'ABA cannot change product backend')
@@ -47,7 +60,7 @@ async function diagnostic(h){
  const proof={version,stage:stem,complete:false,functionalComplete:false,classification:'Instrumentation-only observer SCK A/B/A; never replaces formal header/native baselines or their failures',normalAcceptanceChanged:false,physicalListening:'not performed',originalSourceSpacingMs:90,cases:[],startedAt:new Date().toISOString()}
  const persist=()=>fs.writeFileSync(file,JSON.stringify(proof,null,2)),saved=()=>evaluate("window.kamucl.invoke('mascots:state')")
  const native=()=>main(`(${nativeVideoSnapshot.toString()})(testElectron,process.pid)`)
- const state=()=>evaluate(`(()=>{const e=document.querySelector('.mascot-stage'),strip=e?.querySelector('.figure-strip'),r=strip?.getBoundingClientRect(),b=document.querySelector('[data-hit=kamu]');return{now:performance.now(),timeOrigin:performance.timeOrigin,open:!!e,readyAt:Number(e?.dataset.readyAt),activation:Number(e?.dataset.activation),introAnimations:strip?.getAnimations().filter(a=>a.playState!=='finished'&&a.playState!=='idle').length,footprint:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null,phase:e?.dataset.phase,queue:Number(e?.dataset.queue),contacts:Number(e?.dataset.contacts||0),sounds:Number(e?.dataset.soundsPlayed||0),disabled:b?.disabled,hidden:document.hidden,focus:document.hasFocus(),bufferPreparation:e?.dataset.audioPreparation,viewport:{width:innerWidth,height:innerHeight,scale:visualViewport?.scale??1},backend:e?.dataset.renderBackend}})()`)
+ const state=()=>evaluate(`(()=>{const e=document.querySelector('.mascot-stage'),strip=e?.querySelector('.figure-strip'),r=strip?.getBoundingClientRect(),b=document.querySelector('[data-hit=kamu]');return{now:performance.now(),timeOrigin:performance.timeOrigin,open:!!e,readyAt:Number(e?.dataset.readyAt),activation:Number(e?.dataset.activation),introAnimations:strip?.getAnimations().filter(a=>a.playState!=='finished'&&a.playState!=='idle').length,footprint:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null,phase:e?.dataset.phase,queue:Number(e?.dataset.queue),contacts:Number(e?.dataset.contacts||0),sounds:Number(e?.dataset.soundsPlayed||0),disabled:b?.disabled,hidden:document.hidden,focus:document.hasFocus(),bufferPreparation:e?.dataset.audioPreparation,motion:{noPreference:matchMedia('(prefers-reduced-motion: no-preference)').matches,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,stageReduced:e?.classList.contains('reduced')??null},viewport:{width:innerWidth,height:innerHeight,scale:visualViewport?.scale??1},backend:e?.dataset.renderBackend}})()`)
  const until=async(label,predicate,ms=6000)=>{const began=Date.now();let last;do{last=await state();if(await predicate(last))return last;await wait(30)}while(Date.now()-began<ms);proof.failureState={label,last};persist();assert.fail(label)}
  const click=async selector=>{
   const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw Error('Missing observer ABA target');const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,h=document.elementFromPoint(x,y);if(h!==e&&!e.contains(h))throw Error('Occluded observer ABA target');return{x,y}})()`)
@@ -59,7 +72,9 @@ async function diagnostic(h){
   persist();await nav('skins');assert.equal((await state()).open,false,'previous module must close its own stage')
   proof.preferencesBefore=(await saved()).sound;assert(!proof.preferencesBefore.muted&&proof.preferencesBefore.volume>0)
   proof.runtime=await main('({electron:process.versions.electron,chrome:process.versions.chrome,gpuFeatureStatus:testElectron.app.getGPUFeatureStatus()})')
+  proof.motionMode=await requireNormalMotion(call,evaluate)
   ownsStage=true;await click('.brand-avatar');proof.ready=await until('same actual mascot ready and entrance complete',s=>s.open&&!s.disabled&&s.readyAt>0&&s.bufferPreparation==='ended'&&s.phase==='front'&&s.queue===0&&introSettled(s))
+  assertNormalMotion(proof.ready)
   proof.renderer=await evaluate(`(()=>{const e=document.querySelector('.mascot-stage'),canvas=e.querySelector('.figure-strip canvas'),context=e.dataset.renderBackend==='canvas2d-depth'?canvas.getContext('2d'):null;return{rendererProbe:e.dataset.rendererProbe,fallback:e.dataset.gpuReadyFallback,canvasWidth:canvas.width,canvasHeight:canvas.height,contextAttributes:context?.getContextAttributes?.()??null}})()`)
   proof.reference=await sampleReference()
   const source=path.resolve('scripts/mac-logo-capture-119.swift'),binary=path.join(root,'mac-logo-capture')
@@ -109,3 +124,6 @@ module.exports.observerCases=observerCases
 module.exports.assertSameStage=assertSameStage
 module.exports.assertNaturalAction=assertNaturalAction
 module.exports.assertCaptureIdentity=assertCaptureIdentity
+
+module.exports.assertNormalMotion=assertNormalMotion
+module.exports.requireNormalMotion=requireNormalMotion
