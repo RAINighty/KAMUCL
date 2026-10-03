@@ -1,5 +1,25 @@
 # CURRENT STATUS — KAMUCL 1.1.9
 
+## Last verified state
+
+Windows 成品、三主题与真实 PCL 导入已验证；783 项测试、许可证检查及源码干净解压构建通过。实际成品仍来自 07a1d87c，最终文档与发布工具没有改变应用构建输入。
+
+## Completed
+
+皮肤编辑、主题勾选和安装弹窗、LOGO 单人卡慕及整合包优先分类已完成。独立 Windows 评分为视觉 9.0、交互 9.1、动效 9.0。完整证据、成品摘要及服务／夹具边界见下文。
+
+## Remaining
+
+最终源码包和交接包需与本次文档修订提交重新绑定，并完成运输复验、GitHub 公开 Release 和远端附件核对；这些步骤以发行回执为准，不由本地验收推断完成。Intel 和 Apple Silicon Mac 按用户要求暂停。
+
+## Known issues and risks
+
+物理音效听感、微软真实上传和社区真实在线安装未覆盖。暂停前 Intel 动效停顿及低于目标的原始结果未解决；Mac 不属于本轮合格或交付范围。完整历史失败与未覆盖项见下文。
+
+## Recommended next action
+
+接收者先核对 GitHub v1.1.9 的标签、SHA256SUMS.txt 和附件，再按 START_HERE.md 解压、核对逐文件摘要并运行记录的许可证检查。接续 Mac 工作前须获得用户恢复该范围的指令，保留原始失败与帧时间。
+
 状态时间：2026-10-03 11:01（Asia/Hong_Kong）。
 
 本轮仅交付 Windows。产品提交 07a1d87c0710ab070b763172d27dcf7cebd6547b；EXE SHA256 11a8f16142a0f40519adb2203a91ee7bf74b2ab35ef456729e5034a8fc0aafef；renderer index-rFSz7oqx.js；Windows 实际 GUI QA 07a1d87c0710ab070b763172d27dcf7cebd6547b。暂停前 Mac 历史 QA／源码桥接 a8496bf81efc1f815dc89b7a3e078f8b6ed89b74、CI 37087543778 不作为 Windows 实测 QA 或全球合格结论。Windows production07a1d87c and its real GUI/PCL/portable validation remain unchanged. Subsequent QA/source a8496bf product inputs are identical. User explicitly deferred both Mac architectures; Windows-only release asset selection and delivery documentation do not change app build inputs. Original Windows GUI QA07 and PCL QA0a exact source receipts remain separately bound to the current07 executable; Mac results are historical and never Windows or global qualification.
