@@ -390,6 +390,7 @@ function setLaunchFit(fit: ImageFit) {
         </button>
       </div>
     </div>
+    <div class="bg-row"><span class="bg-label">播放顺序</span><label class="check-option"><input type="checkbox" aria-label="随机播放启动卡图片" :checked="store.settings?.launchThumbnail.randomPlayback === true" @change="store.settings && save({ launchThumbnail: { ...store.settings.launchThumbnail, randomPlayback: ($event.target as HTMLInputElement).checked } })" /><span><strong>随机播放</strong><small>每轮随机播放已启用图片；保留列表顺序和逐图时长。</small></span></label></div>
     <div class="bg-row carousel-default-time"><label data-ui="HomeLayoutEditor:dee929e66133" class="bg-label" for="carousel-default-duration">默认停留时间</label><input data-ui="HomeLayoutEditor:c51dd8fea2e7" id="carousel-default-duration" type="number" min="1" max="120" step="0.5" class="input num-input" :value="carouselDuration(store.settings?.launchThumbnail.intervalSeconds)" @change="setDuration(($event.target as HTMLInputElement).value)" /><span class="muted">秒 · 未单独设置的图片使用此时长</span></div>
     </div>
     <div class="carousel-selection-actions" role="group" aria-label="轮播批量操作" data-ui="carousel:bulk"><span class="muted">批量选择</span>

@@ -2,7 +2,7 @@ import { app, ipcMain } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { CommunityFile, InstallOptions, LoaderName } from '../../shared/types'
-import { favoriteKey, linkFavoriteRecords, removeFavoriteRecords, type ModFavorite } from '../../shared/modFavorites'
+import { favoriteKey, favoriteIconUrl, linkFavoriteRecords, removeFavoriteRecords, type ModFavorite } from '../../shared/modFavorites'
 import { communityFiles, communityModProject, withCommunitySignal } from './community'
 import { modCatalog, identify } from './modManagement'
 import { resolveResourceDirectory } from './resourceDirectory'
@@ -13,7 +13,7 @@ import { compatibleRecordingMod, RECORDING_PROJECTS } from '../../shared/recordi
 const file = () => path.join(app.getPath('userData'),'mod-favorites.json')
 export function modFavorites(): ModFavorite[] { try { const value=JSON.parse(fs.readFileSync(file(),'utf8')); if(!Array.isArray(value))throw new Error();return value.map(v=>({...v,key:favoriteKey(v)})) } catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return [];throw new Error('收藏记录读取失败，未覆盖原记录')} }
 function write(list:ModFavorite[]) { fs.mkdirSync(path.dirname(file()),{recursive:true});fs.writeFileSync(file()+'.tmp',JSON.stringify(list));fs.renameSync(file()+'.tmp',file());return list }
-export function setFavorite(value:ModFavorite,on:boolean) { const key=favoriteKey(value),hash=typeof value.sha1==='string'?value.sha1.toLowerCase():undefined,list=modFavorites().filter(f=>f.key!==key&&!(hash&&f.key==='sha1:'+hash));if(on)list.push({key,name:String(value.name||value.projectId||'本地模组').slice(0,200),source:value.source,projectId:value.projectId,sha1:hash,added:Date.now()});return write(list) }
+export function setFavorite(value:ModFavorite,on:boolean) { const key=favoriteKey(value),hash=typeof value.sha1==='string'?value.sha1.toLowerCase():undefined,list=modFavorites().filter(f=>f.key!==key&&!(hash&&f.key==='sha1:'+hash));if(on)list.push({key,name:String(value.name||value.projectId||'本地模组').slice(0,200),source:value.source,projectId:value.projectId,sha1:hash,iconUrl:favoriteIconUrl(value.iconUrl),added:Date.now()});return write(list) }
 export async function favoriteVersions(source:string,project:string,mc:string,loader:string):Promise<CommunityFile[]> { favoriteKey({source,projectId:project});if(!['fabric','quilt','forge','neoforge'].includes(loader)||typeof mc!=='string'||mc.length>100)throw new Error('请选择游戏与加载器');return (await communityFiles(source as 'modrinth'|'curseforge',project,{kind:'mod',mcVersion:mc,loader:loader as LoaderName})).filter(f=>f.projectId===project&&compatibleRecordingMod(f,mc,loader)) }
 export async function prepareInstallMods(mc:string,opts:InstallOptions,signal?:AbortSignal):Promise<CommunityFile[]> {
  return withCommunitySignal(signal,async()=>{

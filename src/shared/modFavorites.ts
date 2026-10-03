@@ -1,5 +1,10 @@
 import type { CommunitySource } from './types'
-export interface ModFavorite { key: string; name: string; source?: CommunitySource; projectId?: string; sha1?: string; sha1s?: string[]; added: number }
+export interface ModFavorite { key: string; name: string; iconUrl?: string; source?: CommunitySource; projectId?: string; sha1?: string; sha1s?: string[]; added: number }
+/** Remote artwork only: never load local files or credentials from a favorite. */
+export function favoriteIconUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 2048) return
+  try { const url = new URL(value); if (url.protocol === 'https:' && !url.username && !url.password) return url.href } catch {}
+}
 export interface FavoriteSelection { source: CommunitySource; projectId: string; fileId: string }
 export function favoriteKey(value: {source?: string;projectId?: string;sha1?: string}): string {
   if ((value.source === 'modrinth' || value.source === 'curseforge') && /^[a-zA-Z0-9_-]{1,100}$/.test(value.projectId || '')) return `${value.source}:${value.projectId}`
@@ -17,14 +22,15 @@ export function filterFavorites(list: readonly ModFavorite[], filter: FavoriteFi
 }
 
 /** Linking is a merge: older local records and every known file hash remain represented. */
-export function linkFavoriteRecords(list: readonly ModFavorite[], oldKey: string, project: {source: CommunitySource; projectId: string; name: string}): ModFavorite[] {
+export function linkFavoriteRecords(list: readonly ModFavorite[], oldKey: string, project: {source: CommunitySource; projectId: string; name: string; iconUrl?: string}): ModFavorite[] {
   const original = list.find(f => f.key === oldKey)
   if (!original) throw new Error('该收藏已被取消，请刷新列表')
   const key = favoriteKey(project), existing = list.find(f => f.key === key)
   const hashes = [...new Set([original.sha1, ...(original.sha1s ?? []), existing?.sha1, ...(existing?.sha1s ?? [])]
     .filter((hash): hash is string => !!hash && /^[a-f0-9]{40}$/i.test(hash)).map(hash => hash.toLowerCase()))]
   const merged: ModFavorite = { key, source: project.source, projectId: project.projectId, name: project.name.slice(0, 200),
-    added: Math.min(original.added, existing?.added ?? original.added), ...(hashes.length ? {sha1: hashes[0], sha1s: hashes} : {}) }
+    added: Math.min(original.added, existing?.added ?? original.added), ...(hashes.length ? {sha1: hashes[0], sha1s: hashes} : {}),
+    ...(favoriteIconUrl(project.iconUrl || existing?.iconUrl) ? {iconUrl: favoriteIconUrl(project.iconUrl || existing?.iconUrl)} : {}) }
   return [...list.filter(f => f.key !== oldKey && f.key !== key), merged]
 }
 

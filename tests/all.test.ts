@@ -1,4 +1,5 @@
 import './download-cancellation.test'
+import './appearance-motion-110.test'
 import './extension-features.test'
 import './voxlink-116.test'
 import './game-pipe-concurrency.test'

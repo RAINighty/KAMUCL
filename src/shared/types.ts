@@ -563,6 +563,8 @@ export interface LaunchThumbnailSettings {
   /** Default/per-image dwell time, in seconds (1..120). */
   intervalSeconds?: number
   durations?: Record<string, number>
+  /** Shuffle enabled slides without modifying the saved display order. */
+  randomPlayback?: boolean
   fit: ImageFit
 }
 
@@ -980,6 +982,7 @@ export interface CommunityResult {
 export type CommunityProjectReference = Pick<CommunityResult, 'source' | 'projectId' | 'title'> & Partial<Pick<CommunityResult, 'slug' | 'originalTitle'>>
 export interface CommunityModProject extends CommunityProjectReference {
   kind: 'mod'
+  iconUrl?: string
   description?: string
   author?: string
   license?: string

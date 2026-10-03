@@ -120,11 +120,11 @@ function stopBannerTimer() {
 function startBannerTimer() {
   stopBannerTimer()
   if (!banners.value.length) { playback = null; playbackKey = ''; bannerIndex.value = 0; return }
-  playbackKey = 'kamucl.carousel.' + bannerScope.value
+  playbackKey = 'kamucl.carousel.' + bannerScope.value + (appearancePreview.value?.launchThumbnail.randomPlayback ? '.random' : '')
   let saved
   try { saved = JSON.parse(localStorage.getItem(playbackKey) ?? 'null') } catch { /* invalid bookmark */ }
   const settings = appearancePreview.value?.launchThumbnail
-  playback = new CarouselPlayback(banners.value.map(item => ({ path: item.path, durationMs: 1000 * carouselDuration(settings?.durations?.[item.path] ?? settings?.intervalSeconds) })), Date.now(), saved)
+  playback = new CarouselPlayback(banners.value.map(item => ({ path: item.path, durationMs: 1000 * carouselDuration(settings?.durations?.[item.path] ?? settings?.intervalSeconds) })), Date.now(), saved, settings?.randomPlayback === true)
   bannerIndex.value = playback.index
   // 预加载全部轮播图：避免切到下一张时因图片未加载而短暂露出第一张
   for (const item of banners.value) preloadBanner(item.src)
@@ -138,7 +138,7 @@ function startBannerTimer() {
 }
 
 watch(
-  () => JSON.stringify([instanceBanners.value, globalBanners.value, appearancePreview.value?.launchThumbnail.intervalSeconds, appearancePreview.value?.launchThumbnail.durations]),
+  () => JSON.stringify([instanceBanners.value, globalBanners.value, appearancePreview.value?.launchThumbnail.intervalSeconds, appearancePreview.value?.launchThumbnail.durations, appearancePreview.value?.launchThumbnail.randomPlayback]),
   () => {
     failedBanners.value = new Set()
     startBannerTimer()

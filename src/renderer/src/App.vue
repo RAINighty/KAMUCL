@@ -73,13 +73,14 @@ const ProjectionsView = defineAsyncComponent(() => import('./views/ProjectionsVi
 const MascotStage = defineAsyncComponent(() => import('./components/MascotStage.vue'))
 const mascotOpen = ref(false)
 const mascotReady = ref(false)
+const mascotBusy = ref(false)
 const mascotSoftware = ref(false)
 // Give the active logo interaction priority over decorative skin previews.
-provide(MASCOT_INTERACTIVE, computed(() => mascotOpen.value))
+provide(MASCOT_INTERACTIVE, computed(() => mascotOpen.value && (!mascotReady.value || mascotBusy.value)))
 const mascotRef = ref<{flush:()=>Promise<void>}>()
 const mascotKeyboard = ref(false)
 function openMascots(event:MouseEvent){if(mascotOpen.value)return;mascotKeyboard.value=event.detail===0;mascotReady.value=false;mascotSoftware.value=false;mascotOpen.value=true}
-function closeMascots(){mascotOpen.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.brand-avatar')?.focus())}
+function closeMascots(){mascotOpen.value=false;mascotBusy.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.brand-avatar')?.focus())}
 const PacksView = defineAsyncComponent(() => import('./views/PacksView.vue'))
 const ShadersView = defineAsyncComponent(() => import('./views/ShadersView.vue'))
 const KeysView = defineAsyncComponent(() => import('./views/KeysView.vue'))
@@ -967,10 +968,9 @@ function applyCustomVars(custom: CustomTheme, theme: ThemeName) {
   const colors = theme === 'custom' ? readableCustomColors(custom.colors) : custom.colors
   const accent = colors.accent
   const dark = hexLuminance(colors.bg) < 0.46
-  const blackPurple = theme === 'transparent'
   const cardOpacity = dark ? 88 : 94
   const raisedOpacity = dark ? 82 : 91
-  const sideOpacity = blackPurple ? 88 : dark ? 26 : 38
+  const sideOpacity = dark ? 26 : 38
   const accent2 = `color-mix(in srgb, ${accent} ${dark ? 72 : 84}%, ${dark ? 'white' : 'black'})`
   const accentDeep = `color-mix(in srgb, ${accent} 78%, black)`
   st.setProperty('--accent', accent)
@@ -1007,7 +1007,7 @@ function applyCustomVars(custom: CustomTheme, theme: ThemeName) {
   st.setProperty('--shadow-lg', dark ? '0 20px 55px rgba(0, 0, 0, 0.42)' : '0 20px 55px rgba(31, 50, 85, 0.18)')
   st.setProperty(
     '--shell-surface',
-    `color-mix(in srgb, ${colors.bg} ${blackPurple ? 96 : dark ? 30 : 42}%, transparent)`
+    `color-mix(in srgb, ${colors.bg} ${dark ? 30 : 42}%, transparent)`
   )
   st.setProperty('--glass-blur', '28px')
   // 图一布局是全部主题共享的固定骨架；旧 layout 字段只保留兼容，不再改变结构。
@@ -1245,7 +1245,7 @@ onUnmounted(() => {
       <div data-ui="App:fc5fc8ba7e96" class="logo-area">
         <div class="brand-slot">
         <button class="brand-avatar" :class="{'avatar-open':mascotOpen&&mascotReady,'avatar-preparing':mascotOpen&&!mascotReady}" :tabindex="mascotOpen?-1:0" aria-label="打开卡慕互动彩蛋" :aria-expanded="mascotOpen" :aria-busy="mascotOpen&&!mascotReady" :title="mascotOpen&&!mascotReady?'正在准备卡慕…':'打开卡慕互动彩蛋'" @click="openMascots"><img data-ui="App:0f39bd9dbfd2" class="brand-head" :src="brandHead" alt="KaMuaMua 的 Minecraft 头像" /></button>
-        <MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @ready="mascotReady=true" @render-mode="mascotSoftware=$event" @close="closeMascots"/>
+        <MascotStage v-if="mascotOpen" ref="mascotRef" :focus-on-ready="mascotKeyboard" @ready="mascotReady=true" @activity="mascotBusy=$event" @render-mode="mascotSoftware=$event" @close="closeMascots"/>
         </div>
         <div data-ui="App:7494cda29e47" class="logo-text">
           <span data-ui="App:c396a9ff34cb" class="logo-name">KAMUCL</span>

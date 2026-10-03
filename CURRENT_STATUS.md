@@ -1,3 +1,39 @@
+# CURRENT STATUS — KAMUCL 1.1.10
+
+## Last verified state
+
+2026-10-03 14:43，788/788 测试、TypeScript、生产构建、许可证及最终 EXE 四主题 GUI 已通过。产品成品 SHA256 如下。成品之后的文档与 QA 脚本变更不改变应用构建输入。
+
+## Completed
+
+收藏真实图标与旧记录补图、黑紫玻璃透明度、闲置 LOGO 永久暂停皮肤修复、自然站姿和回调保护、启动减少动态效果诊断、启动卡随机播放。原生启动当前显示器 59.96 FPS，备用启动两种动态模式已验证。详见 docs/RELEASE-1.1.10.md。
+
+## Remaining
+
+本文件写入时，Windows 最终 EXE/ZIP 干净解压与完整哈希检查已通过；源码和交接包运输核对以及远端提交、标签、公开 Release 与附件核对仍在执行；由交付回执确认结果，不由文件描述推断完成。
+
+## Known issues and risks
+
+受影响用户电脑不可访问；真实 CDN/平台图标网络未覆盖（服务夹具与真实图片解码分别记录），物理声音未复听，Mac 两架构暂停，录屏帧时间未改写或当作所有机器的 FPS 合格证明。历史失败保留，详见 summary.json。
+
+## Recommended next action
+
+从 GitHub v1.1.10 核对 SHA256 和 Windows 下载，源码运行 START_HERE.md 的验证；系统关闭动画时在 Windows 辅助功能 → 视觉效果开启动画。继续 Mac 工作须由用户恢复范围。
+
+## Packaged artifact SHA256
+
+- KAMUCL-1.1.10.exe: 92e93260179b75f36d3e145ad70f7c4e818042d6de60fadf3949a372249b50da
+- KAMUCL-1.1.10-windows-x64.zip: 76cfb0eebf917a639b6551b0d360c47ddc71850239799a303430dce1fca95442
+- KAMUCL-1.1.10-windows-x64-unpacked.zip: d1b42165dedeed4d32f53559da120af90fd083001959deb63f23013bb2a5edd7
+
+## Changed files and evidence
+
+应用更改覆盖收藏模型/项目元数据/收藏 UI，App 玻璃与彩蛋优先级，SkinViewer3D 帧生命周期，原生启动诊断，轮播类型/策略/状态/UI，设置说明及版本锁文件。验证入口 tests/appearance-motion-110.test.ts 和 scripts/verify-appearance-motion-110-ui.cjs；完整文件列表由源码和交接清单给出。
+
+---
+
+以下保留 1.1.9 历史文档，仅用于追溯，不是当前验收或安装说明。
+
 # CURRENT STATUS — KAMUCL 1.1.9
 
 ## Last verified state

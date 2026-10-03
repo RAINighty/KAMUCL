@@ -410,6 +410,8 @@ export async function communitySearchPage(input: CommunityQuery): Promise<Commun
   return { items: withZhTitle(items), total: totals.modrinth + totals.curseforge, offset: q.offset, limit: q.limit, warnings }
 }
 
+import { favoriteIconUrl } from '../../shared/modFavorites'
+
 const projectText = (value: unknown, limit: number): string | undefined => typeof value === 'string' && value.trim() ? value.slice(0, limit) : undefined
 const projectCount = (value: unknown): number | undefined => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
 function projectWebpage(value: unknown, source: CommunitySource): string | undefined {
@@ -424,10 +426,10 @@ export async function communityProject(source: CommunitySource, projectId: strin
   if (kind !== 'mod') throw new Error('收藏详情仅支持 MOD 项目')
   if (typeof projectId !== 'string') throw new Error('请填写有效的来源项目 ID')
   if (source === 'modrinth' && /^[a-zA-Z0-9_-]{1,100}$/.test(projectId)) {
-    const project = await mrFetch(`/project/${encodeURIComponent(projectId)}`) as { id?: string; project_type?: string; title?: string; slug?: string; description?: string; license?: { id?: string; name?: string }; categories?: string[]; downloads?: number; followers?: number; updated?: string }
+    const project = await mrFetch(`/project/${encodeURIComponent(projectId)}`) as { id?: string; project_type?: string; title?: string; slug?: string; description?: string; license?: { id?: string; name?: string }; categories?: string[]; downloads?: number; followers?: number; updated?: string; icon_url?: string }
     if (project.project_type !== 'mod' || typeof project.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(project.id) || typeof project.title !== 'string' || !project.title) throw new Error('该 Modrinth 项目不是有效模组')
     const slug = projectText(project.slug, 100)
-    return { kind: 'mod', source, projectId: project.id, title: project.title.slice(0, 200), slug,
+    return { kind: 'mod', source, projectId: project.id, title: project.title.slice(0, 200), slug, iconUrl: favoriteIconUrl(project.icon_url),
       description: projectText(project.description, 4000), license: projectText(project.license?.name || project.license?.id, 200),
       categories: Array.isArray(project.categories) ? project.categories.flatMap(c => projectText(c, 100) ?? []).slice(0, 30) : [],
       downloads: projectCount(project.downloads), followers: projectCount(project.followers), updatedAt: projectText(project.updated, 100),
@@ -436,7 +438,7 @@ export async function communityProject(source: CommunitySource, projectId: strin
   if (source === 'curseforge' && /^\d{1,20}$/.test(projectId)) {
     const result = await cfFetch(`/mods/${projectId}`) as { data?: CfMod }, project = result.data
     if (String(project?.id) !== projectId || project?.gameId !== 432 || project?.classId !== CF_CLASS_ID.mod || typeof project?.name !== 'string' || !project.name) throw new Error('该 CurseForge 项目不是有效 Minecraft 模组')
-    return { kind: 'mod', source, projectId, title: project.name.slice(0, 200), slug: projectText(project.slug, 100),
+    return { kind: 'mod', source, projectId, title: project.name.slice(0, 200), iconUrl: favoriteIconUrl(project.logo?.thumbnailUrl), slug: projectText(project.slug, 100),
       description: projectText(project.summary, 4000), author: Array.isArray(project.authors) ? projectText(project.authors.map(author => projectText(author.name, 100)).filter(Boolean).join(', '), 500) : undefined,
       categories: Array.isArray(project.categories) ? project.categories.flatMap(c => projectText(c.name, 100) ?? []).slice(0, 30) : [],
       downloads: projectCount(project.downloadCount), updatedAt: projectText(project.dateModified, 100), webpage: projectWebpage(project.links?.websiteUrl, source) }
@@ -444,9 +446,9 @@ export async function communityProject(source: CommunitySource, projectId: strin
   throw new Error('请填写有效的来源项目 ID')
 }
 
-export async function communityModProject(source: CommunitySource, projectId: string): Promise<{ source: CommunitySource; projectId: string; name: string }> {
+export async function communityModProject(source: CommunitySource, projectId: string): Promise<{ source: CommunitySource; projectId: string; name: string; iconUrl?: string }> {
   const project = await communityProject(source, projectId, 'mod')
-  return { source: project.source, projectId: project.projectId, name: project.title }
+  return { source: project.source, projectId: project.projectId, name: project.title, ...(project.iconUrl ? {iconUrl: project.iconUrl} : {}) }
 }
 
 export async function curseForgeFilePage(projectID: number, fileID: number): Promise<string> {

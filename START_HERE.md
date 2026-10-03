@@ -1,3 +1,15 @@
+# START HERE — KAMUCL 1.1.10
+
+当前交付为 Windows x64；下载并运行 KAMUCL-1.1.10.exe，或解压紧凑 ZIP。需要绕过自解压包装器时用 windows-x64-unpacked ZIP。两种 Mac 架构继续暂停。
+
+源码需要 Node.js 22+、npm、Git、完整 JDK 17+；Windows 使用 PowerShell。运行 npm ci、node scripts/build-bridge.cjs、npx tsc --noEmit、npm test、npm run license:check、npm run build；打包 npm run dist:win。已验证的 Windows 使用 Electron 44.3.0。
+
+交接包验证入口为 scripts/check-licenses.cjs，记录命令 ["node", "scripts/check-licenses.cjs"]。比较外层 SHA256 后核对 _handoff/manifest.json 与 _handoff/SHA256SUMS.txt 并运行记录命令。成品位于 _handoff/artifacts。源码包另含 SOURCE-MANIFEST.json。
+
+当前验证与边界见 docs/RELEASE-1.1.10.md 和 docs/validation-1.1.10/summary.json；图片、账号及游戏实例为个人运行数据，未打入源码或 EXE。升级无需删除实例或存档。下方是以前版本的历史说明，仅供追溯。
+
+---
+
 # KAMUCL 1.1.9 交付入口（Windows）
 
 **用户已将本轮交付限定为 Windows，暂缓 Intel 和 Apple Silicon Mac 的开发、构建与验收。验收范围以 CURRENT_STATUS.md 为准；公开状态、版本标签和下载附件以 GitHub 的 v1.1.9 Release 及外部 SHA256SUMS.txt 为准。**

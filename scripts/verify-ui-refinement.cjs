@@ -1,6 +1,6 @@
 // Actual portable EXE GUI, with an isolated profile and loopback-only inspection.
 if (process.argv[2]) {
-  if (!['black-orange', 'blue-white', 'custom'].includes(process.argv[2])) throw new Error('Unknown GUI theme argument')
+  if (!['transparent', 'black-orange', 'blue-white', 'custom'].includes(process.argv[2])) throw new Error('Unknown GUI theme argument')
   process.env.KAMUCL_TEST_THEME = process.argv[2]
 }
 const fs=require('fs'),path=require('path'),os=require('os'),net=require('net'),assert=require('assert/strict'),{spawn}=require('child_process');
@@ -95,7 +95,8 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
       for(let i=0;i<frames.length;i++)fs.writeFileSync(path.join(directory,frames[i].file),buffers[i]);
       const intervals=frames.slice(1).map((frame,index)=>frame.timestamp-frames[index].timestamp),elapsed=frames.length>1?frames.at(-1).timestamp-frames[0].timestamp:0,result={version,directory,capture,source:'actual Page.startScreencast full compositor frames scaled to fit 960x620, JPEG quality70, acknowledged before decode and buffered in memory until recording stops; no interpolated frames',startedAt:new Date(startedAt).toISOString(),frames,elapsed,fps:elapsed?(frames.length-1)/elapsed:0,intervals};fs.writeFileSync(path.join(directory,'recording.json'),JSON.stringify(result,null,2));return result;
     };
-    const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version,recordScreencast,ownedTrack};
+    const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version,recordScreencast,ownedTrack,ws};
+    if(process.env.KAMUCL_UI_MODULE==='ux110')await require('./verify-appearance-motion-110-ui.cjs')(harness);
     if(!process.env.KAMUCL_SKIP_EXTENSION_BASE)await require('./verify-extension-ui.cjs')(harness);
     const selectedModule=process.env.KAMUCL_UI_MODULE||process.env.KAMUCL_117_MODULE;
     if(version==='1.1.9'&&selectedModule==='motion119')await require('./verify-kamu-motion-diagnostic-119.cjs')({...harness,motionDiagnosticInvocation:'standalone-cold-process'});

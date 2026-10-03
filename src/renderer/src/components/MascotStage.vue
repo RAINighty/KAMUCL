@@ -16,9 +16,10 @@ import {KamuPalmAnimation} from '../kamuPalmAnimation'
 import skinUrl from '../assets/mascot-skins/kamu.png'
 import palmUrl from '../assets/mascot-feedback/pixel-palm.png'
 import printUrl from '../assets/mascot-feedback/palm-print.png'
-const props=defineProps<{focusOnReady?:boolean}>(),emit=defineEmits<{close:[];ready:[];'render-mode':[software:boolean]}>()
+const props=defineProps<{focusOnReady?:boolean}>(),emit=defineEmits<{close:[];ready:[];activity:[active:boolean];'render-mode':[software:boolean]}>()
 const {reduced,hidden,decorativeActive}=useMotion(),host=ref<HTMLElement>(),viewport=ref<HTMLElement>(),hit=ref<HTMLButtonElement>(),menuButton=ref<HTMLButtonElement>()
 const ready=ref(false),supported=ref(true),closing=ref(false),menu=ref(false),confirmReset=ref(false),persistError=ref(''),busy=ref(false)
+watch(busy,value=>emit('activity',value),{flush:'sync'})
 const state=ref<MascotState>({counts:{},order:MASCOTS.map(m=>m.id),sound:normalizeMascotSound()})
 const sound=computed(()=>normalizeMascotSound(state.value.sound)),interaction=new KamuInteraction()
 const audio=new MascotAudio(()=>sound.value,(played,voices)=>{if(host.value){host.value.dataset.soundsPlayed=String(played);host.value.dataset.activeSounds=String(voices)}},()=>!hidden.value,event=>{data('audioPreparation',event.phase);data('audioPrepareStartedAt',String(event.startedAt));data('audioPrepareAt',String(event.at));data('audioPrepareTime',String(event.audioTime))})

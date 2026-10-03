@@ -626,7 +626,7 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
                 >
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
                 </button>
-                <button v-if="query.kind === 'mod'" class="icon-btn result-favorite" :class="{ active: favorites.some(f => f.key === itemKey(r)) }" :aria-label="`${favorites.some(f => f.key === itemKey(r)) ? '取消收藏' : '收藏'} ${r.title}`" :aria-pressed="favorites.some(f => f.key === itemKey(r))" :title="favorites.some(f => f.key === itemKey(r)) ? '取消收藏模组' : '收藏模组'" :disabled="favoriteBusy.has(itemKey(r))" @click.stop="toggleProject(r.source, r.projectId, r.title)">
+                <button v-if="query.kind === 'mod'" class="icon-btn result-favorite" :class="{ active: favorites.some(f => f.key === itemKey(r)) }" :aria-label="`${favorites.some(f => f.key === itemKey(r)) ? '取消收藏' : '收藏'} ${r.title}`" :aria-pressed="favorites.some(f => f.key === itemKey(r))" :title="favorites.some(f => f.key === itemKey(r)) ? '取消收藏模组' : '收藏模组'" :disabled="favoriteBusy.has(itemKey(r))" @click.stop="toggleProject(r.source, r.projectId, r.title, r.iconUrl)">
                   <svg viewBox="0 0 24 24" width="16" height="16" :fill="favorites.some(f => f.key === itemKey(r)) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L3 9.6l6.2-.9Z" /></svg>
                 </button>
               </div>
@@ -666,7 +666,7 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
         <div data-ui="CommunityView:6904c547ed30" class="modal download-modal">
           <h3 data-ui="CommunityView:7b81ed690844" class="modal-title"><MarqueeText :text="'下载 ' + modal.item?.title"/></h3>
           <div data-ui="CommunityView:a84b1e456827" v-if="modal.item" class="modal-links">
-            <button v-if="modal.kind==='mod'" class="btn btn-ghost btn-sm" :disabled="favoriteBusy.has(itemKey(modal.item))" :aria-pressed="favorites.some(f=>f.key===itemKey(modal.item!))" @click="toggleProject(modal.item.source,modal.item.projectId,modal.item.title)">{{favorites.some(f=>f.key===modal.item!.source+':'+modal.item!.projectId)?'★ 已收藏':'☆ 收藏模组'}}</button>
+            <button v-if="modal.kind==='mod'" class="btn btn-ghost btn-sm" :disabled="favoriteBusy.has(itemKey(modal.item))" :aria-pressed="favorites.some(f=>f.key===itemKey(modal.item!))" @click="toggleProject(modal.item.source,modal.item.projectId,modal.item.title,modal.item.iconUrl)">{{favorites.some(f=>f.key===modal.item!.source+':'+modal.item!.projectId)?'★ 已收藏':'☆ 收藏模组'}}</button>
             <button data-ui="CommunityView:6fabba70cd3a" class="btn btn-ghost btn-sm" @click="openExternal(sourceUrl(modal.item, modal.kind))">
               {{ modal.item.source === 'modrinth' ? 'Modrinth 源页面' : 'CurseForge 源页面' }}
             </button>
