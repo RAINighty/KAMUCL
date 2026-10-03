@@ -1,6 +1,6 @@
-# CURRENT STATUS — KAMUCL 1.1.9
+# KAMUCL 1.1.9
 
-状态时间：2026-10-03 11:01（Asia/Hong_Kong）。
+2026-10-03 11:01（Asia/Hong_Kong）。
 
 本轮仅交付 Windows。产品提交 07a1d87c0710ab070b763172d27dcf7cebd6547b；EXE SHA256 11a8f16142a0f40519adb2203a91ee7bf74b2ab35ef456729e5034a8fc0aafef；renderer index-rFSz7oqx.js；Windows 实际 GUI QA 07a1d87c0710ab070b763172d27dcf7cebd6547b。暂停前 Mac 历史 QA／源码桥接 a8496bf81efc1f815dc89b7a3e078f8b6ed89b74、CI 37087543778 不作为 Windows 实测 QA 或全球合格结论。Windows production07a1d87c and its real GUI/PCL/portable validation remain unchanged. Subsequent QA/source a8496bf product inputs are identical. User explicitly deferred both Mac architectures; Windows-only release asset selection and delivery documentation do not change app build inputs. Original Windows GUI QA07 and PCL QA0a exact source receipts remain separately bound to the current07 executable; Mac results are historical and never Windows or global qualification.
 

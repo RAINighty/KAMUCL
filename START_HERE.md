@@ -1,75 +1,59 @@
-# KAMUCL 1.1.8 交付入口
+# KAMUCL 1.1.9 交付入口（Windows）
 
-本包包含皮肤编辑布局与关闭修复、回望人物与掌击走位、图片列表重排、社区收藏集中管理的源码、资源、锁文件、测试、许可证及发布成品。
-本轮功能见 `docs/FEATURES_1.1.8.md`；自由调色板与混播基础见 `docs/FEATURES_1.1.7.md`，六项功能和投影转换边界见 `docs/FEATURES_1.1.6.md`。
-实际验证状态、未覆盖项和成品摘要见 `CURRENT_STATUS.md`。
-本批详细发行记录见 `docs/RELEASE_1.1.8.md`；交接包内的真实截图、原始录屏帧、
-独立评审和源码干净构建结果位于 `release/validation-1.1.8/Delivery/`。
-浏览器验证 profile 和缓存不包含在交付材料中。
+**用户已将本轮交付限定为 Windows，暂缓 Intel 和 Apple Silicon Mac 的开发、构建与验收。验收范围以 CURRENT_STATUS.md 为准；公开状态、版本标签和下载附件以 GitHub 的 v1.1.9 Release 及外部 SHA256SUMS.txt 为准。**
 
-- Project: KAMUCL 1.1.8。
-- Deliverable: 界面交互改进、双平台成品、完整源码和验证记录。
-- Packaged artifact: Windows EXE / ZIP、Mac arm64 / x64 DMG / ZIP。
+本轮交付包含皮肤编辑器布局、主题勾选控件与安装弹窗、LOGO 原位卡慕互动、统一整合包分类导入的源码、资源、锁文件、测试、许可证及 Windows 成品。功能见 docs/FEATURES_1.1.9.md；实际覆盖、历史失败和未覆盖项见 CURRENT_STATUS.md 与 docs/RELEASE_1.1.9.md。详细证据位于交接包 release/validation-1.1.9/Delivery/；用户整合包、存档、浏览器配置和账号不包含在内。暂停前的 Mac 失败证据保留，不能视为 Mac 合格或已交付。
+
+- Project: KAMUCL 1.1.9。
+- Deliverable: 本轮实现、Windows 成品、完整源码及验证证据。
+- Packaged artifact: Windows EXE / compact ZIP / unpacked ZIP；不包含 Mac 安装包。
 - Intended receiver: 启动器使用者及接续开发者。
 
 ## Use the deliverable
 
-Windows x64 使用 `KAMUCL-1.1.8.exe`，或先解压 `KAMUCL-1.1.8-windows-x64.zip`。
-保留 EXE 旁的 `KAMUCL-runtime` 缓存；无法运行自解压包装器时可使用 unpacked ZIP。
-Mac 按芯片选择 arm64 或 x64 的 DMG / ZIP，将 APP 放到 Applications。
-Mac 成品采用 ad-hoc 签名，未进行 Apple Developer ID 签名或公证。
-交接 ZIP 的成品位于 `_handoff/artifacts/`；GitHub Release 提供各平台的独立下载。
+Windows x64 使用 KAMUCL-1.1.9.exe，或解压 KAMUCL-1.1.9-windows-x64.zip。保留 EXE 旁的 KAMUCL-runtime 缓存；无法运行自解压包装器时使用 unpacked ZIP。本轮不提供 Mac 下载或安装说明。
+
+交接包成品在 _handoff/artifacts/；GitHub Release 提供 Windows 独立下载。升级保留用户图片、收藏、设置和所有历史人物计数；另六人的界面退出，不删除计数。此前误导入的实例不会自动删除。
 
 ## Prerequisites
 
-- Operating system: Windows x64，或 macOS Apple Silicon / Intel。
-- Runtime/tool versions: Node.js 22+、npm、完整 JDK 17+、Git；Mac 构建需 Xcode 命令行工具。
+- Operating system: Windows x64。
+- Runtime/tool versions: 源码需要 Node.js 22+、npm、完整 JDK 17+、Git。Windows 成品 Electron 44.3.0。
 
-源码开发需要 Node.js 22 或更高版本、npm、Git、JDK 17 或更高版本及网络访问。
-必须将 `JAVA_HOME` 指向包含 `javac` 和 `jar` 的完整 JDK。
-Windows 使用 PowerShell；Mac 原生构建需要 Xcode 命令行工具及对应架构的 macOS。
-工具、运行库和游戏依赖会从其官方服务下载，缓存不包含在源码或交接包内。
-登录账号、VoxLink 工单凭据、发布令牌和签名材料由使用者另行提供，本包不包含这些内容。
+将 JAVA_HOME 指向包含 javac 与 jar 的完整 JDK，Windows 使用 PowerShell。工具和游戏依赖需要网络访问，缓存不随包交付。账号、发布令牌及 VoxLink 工单凭据另行提供。
 
 ## Setup
 
-```text
-npm ci
-node scripts/build-bridge.cjs
-npx tsc --noEmit
-npm test
-npm run license:check
-npm run build
-```
+    npm ci
+    node scripts/build-bridge.cjs
+    npx tsc --noEmit
+    npm test
+    npm run license:check
+    npm run build
 
-Windows 成品命令为 `npm run dist:win`。Mac 原生双架构交付流程见
-`.github/workflows/mac-build.yml`；macOS 当前使用 Electron 33.4.11，Windows 使用 Electron 44.3.0。
-不要在 Windows 上把交叉打包结果作为 Mac 实际启动验收。
+Windows 成品命令为 npm run dist:win。本轮不执行 Mac 构建或验收；源码中既有 Mac 流程保留，Windows 构建不代表 Mac 通过。
 
 ## Verify
 
 无需安装 npm 依赖即可运行许可证与对应源码检查，失败时退出码非零：
 
-```text
-node scripts/check-licenses.cjs
-```
+    node scripts/check-licenses.cjs
 
-交接包记录的验证命令为 `['node', 'scripts/check-licenses.cjs']`。
-`_handoff/manifest.json` 和 `_handoff/SHA256SUMS.txt` 记录每个文件的 SHA256。
-独立源码 ZIP 使用 `SOURCE-MANIFEST.json` 记录摘要；发行成品使用 Release 的 `SHA256SUMS.txt`。
-先核对下载文件的外层摘要，再解压、核对逐文件摘要并执行上述命令。
-源码干净构建通过不意味着与包含签名和打包元数据的成品逐字节相同。
+交接记录命令为 ["node", "scripts/check-licenses.cjs"]。_handoff/manifest.json 与 _handoff/SHA256SUMS.txt 记录逐文件 SHA256。独立源码包用 SOURCE-MANIFEST.json；发行附件用外部 SHA256SUMS.txt。先核对外层摘要，再解压核对逐文件摘要并执行命令。干净构建通过不表示包含签名和打包元数据的成品逐字节相同。
 
-## 验证入口
+## 验证入口与边界
 
-- `tests/skin-editor-118.test.ts`、`tests/gallery-favorites-118.test.ts`、`tests/mascot-117.test.ts`：本轮手势、收藏迁移、排序、轨迹及保存规则。
-- `tests/extension-features.test.ts`、`tests/voxlink-116.test.ts`：保留功能的格式、协议与数据规则。
-- `scripts/verify-windows-package.cjs`：Windows 成品、中文路径解压、冷/热启动和完整文件。
-- `scripts/verify-ui-refinement.cjs`：隔离成品 GUI；设置 `KAMUCL_EXTENSION_GUI=1` 同时检查新功能。
-- `scripts/verify-skin-editor-ui.cjs`、`scripts/verify-skin-palette-ui.cjs`、`scripts/verify-mascot-header-ui.cjs`、`scripts/verify-gallery-favorites-118-ui.cjs`：由上述 GUI 入口调用，检查真实坐标手势、关闭意图、窗口生命周期、音画时序、收藏和图片管理；旧轮播主题往返回归继续运行。
-- `scripts/verify-mac.cjs`：原生 APP / DMG、材质、默认皮肤和公共功能 GUI。
-- `scripts/verify-voxlink-live.cjs --live`：创建临时私有房间，检查实际上游中继后退出并释放。
+- npm test：公开合成包分类、安全路径、事务回滚、互动队列和持久化、皮肤编辑状态机等。
+- scripts/verify-windows-package.cjs：最终 Windows 成品、中文路径、冷/热启动、ZIP 解压与完整文件摘要。
+- scripts/verify-ui-refinement.cjs：隔离成品 GUI；KAMUCL_EXTENSION_GUI=1 覆盖全部本轮模块。KAMUCL_UI_MODULE 可指定 header、skin118、palette、gallery、gallery118、import119、selection119。
+- scripts/verify-kamu-logo-119-ui.cjs：实际模型就绪、键盘焦点、连续点击、声音源、关闭重试、隐藏与释放；旧 verify-mascot-header-ui.cjs 按版本选择。
+- scripts/verify-pcl-import-119.cjs <private-export.zip>：真实服务导入和所属游戏窗口验证，结果仅写 ignored out。私有 ZIP 由使用者提供，不包含在源码。
+- scripts/verify-mac.cjs、scripts/verify-mac-game.cjs：原生 APP / DMG 及真实 Minecraft 窗口与世界检查。
+- scripts/verify-kamu-native-trace-119.cjs：独立进程的原生合成器诊断，记录实际 BeginFrame、绘制、提交及窗口状态；带追踪的数据不能替代正常动效验收。
+- scripts/verify-kamu-native-video-119.cjs 与 scripts/mac-logo-capture-119.swift：独立 ScreenCaptureKit 原生 LOGO 观察，保存实际窗口身份、原始 BGRA、PTS、采样状态及无损 PNG；不替代正式 CDP 录屏或其低于目标的结果。scripts/native-video-evidence-119.cjs 核对阶段与归档完整性。未获屏幕录制权限时保留失败，不请求权限弹窗。
+- scripts/verify-kamu-feedback-scale-119-ui.cjs：125%／150% 缩放下实际点击、接触帧与声音计数核对；附加截图采集明确作为诊断。
+- scripts/verify-source-archive.cjs：最终源码包干净解压、成员与摘要、安装依赖、类型和生产构建。
 
-真实微软皮肤上传、工单附件提交、跨 Java 客户端和公网对称 NAT 仍需实际参与者验证。
-隔离账号和模拟服务测试不能作为上述实际场景已通过的证据。
-本轮音频已录制并测量实际混音输出，硬件扬声器/耳机的主观听感未人工验收。
+夹具社区响应不等同真实在线收藏安装；数值音频检查不等同耳机或扬声器听感。真实微软上传、硬件主观听测、用户存档实际游玩等未覆盖项以发行报告为准。
+
+历史原始截图帧与失败记录已打包为 KAMUCL-1.1.9-validation-history-part001.zip 至 part005.zip，均可独立解压；完整清单为 KAMUCL-1.1.9-validation-history-index.json。五卷共 155056 个文件、5827360601 字节原始内容，已逐文件核对源目录与干净解压后的大小、SHA256 和完整清单；每卷小于 GitHub 单附件 2GB 限制。包含暂停前的 Mac 失败及 Windows 长路径漏收证据，失败指标保持原值。最终交接包计划保留所有最终原始证据、历史帧时间、PNG、WebM 和日志，仅不重复历史 JPEG；Delivery/HISTORY-REFERENCE.json 将列出各附件大小、SHA256 与每个未重复成员所在分卷及摘要。临时浏览器缓存单独列为隐私排除，原始历史帧和失败结果没有删改；交接包运输校验与外部历史附件闭合分别验证，接收者需核对索引和全部五卷。

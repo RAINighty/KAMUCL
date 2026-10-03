@@ -6,9 +6,12 @@
  * 3. 上传并验证全部附件后公开 Release
  *
  * 认证优先级：GITHUB_TOKEN 环境变量 → gh CLI → git 凭据管理器（推送用的凭据）。
- * 用法：node scripts/release-github.cjs [--dry-run] [--notes-file reviewed.md]
+ * 用法：node scripts/release-github.cjs [--platform all|windows] [--dry-run] [--notes-file reviewed.md]
  */
 const fs = require('node:fs')
+const { parseReleaseArgs, releaseAssetNames, assertUniqueAssetNames, assertRemotePlatformScope } = require('./release-platform-assets.cjs')
+// Reject invalid/ambiguous scope before writing checksums or creating remote state.
+const options = parseReleaseArgs(process.argv.slice(2))
 require('./check-licenses.cjs').checkLicenses({ release: true })
 const path = require('node:path')
 const crypto = require('node:crypto')
@@ -19,7 +22,7 @@ const root = path.join(__dirname, '..')
 const pkg = require(path.join(root, 'package.json'))
 const version = pkg.version
 const tag = `v${version}`
-const dryRun = process.argv.includes('--dry-run')
+const dryRun = options.dryRun
 
 function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
@@ -96,14 +99,9 @@ async function taggedCommit(token) {
 }
 
 async function main() {
-  const exe = path.join(root, 'release', `KAMUCL-${version}.exe`)
-  const zip = path.join(root, 'release', `KAMUCL-${version}-windows-x64.zip`)
-  const source = path.join(root, 'release', `KAMUCL-${version}-source.zip`)
-  const unpacked = path.join(root, 'release', `KAMUCL-${version}-windows-x64-unpacked.zip`)
-  const mac = ['arm64', 'x64'].flatMap(arch => ['dmg', 'zip'].map(ext => path.join(root, 'release', `KAMUCL-${version}-mac-${arch}.${ext}`)))
-  const handoff = path.join(root, 'release', `KAMUCL-${version}-handoff.zip`)
-  const packages = [exe, zip, unpacked, source, ...mac, handoff]
+  const packages = releaseAssetNames(version, options.platform).map(name => path.join(root, 'release', name))
   packages.push(...require('./release-history-assets.cjs')(path.join(root, 'release'), version))
+  assertUniqueAssetNames([...packages.map(file => path.basename(file)), 'SHA256SUMS.txt'])
   for (const f of packages) {
     if (!fs.existsSync(f)) {
       console.error(`缺少构建产物：${f}（先运行打包）`)
@@ -116,12 +114,11 @@ async function main() {
   fs.writeFileSync(sumsFile, sums, 'utf-8')
   console.log('SHA256SUMS.txt:\n' + sums)
 
-  const notesIndex = process.argv.indexOf('--notes-file')
-  const notesPath = notesIndex < 0 ? null : process.argv[notesIndex + 1]
-  if (notesIndex >= 0 && (!notesPath || notesPath.startsWith('--'))) throw new Error('--notes-file 需要已审阅的 Markdown 文件')
+  const notesPath = options.notesPath
   const body = notesPath ? fs.readFileSync(path.resolve(root, notesPath), 'utf8') : latestNoteBody()
   if (!body.trim()) throw new Error('Release 说明为空，停止发布')
   if (dryRun) {
+    console.log('Release platform: ' + options.platform)
     console.log('--- dry run，Release body ---')
     console.log(body)
     return
@@ -180,6 +177,7 @@ async function main() {
     const assetResponse = await api('GET', `https://api.github.com/repos/${REPO}/releases/${release.id}/assets`, token)
     if (!assetResponse.ok) throw new Error(`无法检查远端附件：HTTP ${assetResponse.status}`)
     const assets = await assetResponse.json()
+    assertRemotePlatformScope(assets, version, options.platform)
     const same = assets.find(a => a.name === name)
     if (same?.size === fs.statSync(file).size && same.digest === `sha256:${sha256(file)}`) {
       console.log(`  ✓ ${name} 已存在且摘要一致`)
@@ -202,6 +200,7 @@ async function main() {
   const verified = await api('GET', `https://api.github.com/repos/${REPO}/releases/${release.id}/assets`, token)
   if (!verified.ok) throw new Error(`无法核对远端附件：HTTP ${verified.status}`)
   const assets = await verified.json()
+  assertRemotePlatformScope(assets, version, options.platform)
   for (const file of [...packages, sumsFile]) {
     const asset = assets.find(a => a.name === path.basename(file))
     if (!asset || asset.size !== fs.statSync(file).size || asset.digest !== `sha256:${sha256(file)}`) {
@@ -213,6 +212,7 @@ async function main() {
   const publicResponse = await api('GET', `https://api.github.com/repos/${REPO}/releases/tags/${tag}`, token)
   if (!publicResponse.ok) throw new Error(`公开标签无法读取：HTTP ${publicResponse.status}`)
   const publicRelease = await publicResponse.json()
+  assertRemotePlatformScope(publicRelease.assets, version, options.platform)
   if (publicRelease.id !== release.id || publicRelease.draft || publicRelease.tag_name !== tag || publicRelease.target_commitish !== commit) throw new Error('公开 Release 与已验证标签或 master 提交不一致')
   if (await taggedCommit(token) !== commit) throw new Error('公开版本标签未指向已验证 master 提交')
   console.log(`\n全部附件大小与 SHA256 已核对，发布完成：https://github.com/${REPO}/releases/tag/${tag}`)
