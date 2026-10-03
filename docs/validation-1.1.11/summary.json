@@ -1,0 +1,160 @@
+{
+  "version": "1.1.11",
+  "recordedAt": "2026-10-03T21:00:06.879Z",
+  "status": "native-qualification-incomplete; local-engineering-candidate",
+  "baseline": {
+    "version": "1.1.10",
+    "master": "85bfe93c016a004b7ddbd397c6b8769bedd25c50",
+    "main": "1f2819a9b3ade9810df48d2c69efabcd1808f264"
+  },
+  "validation": {
+    "publicTests": {
+      "total": 843,
+      "passed": 842,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "Linux native updater shell cannot execute on the Windows host"
+    },
+    "gateProtocolNegativeTests": {
+      "total": 41,
+      "passed": 41,
+      "classification": "synthetic protocol tests, not product native acceptance"
+    },
+    "galleryHandlerTests": {
+      "total": 12,
+      "passed": 12
+    },
+    "typecheck": true,
+    "productionBuild": true,
+    "licenses": true,
+    "windowsPackageIntegrity": true,
+    "windowsFourThemeGui": "partial actual GUI with service fixtures",
+    "windowsRequiredModules": [
+      "single-logo",
+      "skin-editor",
+      "palette",
+      "gallery",
+      "gallery118",
+      "import119",
+      "selection119"
+    ],
+    "actualAudioListening": "not-performed"
+  },
+  "inventory": {
+    "routes": 15,
+    "ipc": 280,
+    "scenarios": 63
+  },
+  "platforms": [
+    {
+      "id": "windows-x64",
+      "completeQualification": false,
+      "scores": {
+        "visual": null,
+        "interaction": null,
+        "motion": null
+      },
+      "nativeStatus": "partial local native regression"
+    },
+    {
+      "id": "mac-arm64",
+      "completeQualification": false,
+      "scores": {
+        "visual": null,
+        "interaction": null,
+        "motion": null
+      },
+      "nativeStatus": "not-built-or-accepted on current candidate"
+    },
+    {
+      "id": "mac-x64",
+      "completeQualification": false,
+      "scores": {
+        "visual": null,
+        "interaction": null,
+        "motion": null
+      },
+      "nativeStatus": "not-built-or-accepted on current candidate"
+    },
+    {
+      "id": "linux-x64",
+      "completeQualification": false,
+      "scores": {
+        "visual": null,
+        "interaction": null,
+        "motion": null
+      },
+      "nativeStatus": "not-built-or-accepted on current candidate"
+    },
+    {
+      "id": "linux-arm64",
+      "completeQualification": false,
+      "scores": {
+        "visual": null,
+        "interaction": null,
+        "motion": null
+      },
+      "nativeStatus": "not-built-or-accepted on current candidate"
+    },
+    {
+      "id": "harmonyos-arm64",
+      "completeQualification": false,
+      "scores": {
+        "visual": null,
+        "interaction": null,
+        "motion": null
+      },
+      "nativeStatus": "engineering ready; no SDK/signing/device/game chain"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "KAMUCL-1.1.11.exe",
+      "size": 97290244,
+      "sha256": "dd584c92935c71ebdcd5ca379d0f1f851c9a07b604a9dcdfd6f2a1986e8142c7",
+      "status": "local-windows-candidate; no public release"
+    },
+    {
+      "name": "KAMUCL-1.1.11-windows-x64.zip",
+      "size": 97321815,
+      "sha256": "78d31f0045102c983fa67d586511993312f2901c686b3f75be1d0f95c163bd2f",
+      "status": "local-windows-candidate; no public release"
+    },
+    {
+      "name": "KAMUCL-1.1.11-windows-x64-unpacked.zip",
+      "size": 143058234,
+      "sha256": "676162091dc723ee97ee6309232eca01de24d0fe602ddaa3d2e71d702b2dd881",
+      "status": "local-windows-candidate; no public release"
+    }
+  ],
+  "evidenceManifest": "release/validation-1.1.11/Delivery/EVIDENCE-MANIFEST.json",
+  "historicalFailures": [
+    "Intel active interval130.627333ms; original CDP/SCK FPS remain rejected",
+    "Windows initial package check raced unfinished ZIP; original failure retained",
+    "Initial Node update picker test lacked Electron app; fixed",
+    "Initial dry-run incorrectly required formal acceptance; real publication retains its gate",
+    "DEB updated label broke old literal-only test; corrected to check shared real label wiring",
+    "gallery118 old total metadata count included automatic artwork reads; original failure retained and real mutation handler observations passed"
+  ],
+  "uncovered": [
+    "current macOS native builds, credentials, Intel GPU/motion, game/world/save/quit, services and updates",
+    "Ubuntu24.04/26.04 native x64/ARM64 desktop/GPU, GNOME/KDE/Wayland and complete games/services/updates",
+    "full Windows63 scenario matrix and current real accounts/community/services",
+    "physical sound listening",
+    "HarmonyOS SDK, legal signing, device and native JVM/JNI/LWJGL/GLFW/audio/game"
+  ],
+  "remote": {
+    "master": "85bfe93c016a004b7ddbd397c6b8769bedd25c50",
+    "main": "1f2819a9b3ade9810df48d2c69efabcd1808f264",
+    "v111Tag": false,
+    "v111Release": false,
+    "push": "rejected: OAuth token lacks workflow scope",
+    "authorization": "two direct connection timeouts; proxy retry expired; scope remains repo/read:org/gist"
+  },
+  "privacy": {
+    "privateAccountDataIncluded": false,
+    "privateModpackOrWorldIncluded": false,
+    "pelicanBicycleIncluded": false,
+    "wuhuiTouched": false
+  }
+}

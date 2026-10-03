@@ -34,6 +34,8 @@ import type { LocalUpdateCheck, PluginInfo, ReleaseInfo, Settings, ThemeName, Up
 import { QQ_GROUP_NUMBER } from '@shared/branding'
 import { useMotion } from '../motion'
 const { systemReduced } = useMotion()
+import { usePlatformUpdate } from '../composables/usePlatformUpdate'
+const { systemInstaller, installAction, updateReadyMessage } = usePlatformUpdate()
 const systemMotionHelp = window.kamucl.platform === 'darwin'
   ? '若需要动画，请在系统设置 → 辅助功能 → 显示中关闭“减少动态效果”。'
   : window.kamucl.platform === 'win32'
@@ -205,7 +207,7 @@ async function onRestoreBackup() {
 async function onApplyPending() {
   try {
     await applyPendingUpdate()
-    toast('更新已就绪，下次手动启动时应用', 'success')
+    toast(updateReadyMessage(), 'success')
   } catch (e) {
     toast('安装失败：' + errText(e), 'error')
   }
@@ -229,7 +231,7 @@ async function confirmLocalUpdate() {
   try {
     await applyLocalUpdate(lu.check)
     await refreshUpdateState()
-    toast('本地更新已准备，下次手动启动时应用', 'success')
+    toast(updateReadyMessage('本地更新已准备'), 'success')
   } catch (e) {
     toast('安装更新失败：' + errText(e), 'error')
   }
@@ -1091,11 +1093,11 @@ async function onRemovePlugin(p: PluginInfo) {
               />
               <span class="switch-ui"></span>
             </label>
-            <span data-ui="SettingsView:94871aad1da8" class="muted upd-auto-hint">发现新版本静默下载，下次启动时应用；关闭则弹窗询问</span>
+            <span data-ui="SettingsView:94871aad1da8" class="muted upd-auto-hint">{{ systemInstaller ? '发现新版本静默下载，下次启动打开系统安装器；关闭则弹窗询问' : '发现新版本静默下载，下次启动时应用；关闭则弹窗询问' }}</span>
           </div>
           <div data-ui="SettingsView:1c8ad9d5ad0b" v-if="pendingUpdate" class="upd-row upd-pending-row">
-            <span data-ui="SettingsView:0447f8159ad6" class="upd-pending-text">v{{ pendingUpdate.release.version }} 已就绪，下次启动时应用</span>
-            <button data-ui="SettingsView:5bd17b41383a" class="btn btn-gold btn-sm" @click="onApplyPending">下次启动应用</button>
+            <span data-ui="SettingsView:0447f8159ad6" class="upd-pending-text">{{ updateReadyMessage(`v${pendingUpdate.release.version} 已就绪`) }}</span>
+            <button data-ui="SettingsView:5bd17b41383a" class="btn btn-gold btn-sm" @click="onApplyPending">{{ installAction }}</button>
           </div>
           <div class="upd-row">
             <span class="upd-label">更新下载源</span>

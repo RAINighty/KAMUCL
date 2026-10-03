@@ -1,4 +1,20 @@
-# START HERE — KAMUCL 1.1.10
+# START HERE — KAMUCL 1.1.11 接续候选
+
+本包是多平台移植的接续候选，不是 Mac／Linux／鸿蒙完整验收完成或正式发行的声明。Windows 最新 EXE 与两个 ZIP 已完成干净解压及启动验证；Mac ARM64、Mac Intel、Linux x64／ARM64 的当前原生产物及完整运行证据尚未取得。鸿蒙已生成原生 HAP 接续工程，但缺少官方 SDK、合法签名条件和实机，尚未生成 HAP 或验证游戏。以 CURRENT_STATUS.md、docs/RELEASE-1.1.11.md 和 docs/validation-1.1.11/independent-review.md 为当前权威状态；下方旧版本说明只用于追溯。
+
+Windows x64 使用 _handoff/artifacts/KAMUCL-1.1.11.exe，或解压紧凑 ZIP；无法使用自解压包装器时解压 windows-x64-unpacked ZIP。各附件 SHA256 在 CURRENT_STATUS.md；交接包逐文件清单在 _handoff/manifest.json 与 _handoff/SHA256SUMS.txt。账户、游戏、用户图片、私钥和未提交的 pelican-bicycle.html 不包含在内，接收者自行选择自己的游戏目录和登录。
+
+源码需要 Node.js 22+、npm、Git、完整 JDK 17+。依次运行 npm ci、node scripts/build-bridge.cjs、npx tsc --noEmit、npm test、npm run license:check、npm run build。Mac／Linux 共同 Electron 基线为 44.3.0，必须在对应原生架构上构建；Mac 最低 macOS 13，Linux 目标 Ubuntu 24.04／26.04 LTS。Mac 打包入口 node scripts/pack-mac.mjs <arm64|x64> --package-only；Linux 入口 node scripts/pack-linux.cjs <arm64|x64>。只构建不构成原生功能或一致性通过，详细验收清单见 docs/validation-1.1.11/parity-matrix.json。Mac 当前为 ad-hoc 签名，不是 Developer ID 签名或公证。
+
+鸿蒙入口 npm run prepare:harmonyos、npm run verify:harmonyos、npm run dist:harmonyos；固定运行时、工程来源及缺失条件见 docs/HARMONYOS.md。不可用 SDK／签名／设备条件会报错，界面资源一致性不等于 JVM／LWJGL／游戏启动链通过。
+
+本交接包记录的验证命令是 ["node", "scripts/check-licenses.cjs"]，无需先安装 npm 依赖。先核对外层 SHA256，再核对逐文件摘要并执行该命令；命令成功只验证许可证和对应源码要求。当前新平台正式发布门控要求完整原生运行、游戏、更新回滚、原始画面及独立评分，不能以此轻量命令替代。
+
+GitHub 当前 workflow 权限不足，候选推送已被远端拒绝；远端 master 仍为 1.1.10 基线。恢复标准 GitHub workflow 授权后才能上传新增构建工作流并启动原生 CI。正式标签和 Release 尚未创建，不能从本地包推断存在公开下载。不得强制推送、覆盖 main 独立历史或操作 wuhui。
+
+---
+
+# START HERE — KAMUCL 1.1.10 历史
 
 当前交付为 Windows x64；下载并运行 KAMUCL-1.1.10.exe，或解压紧凑 ZIP。需要绕过自解压包装器时用 windows-x64-unpacked ZIP。两种 Mac 架构继续暂停。
 

@@ -9,6 +9,8 @@ import ModpackSupplement from './components/ModpackSupplement.vue'
 import { instanceCenter, openInstanceCenter } from './instanceCenter'
 import { loadExitNotices, clearNotices } from './store'
 import { useNavigationBubble } from './composables/useNavigationBubble'
+import { usePlatformUpdate } from './composables/usePlatformUpdate'
+const { updateReadyMessage } = usePlatformUpdate()
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
 import { MASCOT_INTERACTIVE } from './mascotInteraction'
 import type { Component } from 'vue'
@@ -310,7 +312,7 @@ async function onUpdateInstallNow() {
   try {
     await applyUpdate(release)
     updateModal.open = false
-    toast('更新已就绪，下次手动启动时应用', 'success')
+    toast(updateReadyMessage(), 'success')
   } catch (e) {
     toast('安装更新失败：' + errText(e), 'error')
     updateModal.open = false
@@ -1116,7 +1118,7 @@ onMounted(async () => {
       if (updateModal.open && r.taskId === updateModal.taskId) updateModal.slowHint = true
     }),
     onUpdateReady((r) => {
-      toast(`新版本 v${r.version} 已下载完成，下次启动时应用`, 'success')
+      toast(updateReadyMessage(`新版本 v${r.version} 已下载完成`), 'success')
     }),
     onInstallDone((r) => {
       store.installing.delete(r.versionId)

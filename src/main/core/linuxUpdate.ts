@@ -26,7 +26,20 @@ export function linuxUpdateSupported(): boolean {
   const target = linuxAppTarget()
   if (!target) return false
   if (installationKind() === 'deb') return true
+  if (installationKind() === 'appimage' && linuxAppImageUpdateReason()) return false
   try { fs.accessSync(path.dirname(target), fs.constants.W_OK); return true } catch { return false }
+}
+/** Replacement must restart the exact launcher PID, including during rollback. */
+export function linuxAppImageUpdateReason(): string | null {
+  if (installationKind() !== 'appimage') return null
+  try {
+    const appDir = process.env.APPDIR
+    if (process.env.APPIMAGE_EXTRACT_AND_RUN || !appDir || Number(fs.statfsSync(appDir).type) !== 0x65735546) throw Error('extracted runtime')
+    fs.accessSync('/dev/fuse', fs.constants.R_OK | fs.constants.W_OK)
+    return null
+  } catch {
+    return '当前 AppImage 在解压模式运行或 FUSE 不可用，无法安全自动替换并重启。原程序和下载包会保留，请使用便携 tar.gz 或 DEB 安装包。'
+  }
 }
 const inside = (root: string, file: string) => {
   const rel = path.relative(root, file)
@@ -48,6 +61,7 @@ async function verifyDirectory(dir: string, version: string): Promise<void> {
   assertLinuxManifest(await fs.promises.readFile(path.join(dir, 'resources/kamucl-linux.json'), 'utf8'), version, 'portable-directory')
   const fd = await fs.promises.open(path.join(dir, 'kamucl'), 'r')
   try { const bytes = Buffer.alloc(64); await fd.read(bytes, 0, 64, 0); assertLinuxElf(bytes) } finally { await fd.close() }
+  await fs.promises.access(path.join(dir, 'kamucl'), fs.constants.X_OK)
   if (!(await fs.promises.stat(path.join(dir, 'resources/app.asar'))).isFile()) throw Error('Linux 更新包缺少应用归档')
 }
 export async function verifyLinuxAppImage(file: string, version: string): Promise<void> {
@@ -84,6 +98,7 @@ export async function validateLinuxPendingUpdate(t: UpdateTransaction): Promise<
   else await validateLinuxArchive(t.file)
 }
 export async function stageLinuxUpdate(release: ReleaseInfo, file: string, sha256: string, mode: UpdateTransaction['mode']): Promise<void> {
+  const appImageReason = linuxAppImageUpdateReason(); if (appImageReason) throw Error(appImageReason)
   if (!linuxUpdateSupported()) throw Error('Linux 应用目录不可写，请移至用户可写目录后更新')
   if (!inside(linuxUpdateDir(), file) || path.basename(file) !== linuxUpdateAssetName(release.version)) throw Error('请选择当前 Linux 架构及安装方式的官方更新包')
   const t: UpdateTransaction = { schema: 1, id: randomUUID(), target: linuxAppTarget()!, file, sha256, size: fs.statSync(file).size, from: app.getVersion(), release, mode }
@@ -112,7 +127,9 @@ export function linuxUpdaterScript(t: UpdateTransaction, staged: string, oldHash
     'if ! mv -- ' + q(staged) + ' ' + q(t.target) + '; then mv -- ' + q(backup) + ' ' + q(t.target) + '; exit 1; fi',
     "printf '%s' " + q(state) + ' >' + q(path.join(stateDir, 'update-state.json.tmp')),
     'mv -f -- ' + q(path.join(stateDir, 'update-state.json.tmp')) + ' ' + q(path.join(stateDir, 'update-state.json')),
-    'unset APPIMAGE APPDIR', q(executable) + ' >/dev/null 2>&1 &', 'launched=$!',
+    '# Normal FUSE mode execs AppRun in this PID. Extract-and-run forks a wrapper.',
+    '# Do not inherit a wrapper mode whose PID could exit while Electron remains.',
+    'unset APPIMAGE APPDIR APPIMAGE_EXTRACT_AND_RUN', q(executable) + ' >/dev/null 2>&1 &', 'launched=$!',
     "start_time() { sed 's/.*) //' /proc/$1/stat 2>/dev/null | awk '{print $20}'; }",
     'launched_start=$(start_time "$launched")', 'n=0',
     'while [ "$n" -lt 240 ]; do',
@@ -136,7 +153,16 @@ export function linuxUpdaterScript(t: UpdateTransaction, staged: string, oldHash
 }
 let acknowledged: UpdateTransaction | null = null
 export async function applyLinuxUpdateOnStartup(): Promise<boolean> {
-  if (!linuxUpdateSupported()) return false
+  if (!linuxUpdateSupported()) {
+    const reason = linuxAppImageUpdateReason()
+    if (reason && readLinuxUpdate()) {
+      try {
+        fs.appendFileSync(path.join(data(), 'linux-updater.log'), new Date().toISOString() + ' ' + reason + '\n')
+        fs.writeFileSync(path.join(data(), 'update-failed.flag'), reason)
+      } catch { /* inability to write diagnostics must not prevent opening the original application */ }
+    }
+    return false
+  }
   try {
     const previous = readLinuxUpdate(claim())
     if (previous) {

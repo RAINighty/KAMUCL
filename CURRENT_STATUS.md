@@ -1,4 +1,48 @@
-# CURRENT STATUS — KAMUCL 1.1.10
+# CURRENT STATUS — KAMUCL 1.1.11 接续候选
+
+## Last verified state
+
+2026-10-04 04:55（Asia/Hong_Kong）。当前版本 1.1.11；公开基线为 1.1.10。最终公开测试 843 项：842 通过、0 失败、1 项 Linux 原生 shell 测试在 Windows 跳过。TypeScript、生产构建、许可证、Windows EXE／两 ZIP 干净解压、冷／热启动及完整 payload／ASAR 核对通过。四主题 ux110 与黑橙的彩蛋、皮肤、色板、图片／收藏、导入和选择必测模块通过；服务夹具与故障注入不作为真实在线服务证据。
+
+## Completed
+
+已实现共享平台信息和架构规则、Linux 安全凭据与会话回退、ARM64 原生库与 ELF 验证、联机资产、X11 游戏窗口助手、按安装形式选择附件和 Linux 更新回滚、Mac 44.3.0／13+ 两架构构建与完整验收入口。修复旧版本测试分流，建立 15 页面／280 IPC／63 场景矩阵和读取原始证据的发布门控。鸿蒙固定原生运行时／模板，生成接续工程并验证共享前端字节一致；不宣称 HAP 或游戏运行通过。
+
+## Remaining
+
+Mac ARM64／Intel 和 Ubuntu 24.04／26.04 x64／ARM64 原生打包、安装、所有页面与真实游戏／联机／更新验收尚未完成。独立评审已核对有限 Windows 截图和原始录屏，但各平台视觉、交互、动效仍未评分，完整功能通过项不能由局部 GUI 回归填充。鸿蒙缺少 SDK、合法签名与设备，尚无 HAP 或 JVM／LWJGL／JNI 游戏运行链。
+
+候选 master 提交尚未成功推送：GitHub 实际拒绝新增工作流，OAuth 仅含 repo／read:org／gist，缺少 workflow。三次标准授权未成功完成，前两次直接连接超时、代理重试到期；旧基线仍在远端。main 的独立历史须以 cherry-pick 接续；没有 v1.1.11 标签或公开 Release。本地源码／交接包的最终 SHA、干净解压和验证命令由外部回执记录，不能用本说明推断已经发布。
+
+## Known issues and risks
+
+历史 Intel 活动停顿与 CDP／SCK 低于门槛仍保持失败，尚无当前实机复测。Linux 提取运行的 AppImage／缺少 FUSE 不自动替换；DEB 更新需要系统安装器确认；桌面模糊和外部窗口控制受合成器及 X11／XWayland 能力限制。拒绝不安全凭据持久化；缺少系统密钥服务时仅会话登录。仅 x64 游戏或模组原生库不能冒充 ARM64 兼容。
+
+物理音效听感、全部真实账号与社区服务、跨架构真实联机及完整功能矩阵未覆盖。当前 Mac 包计划 ad-hoc 签名，不是 Developer ID 签名或公证；当前鸿蒙运行时完整第三方许可证与签名条件尚未满足。所有历史失败与当前未覆盖项见 docs/RELEASE-1.1.11.md、mac-acceptance.md、Linux 接续说明和独立评审。
+
+## Recommended next action
+
+先恢复 GitHub CLI 的 workflow 标准授权，再推送当前候选并在对应原生架构执行构建。提供 Ubuntu 实际桌面／GPU 与正式系统组合，按矩阵补齐逐项运行和原始画面；取得合法鸿蒙 SDK、签名及实机后继续原生游戏链。只有各平台全部必测通过且三个独立评分各至少 9、无关键缺陷，才发布合格附件。不可把 Xvfb／交叉构建／Windows 回归视为对应平台通过。
+
+## Packaged artifact SHA256
+
+以下为本地 Windows 接续候选，未公开发布。
+
+| 成品 | 字节数 | SHA256 |
+| --- | ---: | --- |
+| KAMUCL-1.1.11.exe | 97290244 | dd584c92935c71ebdcd5ca379d0f1f851c9a07b604a9dcdfd6f2a1986e8142c7 |
+| KAMUCL-1.1.11-windows-x64.zip | 97321815 | 78d31f0045102c983fa67d586511993312f2901c686b3f75be1d0f95c163bd2f |
+| KAMUCL-1.1.11-windows-x64-unpacked.zip | 143058234 | 676162091dc723ee97ee6309232eca01de24d0fe602ddaa3d2e71d702b2dd881 |
+
+内嵌 ASAR SHA256：b03fe16bb64a0bb341069db58b736e3aaeffb8866495f45f1bc4c82dcc64b5f1。最终源码提交由 SOURCE-MANIFEST.json、源码审计回执和交接包清单绑定。完成最新应用构建后的改动仅涉及 QA、发布门控和文档；干净源码审计再次核对提交后的文件。全部用户图片、账号、收藏、计数和未提交的 pelican-bicycle.html 保留在原位置，不包含在成品或公开源码。
+
+## Changed files and evidence
+
+入口为 START_HERE.md。源码文件列表由源码清单给出；本批验证汇总 docs/validation-1.1.11/summary.json，逐项库存 parity-matrix.json，独立评审 independent-review.md。原始测试／构建／包验证／GUI 记录保存在交接包 release/validation-1.1.11/；原始帧不插帧、不重写时间。记录验证命令 ["node", "scripts/check-licenses.cjs"]，成功仅表示许可证／对应源码核对，不是全平台验收。
+
+---
+
+# CURRENT STATUS — KAMUCL 1.1.10 历史
 
 ## Last verified state
 

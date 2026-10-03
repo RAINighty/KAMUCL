@@ -12,10 +12,10 @@
     "classification": "historical Windows baseline; not current-platform proof"
   },
   "sourceSnapshot": {
-    "head": "85bfe93c016a004b7ddbd397c6b8769bedd25c50",
-    "trackedDiffSHA256": "b087606f89ac0f9ef79ace31994731db71ec02b2cb0a633672065a3adfe2fdcb",
+    "head": "6f5aecdd93502653913e3a72c89b499c7f2d2f96",
+    "trackedDiffSHA256": "2e82fee949ec6ee230efd030b5d477e18a16da8ae76fa37e435924f9b049f18a",
     "final": false,
-    "inventoryInputCount": 337,
+    "inventoryInputCount": 338,
     "inventoryInputs": [
       {
         "path": "src/main/core/accounts.ts",
@@ -283,7 +283,7 @@
       },
       {
         "path": "src/main/core/launch.ts",
-        "sha256": "afce8c89275ebbab68869aa1a4378e97c472c02aba7e36ac1ba89904703a17ba"
+        "sha256": "83ee1e7f3af3d89685bf9634da8af895305961e556cabad27bfca3a3194c0b9e"
       },
       {
         "path": "src/main/core/launchAssets.ts",
@@ -307,11 +307,11 @@
       },
       {
         "path": "src/main/core/linuxUpdate.ts",
-        "sha256": "eb7f3dcfc01f49eed84b9f4bb9eb9c103a5a3861682fdb0693cb3bdbd9896d06"
+        "sha256": "e4e8e8249c871eea16f0d0963b179a3883fc82b46ea2c67ed5a4f118fd3eb868"
       },
       {
         "path": "src/main/core/linuxUpdateIdentity.ts",
-        "sha256": "697b25ebcb61785611d5d0a9b3fd913e0f31b6156e76820faa1238ede2d70653"
+        "sha256": "157bf641461fcb35749cfe34b9a4094b294be31d09c3d4f4d82dba5d383817a5"
       },
       {
         "path": "src/main/core/loaders.ts",
@@ -763,7 +763,7 @@
       },
       {
         "path": "src/renderer/src/App.vue",
-        "sha256": "409a576cd3ec4bdc6df634462254cd2dde109f574562f4cb9d8d22905f4efd45"
+        "sha256": "875067c2002eb11529192d7bafc74bcc13d59d8d67fbdafdedd1b8ac0b01c12f"
       },
       {
         "path": "src/renderer/src/api.ts",
@@ -931,7 +931,7 @@
       },
       {
         "path": "src/renderer/src/components/UpdateModal.vue",
-        "sha256": "426239abd0539752240a4c88d89162057a12fba13754fb2d0e21bd52eab5cea0"
+        "sha256": "a8acb271a1fae0b5a1b7ba0711447caa6705b7cade8c1be68eb0f5c8e91dba17"
       },
       {
         "path": "src/renderer/src/components/WorldImportModal.vue",
@@ -984,6 +984,10 @@
       {
         "path": "src/renderer/src/composables/useNavigationBubble.ts",
         "sha256": "a2e23ed1d2ff0c38bf97c04a8dcb92b86c108e8115fbc10b578252568238b00b"
+      },
+      {
+        "path": "src/renderer/src/composables/usePlatformUpdate.ts",
+        "sha256": "1fa1551d06c88770bc99a9120ad4ed737051614c2634ed42870e50dcdf8fce3b"
       },
       {
         "path": "src/renderer/src/env.d.ts",
@@ -1151,7 +1155,7 @@
       },
       {
         "path": "src/renderer/src/views/SettingsView.vue",
-        "sha256": "7845703ce2d150916613366117aa4ed22775e8d3595b0ad210ef768d5d009064"
+        "sha256": "aa1ceda52d9a879f20f161d8f8d14aef86ce49f8aa11898793b93dd2db363470"
       },
       {
         "path": "src/renderer/src/views/ShadersView.vue",
@@ -1365,7 +1369,9 @@
         "path": "src/types/yazl.d.ts",
         "sha256": "f637443fada1bf45960df5b6d0e2089c820776df433b16dab77a7103fc4ebb62"
       }
-    ]
+    ],
+    "refreshedAt": "2026-10-03T20:48:28.751Z",
+    "note": "Current input hashes refreshed during ongoing implementation; routes and IPC inventory remain a static inventory, not runtime proof; final source binding and dynamic expressions still need final audit."
   },
   "approvedExceptions": [
     {
@@ -10665,8 +10671,383 @@
         "Windows baseline-compatible"
       ],
       "status": "not-tested",
-      "reason": "Windows本批公共代码回归尚无最终证据",
-      "evidence": [],
+      "reason": "Current Windows partial native GUI and clean package regression reviewed; final source identity and full functional/native service coverage incomplete",
+      "evidence": [
+        {
+          "id": "windows-ux110-partial-2026-10-04",
+          "kind": "limited-native-GUI-with-service-fixtures",
+          "version": "1.1.11",
+          "capturedSourceCommit": null,
+          "artifact": {
+            "path": "release/KAMUCL-1.1.11.exe",
+            "sha256": "dd584c92935c71ebdcd5ca379d0f1f851c9a07b604a9dcdfd6f2a1986e8142c7",
+            "size": 97290244
+          },
+          "capturedSourceCommitStatus": "Original UX receipt does not bind source commit; final full release proof must add that identity",
+          "reviewedAt": "2026-10-03T20:48:28.813Z",
+          "reviewer": "independent_platform_parity",
+          "notFullAcceptance": true,
+          "scores": {
+            "visual": null,
+            "interaction": null,
+            "motion": null
+          },
+          "themes": [
+            {
+              "theme": "transparent",
+              "result": {
+                "path": "out/appearance-motion-transparent-110.json",
+                "sha256": "d72b420a329ae59cad22ef5b7a18e2ed1fdaaa1130c532e5d95efd9b6a728162",
+                "size": 58123
+              },
+              "log": {
+                "path": "out/qa111-ux-transparent.log",
+                "sha256": "ff3fc2c65b275a1a053007a0aff7a632a34e1aebb697e26a08406744a004c7b8",
+                "size": 43
+              },
+              "service": "Favorite artwork metadata fixtures; UI, settings storage, image rendering and WebGL are the actual product",
+              "receiptComplete": true,
+              "rawRecording": {
+                "path": "out/skin-walk-110-transparent/recording.json",
+                "sha256": "b69af0804b681b1d69e13bb339eb62e16152bfb69ec951f38d7beb950e33fb8a",
+                "size": 49892
+              },
+              "rawFrameSetSHA256": "00a3c8587b817830f068e859cce0bd27040df2d26332077e658993fcf5bce12f",
+              "originalFrameCount": 151,
+              "originalElapsedSeconds": 1.4869189262390137,
+              "originalCaptureFPS": 100.87974357782058,
+              "nonIncreasingTimestamps": 0,
+              "maximumOriginalGapSeconds": 0.014821052551269531,
+              "uniqueFrameSHA256Count": 151,
+              "interpolated": false,
+              "source": "actual Page.startScreencast full compositor frames scaled to fit 960x620, JPEG quality70, acknowledged before decode and buffered in memory until recording stops; no interpolated frames",
+              "viewedImages": [
+                {
+                  "path": "release/ui-refinement-transparent/110-wallpaper-glass-home.png",
+                  "sha256": "012d271ddae59c093c60653e5aceb3bf6897eb54dba5f6bcdad866249d419e69",
+                  "size": 864417
+                },
+                {
+                  "path": "release/ui-refinement-transparent/110-favorite-project-icons.png",
+                  "sha256": "c8de2ed440a0b7d5ec581ca8075fa068cc70ac8860facc03eb10790235850d1c",
+                  "size": 240054
+                }
+              ],
+              "observedLayout": [
+                {
+                  "width": 962,
+                  "height": 622,
+                  "zoom": 1,
+                  "left": 691.6000366210938,
+                  "right": 717.6000366210938,
+                  "top": 404.20001220703125,
+                  "bottom": 430.20001220703125
+                },
+                {
+                  "width": 1024,
+                  "height": 720,
+                  "zoom": 1.25,
+                  "left": 722.9599609375,
+                  "right": 748.9599609375,
+                  "top": 453.3199768066406,
+                  "bottom": 479.3199768066406
+                }
+              ],
+              "observedShell": {
+                "surface": "color-mix(in srgb, #212121 30%, transparent)",
+                "sidebar": "color-mix(in srgb, #171717 26%, transparent)"
+              }
+            },
+            {
+              "theme": "black-orange",
+              "result": {
+                "path": "out/appearance-motion-black-orange-110.json",
+                "sha256": "c6e8eb49e015dffc52b5dd1311ed71164700a14c440f0a503235559fafe3df69",
+                "size": 58108
+              },
+              "log": {
+                "path": "out/qa111-ux-black-orange.log",
+                "sha256": "3d8b775f2f1cf6d47eccf3498a0f0713acb867b1665456badec2557594a9227b",
+                "size": 44
+              },
+              "service": "Favorite artwork metadata fixtures; UI, settings storage, image rendering and WebGL are the actual product",
+              "receiptComplete": true,
+              "rawRecording": {
+                "path": "out/skin-walk-110-black-orange/recording.json",
+                "sha256": "1f06ebcb788eb3302ac039e2c250b95968297650f17504e679bc985306027985",
+                "size": 49875
+              },
+              "rawFrameSetSHA256": "7151831d5c010ea2f6867f4833ad35d5fdbc89d20b87f77b38d88d649b08c60e",
+              "originalFrameCount": 151,
+              "originalElapsedSeconds": 1.4971139430999756,
+              "originalCaptureFPS": 100.19277469916875,
+              "nonIncreasingTimestamps": 0,
+              "maximumOriginalGapSeconds": 0.015316009521484375,
+              "uniqueFrameSHA256Count": 151,
+              "interpolated": false,
+              "source": "actual Page.startScreencast full compositor frames scaled to fit 960x620, JPEG quality70, acknowledged before decode and buffered in memory until recording stops; no interpolated frames",
+              "viewedImages": [
+                {
+                  "path": "release/ui-refinement-black-orange/110-wallpaper-glass-home.png",
+                  "sha256": "fbf4860587b65f5ab944d49909c68adcb674194ed8c96a769fd35cd74d7d4f90",
+                  "size": 863994
+                },
+                {
+                  "path": "release/ui-refinement-black-orange/110-favorite-project-icons.png",
+                  "sha256": "f4532992834646a7ac91ce97e2aec235d644b72ed6aabf3fb4ba3ebbfce0eb3c",
+                  "size": 251400
+                }
+              ],
+              "observedLayout": [
+                {
+                  "width": 962,
+                  "height": 622,
+                  "zoom": 1,
+                  "left": 691.6000366210938,
+                  "right": 717.6000366210938,
+                  "top": 404.20001220703125,
+                  "bottom": 430.20001220703125
+                },
+                {
+                  "width": 1024,
+                  "height": 720,
+                  "zoom": 1.25,
+                  "left": 722.9599609375,
+                  "right": 748.9599609375,
+                  "top": 453.3199768066406,
+                  "bottom": 479.3199768066406
+                }
+              ],
+              "observedShell": {
+                "surface": "color-mix(in srgb, #0b0b0e 30%, transparent)",
+                "sidebar": "color-mix(in srgb, #111116 26%, transparent)"
+              }
+            },
+            {
+              "theme": "blue-white",
+              "result": {
+                "path": "out/appearance-motion-blue-white-110.json",
+                "sha256": "1ba230dc7a2d347ac3bd187fb5bf173a958eab7acfa6aad2ad16432e67ba0708",
+                "size": 57746
+              },
+              "log": {
+                "path": "out/qa111-ux-blue-white.log",
+                "sha256": "213cc405abfd987e94bcbe3277c68ea71f52c370098e9b585bfd6b872f304f45",
+                "size": 42
+              },
+              "service": "Favorite artwork metadata fixtures; UI, settings storage, image rendering and WebGL are the actual product",
+              "receiptComplete": true,
+              "rawRecording": {
+                "path": "out/skin-walk-110-blue-white/recording.json",
+                "sha256": "6d88ac122e25ec41d379d2ee1fafb253b4772f98d1da3977a88a3d0f5166c4cc",
+                "size": 49538
+              },
+              "rawFrameSetSHA256": "c8e86db6ae605c2c3d7ed39e6122a96528cf048ba590456c82bd7651badf175e",
+              "originalFrameCount": 150,
+              "originalElapsedSeconds": 1.489361047744751,
+              "originalCaptureFPS": 100.04290109884481,
+              "nonIncreasingTimestamps": 0,
+              "maximumOriginalGapSeconds": 0.015627145767211914,
+              "uniqueFrameSHA256Count": 150,
+              "interpolated": false,
+              "source": "actual Page.startScreencast full compositor frames scaled to fit 960x620, JPEG quality70, acknowledged before decode and buffered in memory until recording stops; no interpolated frames",
+              "viewedImages": [
+                {
+                  "path": "release/ui-refinement-blue-white/110-wallpaper-glass-home.png",
+                  "sha256": "786eabf19a041d0e243e3f8f4025f4ca1285625be94483d848569a7b987e75ec",
+                  "size": 847373
+                },
+                {
+                  "path": "release/ui-refinement-blue-white/110-favorite-project-icons.png",
+                  "sha256": "28beda92646bd02be6d940c876f3cf331d3df00a845f1e2ac4a7ec7091e2b2b5",
+                  "size": 235795
+                }
+              ],
+              "observedLayout": [
+                {
+                  "width": 962,
+                  "height": 622,
+                  "zoom": 1,
+                  "left": 691.6000366210938,
+                  "right": 717.6000366210938,
+                  "top": 404.20001220703125,
+                  "bottom": 430.20001220703125
+                },
+                {
+                  "width": 1024,
+                  "height": 720,
+                  "zoom": 1.25,
+                  "left": 722.9599609375,
+                  "right": 748.9599609375,
+                  "top": 453.3199768066406,
+                  "bottom": 479.3199768066406
+                }
+              ],
+              "observedShell": {
+                "surface": "color-mix(in srgb, #edf0f7 42%, transparent)",
+                "sidebar": "color-mix(in srgb, #f5f7fb 38%, transparent)"
+              }
+            },
+            {
+              "theme": "custom",
+              "result": {
+                "path": "out/appearance-motion-custom-110.json",
+                "sha256": "5f0f04660ca17fc7ad6b88b91ae58d94539d449f45eb4a82e41cf3e3b2f61dbe",
+                "size": 57752
+              },
+              "log": {
+                "path": "out/qa111-ux-custom.log",
+                "sha256": "c0f863a6f9eba34cb8e2146ab171be69ae35aa9cc8226c294e6f481cb99d7740",
+                "size": 38
+              },
+              "service": "Favorite artwork metadata fixtures; UI, settings storage, image rendering and WebGL are the actual product",
+              "receiptComplete": true,
+              "rawRecording": {
+                "path": "out/skin-walk-110-custom/recording.json",
+                "sha256": "2a057f56b0c15544080c713398c30e4af898963c1f7f511780a2b03b5b30c9aa",
+                "size": 49552
+              },
+              "rawFrameSetSHA256": "3eb174031beaae6af8c87aa4846596dec6ff7d3af18e9c6c7364df250b31245c",
+              "originalFrameCount": 150,
+              "originalElapsedSeconds": 1.4893040657043457,
+              "originalCaptureFPS": 100.04672882534065,
+              "nonIncreasingTimestamps": 0,
+              "maximumOriginalGapSeconds": 0.015031099319458008,
+              "uniqueFrameSHA256Count": 150,
+              "interpolated": false,
+              "source": "actual Page.startScreencast full compositor frames scaled to fit 960x620, JPEG quality70, acknowledged before decode and buffered in memory until recording stops; no interpolated frames",
+              "viewedImages": [
+                {
+                  "path": "release/ui-refinement-custom/110-wallpaper-glass-home.png",
+                  "sha256": "c45f6a791fbad7dc32c6a77829296f199b5435155e1d4f5a81bf6311aac1515a",
+                  "size": 834335
+                },
+                {
+                  "path": "release/ui-refinement-custom/110-favorite-project-icons.png",
+                  "sha256": "b649ae52223873a4c9a60e8e71feabe7645766231ddef9a1a60a7088a5d257a3",
+                  "size": 251125
+                },
+                {
+                  "path": "release/ui-refinement-custom/110-random-keyboard-960-1.png",
+                  "sha256": "c05900acc00aeb3fc7a58b9b2c44a1ed3769bbac7cc7756fbc4ab893b4ddbe5f",
+                  "size": 164775
+                }
+              ],
+              "observedLayout": [
+                {
+                  "width": 962,
+                  "height": 622,
+                  "zoom": 1,
+                  "left": 691.6000366210938,
+                  "right": 717.6000366210938,
+                  "top": 404.20001220703125,
+                  "bottom": 430.20001220703125
+                },
+                {
+                  "width": 1024,
+                  "height": 720,
+                  "zoom": 1.25,
+                  "left": 722.9599609375,
+                  "right": 748.9599609375,
+                  "top": 453.3199768066406,
+                  "bottom": 479.3199768066406
+                }
+              ],
+              "observedShell": {
+                "surface": "color-mix(in srgb, #171520 30%, transparent)",
+                "sidebar": "color-mix(in srgb, #201d2b 26%, transparent)"
+              }
+            }
+          ],
+          "observations": [
+            "Four-theme home/favorite screenshots examined; no sampled clipping, glyph replacement, or unthemed native blue checkbox observed",
+            "Old/new favorite images decode using injected metadata/CDN artwork; these are test artwork, not real Modrinth/CurseForge service verification",
+            "Custom raw frame 0000 and 0075 examined; visible rendered arm and leg pose changes in actual model; all original frame files and timestamps verified",
+            "Minimum requested window and 125% zoom coordinate/Space toggle results present; actual viewport metadata is retained unchanged",
+            "Package clean extraction/cold/warm receipt inspected separately; this does not cover the complete functional matrix"
+          ],
+          "unverifiedRequired": [
+            "All 15 routes and all theme/state/scale combinations",
+            "Final source commit and embedded application identity",
+            "Complete applicable function matrix and native update rollback",
+            "Real account authentication/credential restart and actual community services",
+            "Actual game world launch/save/exit and real multiplayer peers",
+            "Mascot audio physical listening and complete motion/lifecycle review",
+            "Other operating systems and architectures"
+          ],
+          "packageVerification": {
+            "result": {
+              "path": "out/windows-package-1.1.11.json",
+              "sha256": "28d22e56f01513198432bc8cd2626d662bd8d0cf627964b4c0937307800847d6",
+              "size": 6236
+            },
+            "log": {
+              "path": "out/windows-package111-desktop-final.log",
+              "sha256": "22d1939ee7a79683e447ff363f8d4eac59d6b9e82b52732d5fdd86ec9c61cfc1",
+              "size": 6425
+            },
+            "complete": true,
+            "asarSHA256": "b03fe16bb64a0bb341069db58b736e3aaeffb8866495f45f1bc4c82dcc64b5f1",
+            "artifacts": [
+              {
+                "path": "release/KAMUCL-1.1.11.exe",
+                "sha256": "dd584c92935c71ebdcd5ca379d0f1f851c9a07b604a9dcdfd6f2a1986e8142c7",
+                "size": 97290244
+              },
+              {
+                "path": "release/KAMUCL-1.1.11-windows-x64.zip",
+                "sha256": "78d31f0045102c983fa67d586511993312f2901c686b3f75be1d0f95c163bd2f",
+                "size": 97321815
+              },
+              {
+                "path": "release/KAMUCL-1.1.11-windows-x64-unpacked.zip",
+                "sha256": "676162091dc723ee97ee6309232eca01de24d0fe602ddaa3d2e71d702b2dd881",
+                "size": 143058234
+              }
+            ],
+            "portable": {
+              "pass": true,
+              "root": "C:\\Users\\ROG\\AppData\\Local\\Temp\\kamucl startup 中文-8CltD0",
+              "results": [
+                {
+                  "phase": "cold",
+                  "firstPaintMs": 343,
+                  "electronEntryMs": 4772,
+                  "cache": "C:\\Users\\ROG\\AppData\\Local\\Temp\\kamucl startup 中文-8CltD0\\KAMUCL-runtime\\1.1.11-e54a456dd460309d\\cache.ready",
+                  "cacheMtime": 1791060147623.3047
+                },
+                {
+                  "phase": "warm",
+                  "firstPaintMs": 190,
+                  "electronEntryMs": 112,
+                  "cache": "C:\\Users\\ROG\\AppData\\Local\\Temp\\kamucl startup 中文-8CltD0\\KAMUCL-runtime\\1.1.11-e54a456dd460309d\\cache.ready",
+                  "cacheMtime": 1791060147623.3047
+                }
+              ]
+            },
+            "zipped": {
+              "pass": true,
+              "root": "C:\\Users\\ROG\\AppData\\Local\\Temp\\kamucl startup 中文-2iAMCj",
+              "results": [
+                {
+                  "phase": "cold",
+                  "firstPaintMs": 355,
+                  "electronEntryMs": 4796,
+                  "cache": "C:\\Users\\ROG\\AppData\\Local\\Temp\\kamucl startup 中文-2iAMCj\\KAMUCL-runtime\\1.1.11-e54a456dd460309d\\cache.ready",
+                  "cacheMtime": 1791060155166.322
+                },
+                {
+                  "phase": "warm",
+                  "firstPaintMs": 207,
+                  "electronEntryMs": 126,
+                  "cache": "C:\\Users\\ROG\\AppData\\Local\\Temp\\kamucl startup 中文-2iAMCj\\KAMUCL-runtime\\1.1.11-e54a456dd460309d\\cache.ready",
+                  "cacheMtime": 1791060155166.322
+                }
+              ]
+            }
+          }
+        }
+      ],
       "scores": {
         "visual": null,
         "interaction": null,
@@ -10678,7 +11059,7 @@
       "completeParity": false
     },
     {
-      "id": "macos-arm64",
+      "id": "mac-arm64",
       "platform": "macos",
       "architecture": "arm64",
       "installations": [
@@ -10702,7 +11083,7 @@
       "completeParity": false
     },
     {
-      "id": "macos-x64",
+      "id": "mac-x64",
       "platform": "macos",
       "architecture": "x64",
       "installations": [
@@ -10839,5 +11220,23 @@
     "passed": true,
     "checks": 7,
     "scope": "JSON completeness only; no product functionality pass inferred"
+  },
+  "releaseGate": {
+    "schema": 2,
+    "desktopTargets": [
+      "windows-x64",
+      "mac-arm64",
+      "mac-x64",
+      "linux-x64",
+      "linux-arm64"
+    ],
+    "harmonyScope": "Separate HAP gate; desktop acceptance never establishes native Harmony game parity",
+    "nativeReleaseQualified": false,
+    "unitValidation": {
+      "tests": 41,
+      "passed": 41,
+      "classification": "Synthetic protocol fixtures validate the gate, not the product"
+    },
+    "evidenceSchema": "See independent-review.md"
   }
 }
