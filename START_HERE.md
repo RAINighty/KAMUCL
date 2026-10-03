@@ -10,7 +10,7 @@ Windows x64 使用 _handoff/artifacts/KAMUCL-1.1.11.exe，或解压紧凑 ZIP；
 
 本交接包记录的验证命令是 ["node", "scripts/check-licenses.cjs"]，无需先安装 npm 依赖。先核对外层 SHA256，再核对逐文件摘要并执行该命令；命令成功只验证许可证和对应源码要求。当前新平台正式发布门控要求完整原生运行、游戏、更新回滚、原始画面及独立评分，不能以此轻量命令替代。
 
-2026-10-04 05:33（Asia/Hong_Kong）：GitHub workflow 标准授权已完成，候选 `ab54c5f` 已推送 master，main 通过 cherry-pick 同步为 `db13257`，保留独立历史。原生 CI 已启动；首次 Mac／Linux 四架构运行停在 FRP 测试夹具的下载等待，已取消并保留原始日志，修复后必须重新运行完整测试和构建。正式标签和 Release 尚未创建，不能从本地包推断存在公开下载。不得强制推送、覆盖 main 独立历史或操作 wuhui。
+2026-10-04 06:05（Asia/Hong_Kong）：GitHub workflow 标准授权已完成，`0d71da0` 已推送 master，main 通过 cherry-pick 同步为 `ef8ec49`，保留独立历史。两次原生 CI 因 FRP／进程就绪测试夹具等待而取消；旧 Windows 更新包夹具也已准确绑定平台，全部原始日志保留。修复后的 853 项 Windows 回归为 852 通过、0 失败、1 项原生 Linux skip；须重新执行完整原生测试和构建。正式标签和 Release 尚未创建，不能从本地包推断存在公开下载。不得强制推送、覆盖 main 独立历史或操作 wuhui。
 
 ---
 

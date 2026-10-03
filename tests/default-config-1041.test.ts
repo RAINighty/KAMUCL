@@ -9,17 +9,19 @@ import AdmZip from 'adm-zip'
 import { trackLaunchState, instanceLaunchBusy, type LaunchTracking } from '../src/shared/launchTracking'
 
 let code: Promise<string>
-async function runtime(t: any, env: Record<string, string> = {}) {
+async function runtime(t: any, env: Record<string, string> = {}, platform = process.platform, arch = process.arch) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kamucl-defaults-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   code ??= build({ stdin: { contents: `export * from './src/main/core/defaultResourcePacks';export {getPendingUpdate} from './src/main/core/applyUpdate';export {checkLatest,currentVersion} from './src/main/core/selfUpdate';export {trustedUpdateRelease} from './src/main/core/updateTrust';export {setDefaultKey,syncKeysToGameDir} from './src/main/core/keybindings';`, resolveDir: process.cwd() }, platform: 'node', format: 'cjs', bundle: true, write: false, packages: 'external' }).then(r => r.outputFiles[0].text)
   const require = createRequire(path.resolve('package.json')), mod = { exports: {} as any }, requested: string[] = []
-  const fakeProcess = { ...process, env: { ...process.env, ...env } }
+  const fixtureEnv = { ...process.env, ...env }
+  delete fixtureEnv.PORTABLE_EXECUTABLE_FILE; delete fixtureEnv.KAMUCL_UPDATE_TARGET_EXE; delete fixtureEnv.APPIMAGE
+  const fakeProcess = { ...process, platform, arch, env: fixtureEnv }
   new Function('require','module','exports','process',await code)(
     (name: string) => name === 'electron' ? { app: { isPackaged: true, getPath: () => root, getVersion: () => '1.0.41', getName: () => 'test' } }
       : name === 'undici' ? { ...require(name), fetch: async (url: string) => { requested.push(String(url)); return Response.json({ tag_name: 'v1.0.30', assets: [{ name: 'KAMUCL-1.0.30.exe', size: 123, browser_download_url: 'https://github.com/kamubaba-i/KAMUCL/releases/download/v1.0.30/KAMUCL-1.0.30.exe' }] }) } }
       : require(name), mod, mod.exports, fakeProcess)
-  return { root, api: mod.exports, requested }
+  return { root, api: mod.exports, requested, fixtureEnv }
 }
 function pack(file: string, marker: string) {
   const zip = new AdmZip(); zip.addFile('pack.mcmeta', Buffer.from(JSON.stringify({ pack: { pack_format: 75, description: marker } }))); zip.addFile('assets/minecraft/test.txt', Buffer.from(marker)); zip.writeZip(file)
@@ -142,8 +144,17 @@ test('unassigned key persists and syncs as unknown while other settings survive'
   assert(text.includes('key_key.forward:key.keyboard.unknown')); assert(text.includes('resourcePacks:["vanilla"]'))
 })
 
-test('packaged updates ignore test overrides and reject local v99 pending/cache pollution', async t => {
-  const { root, api, requested } = await runtime(t, { KAMUCL_USERDATA_DIR: 'unused-test-dir', KAMUCL_UPDATE_API_BASE: 'http://127.0.0.1:8310', KAMUCL_VERSION_OVERRIDE: '99.0.0' })
+test('Windows packaged updates ignore test overrides and reject local v99 pending/cache pollution', async t => {
+  const isolatedKeys = ['PORTABLE_EXECUTABLE_FILE', 'KAMUCL_UPDATE_TARGET_EXE', 'APPIMAGE'] as const
+  const hostEnvironment = isolatedKeys.map(key => process.env[key])
+  const unrelated = path.join(os.tmpdir(), 'kamucl-unrelated-host')
+  const { root, api, requested, fixtureEnv } = await runtime(t, {
+    KAMUCL_USERDATA_DIR: 'unused-test-dir', KAMUCL_UPDATE_API_BASE: 'http://127.0.0.1:8310', KAMUCL_VERSION_OVERRIDE: '99.0.0',
+    PORTABLE_EXECUTABLE_FILE: path.join(unrelated, 'KAMUCL.exe'),
+    KAMUCL_UPDATE_TARGET_EXE: path.join(unrelated, 'another.exe'), APPIMAGE: path.join(unrelated, 'KAMUCL.AppImage')
+  }, 'win32', 'x64')
+  for (const key of isolatedKeys) assert.equal(fixtureEnv[key], undefined, `${key} must not route the fixture to a host installation`)
+  assert.deepEqual(isolatedKeys.map(key => process.env[key]), hostEnvironment, 'the real host environment remains unchanged')
   assert.equal(api.currentVersion(), '1.0.41')
   const file = path.join(root, 'KAMUCL-99.0.0.exe'); fs.writeFileSync(file, 'fixture')
   const release = { version: '99.0.0', assetName: path.basename(file), assetUrl: 'http://127.0.0.1:8310/download/KAMUCL-99.0.0.exe', assetSize: 7 }

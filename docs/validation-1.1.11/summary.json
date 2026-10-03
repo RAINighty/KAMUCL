@@ -1,6 +1,6 @@
 {
   "version": "1.1.11",
-  "recordedAt": "2026-10-03T21:38:54+00:00",
+  "recordedAt": "2026-10-03T22:05:06+00:00",
   "status": "native-qualification-incomplete; local-engineering-candidate",
   "baseline": {
     "version": "1.1.10",
@@ -9,13 +9,14 @@
   },
   "validation": {
     "publicTests": {
-      "total": 848,
-      "passed": 847,
+      "total": 853,
+      "passed": 852,
       "failed": 0,
       "skipped": 1,
       "skipReason": "Linux native updater shell cannot execute on the Windows host",
-      "log": "out/test111-frp-native-fixture-final.log",
-      "durationMs": 108151.897
+      "log": "out/test111-posix-update-fixtures-final.log",
+      "durationMs": 108569.0844,
+      "finalHostEnvironmentIsolation": "private helper environment cleanup followed by 18/18 targeted tests; full suite loaded before this last fixture-only cleanup"
     },
     "gateProtocolNegativeTests": {
       "total": 41,
@@ -41,6 +42,14 @@
       "selection119"
     ],
     "actualAudioListening": "not-performed",
+    "posixAndUpdateFixtureCorrection": {
+      "productSourceChanged": false,
+      "independentlyReviewed": true,
+      "spawnAssertionsPreserved": ["stdout", "owned child kill/close", "SIGTERM", "killed", "natural exit code7", "memory metrics"],
+      "updateRoutingConfigurations": ["darwin/arm64", "darwin/x64", "linux/arm64", "linux/x64"],
+      "targetedUpdaterTests": { "passed": 18, "failed": 0, "classification": "isolated controller/filesystem fixtures, not actual OS upgrade acceptance" },
+      "nativeFullRerunRequired": true
+    },
     "frpFixtureCorrection": {
       "productSourceChanged": false,
       "independentlyReviewed": true,
@@ -145,7 +154,9 @@
     "Initial dry-run incorrectly required formal acceptance; real publication retains its gate",
     "DEB updated label broke old literal-only test; corrected to check shared real label wiring",
     "gallery118 old total metadata count included automatic artwork reads; original failure retained and real mutation handler observations passed",
-    "ab54 native Mac run37154520494 and Linux run37154520531 cancelled after FRP fixture initial download awaited a later cancellation-stage release; no native package produced"
+    "ab54 native Mac run37154520494 and Linux run37154520531 cancelled after FRP fixture initial download awaited a later cancellation-stage release; no native package produced",
+    "0d71da native Mac run37155930792 and Linux run37155930845 each reported a legacy Windows EXE pending fixture failure and then cancelled after awaiting an already emitted POSIX spawn event; no native package produced",
+    "initial Linux observation mistook timestamps on skipped build steps for execution; obsolete record retained and corrected using actual step conclusion; original logs unchanged"
   ],
   "uncovered": [
     "current macOS native builds, credentials, Intel GPU/motion, game/world/save/quit, services and updates",
@@ -155,13 +166,25 @@
     "HarmonyOS SDK, legal signing, device and native JVM/JNI/LWJGL/GLFW/audio/game"
   ],
   "remote": {
-    "master": "ab54c5f1c00d2f0ef371401102f295604ac7e438",
-    "main": "db13257a082331815c604c56090dd20eb218e76c",
+    "master": "0d71da046e2d0e29ca540fe9ac03129f0c795e5a",
+    "main": "ef8ec49d087ff73aec6b0d68f23bbbfc75a652d2",
     "v111Tag": false,
     "v111Release": false,
     "push": "successful; main synchronized by cherry-pick with independent history",
     "authorization": "human completed standard workflow OAuth authorization; previous rejected push, connection timeouts and expired codes retained as history",
-    "observedAt": "2026-10-04 05:33 Asia/Hong_Kong",
+    "observedAt": "2026-10-04 06:05 Asia/Hong_Kong",
+    "secondNativeRuns": {
+      "commit": "0d71da046e2d0e29ca540fe9ac03129f0c795e5a",
+      "mac": "37155930792",
+      "linux": "37155930845",
+      "status": "cancelled after repeated POSIX spawn wait; one Windows legacy updater fixture failure per job retained",
+      "macVisiblePassingTestsPerArch": 319,
+      "linuxVisiblePassingTestsPerArch": 320,
+      "macOriginalLogsSHA256": "b20d3328bf750c08f77a50bcb4f74576a162fc2cf4798ef1bfb2121406704a60",
+      "linuxOriginalLogsSHA256": "d720d786ab6cac2249280fa85f7a4e9dc0c7334a2d3fe0f67c3beac60286db52",
+      "productionBuildStatus": "skipped",
+      "nativeArtifactsProduced": false
+    },
     "firstNativeRuns": {
       "commit": "ab54c5f1c00d2f0ef371401102f295604ac7e438",
       "mac": "37154520494",
