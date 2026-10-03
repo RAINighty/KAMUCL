@@ -1,6 +1,6 @@
 {
   "version": "1.1.11",
-  "recordedAt": "2026-10-03T22:30:28.401Z",
+  "recordedAt": "2026-10-03T23:04:32.917Z",
   "status": "native-qualification-incomplete; local-engineering-candidate",
   "baseline": {
     "version": "1.1.10",
@@ -9,14 +9,15 @@
   },
   "validation": {
     "publicTests": {
-      "total": 855,
-      "passed": 854,
+      "total": 857,
+      "passed": 856,
       "failed": 0,
       "skipped": 1,
-      "durationMs": 109888.6364,
+      "durationMs": 114767.6325,
       "skipReason": "Linux native updater shell cannot execute on the Windows host",
-      "log": "out/test111-runtime-fixtures-final.log",
-      "sha256": "7b480f7c00e50d3eaab37bf94fd1c5b68609d1f9c430f3a65c3bd7929a804eac"
+      "log": "out/test111-native-job-isolation-final.log",
+      "sha256": "bf71100b583bd37931ce4faae54957acad34f5d50280ee1af46231c3f4e1e33f",
+      "ordering": "Final eight QA/test source files frozen before suite start; subsequent pack-linux tar call now uses private stage and exclusive publisher, separately syntax-checked and targeted4/4 after that final call change"
     },
     "gateProtocolNegativeTests": {
       "total": 41,
@@ -93,6 +94,24 @@
       },
       "builderMapping": "official LICENSE becomes LICENSE.electron.txt; version file removed by electron-builder; packaged inventory uses actual names",
       "thresholdsRelaxed": false
+    },
+    "nativeJobIsolationCorrection": {
+      "productSourceChanged": false,
+      "windowsBuildInputsChanged": false,
+      "linuxPackagingScriptChanged": true,
+      "thresholdsRelaxed": false,
+      "classification": "Independent Mac QA output directory and signed per-job real window probe; failure-only same-process GPU observations; exact Linux builder-name mapping and exclusive publication; real unfinished HTTP transfer gate for deterministic cancellation",
+      "independentReview": "out/independent-native-round4-1.1.11.json",
+      "reviewSHA256": "59502215ca785a1e93827f02eabf84202589330d8777223792ef52c0e982769d",
+      "independentTests": {
+        "cancelRepeated": [
+          4,
+          4
+        ],
+        "observer": 39,
+        "packageNames": 2
+      },
+      "nativeFullRerunRequired": true
     }
   },
   "inventory": {
@@ -119,7 +138,7 @@
         "interaction": null,
         "motion": null
       },
-      "nativeStatus": "not-built-or-accepted on current candidate"
+      "nativeStatus": "Native e0b1210 ZIP/DMG built with ad-hoc signatures; full APP/DMG and game qualification failed, fresh exact-source rerun required"
     },
     {
       "id": "mac-x64",
@@ -129,7 +148,7 @@
         "interaction": null,
         "motion": null
       },
-      "nativeStatus": "not-built-or-accepted on current candidate"
+      "nativeStatus": "Native e0b1210 ZIP/DMG built with ad-hoc signatures; full APP/DMG and game qualification failed, fresh exact-source rerun required"
     },
     {
       "id": "linux-x64",
@@ -139,7 +158,7 @@
         "interaction": null,
         "motion": null
       },
-      "nativeStatus": "not-built-or-accepted on current candidate"
+      "nativeStatus": "Native e0b1210 three formats generated; package verifier not reached, Windows static inspection only, formal desktop/game unverified"
     },
     {
       "id": "linux-arm64",
@@ -149,7 +168,7 @@
         "interaction": null,
         "motion": null
       },
-      "nativeStatus": "not-built-or-accepted on current candidate"
+      "nativeStatus": "Native e0b1210 test failure; package steps skipped, fresh exact-source rerun required"
     },
     {
       "id": "harmonyos-arm64",
@@ -193,23 +212,24 @@
     "ab54 native Mac run37154520494 and Linux run37154520531 cancelled after FRP fixture initial download awaited a later cancellation-stage release; no native package produced",
     "0d71da native Mac run37155930792 and Linux run37155930845 each reported a legacy Windows EXE pending fixture failure and then cancelled after awaiting an already emitted POSIX spawn event; no native package produced",
     "initial Linux observation mistook timestamps on skipped build steps for execution; obsolete record retained and corrected using actual step conclusion; original logs unchanged",
-    "2b1e6f native Mac run37157548139 completed with three /var versus /private/var temporary fixture path failures per architecture; Linux run37157548122 ARM rejected a fake Windows native classifier and x64 packaging rejected obsolete libEGL inventory; all original logs retained, not a deadlock or cancellation"
+    "2b1e6f native Mac run37157548139 completed with three /var versus /private/var temporary fixture path failures per architecture; Linux run37157548122 ARM rejected a fake Windows native classifier and x64 packaging rejected obsolete libEGL inventory; all original logs retained, not a deadlock or cancellation",
+    "e0b1210 Mac37158774374 produced both native ZIP/DMG pairs and passed6 bounded integration jobs; ARM UI failed missing independent out directory, both game tasks failed missing cross-job window probe, Intel APP/DMG actually failed EGL/GPU initialization with30 no-canvas samples. Linux37158774429 produced3 x64 packages but canonical filename mapping failed before native package verification; ARM cancellation fixture finished before abort and cleanup produced late ENOENT. Original logs/screens/timelines retained, none reclassified as product acceptance."
   ],
   "uncovered": [
-    "current macOS native builds, credentials, Intel GPU/motion, game/world/save/quit, services and updates",
+    "current complete macOS APP/DMG GUI, Keychain restart/update, Intel GPU/motion, game/world/save/quit, real services and public online updates",
     "Ubuntu24.04/26.04 native x64/ARM64 desktop/GPU, GNOME/KDE/Wayland and complete games/services/updates",
     "full Windows63 scenario matrix and current real accounts/community/services",
     "physical sound listening",
     "HarmonyOS SDK, legal signing, device and native JVM/JNI/LWJGL/GLFW/audio/game"
   ],
   "remote": {
-    "master": "2b1e6f18a2ccc3dcf5230392d58d8ddfba3dec7f",
-    "main": "55ad9862554a1c8e5a751e3b0f7548565269b8d2",
+    "master": "e0b1210317b87ab5bb1809d56e40882c1c8762f4",
+    "main": "dbcc9dc5de1902871f5c2bf729f4f35eb4c40459",
     "v111Tag": false,
     "v111Release": false,
     "push": "successful; main synchronized by cherry-pick with independent history",
     "authorization": "human completed standard workflow OAuth authorization; previous rejected push, connection timeouts and expired codes retained as history",
-    "observedAt": "2026-10-04 06:30 Asia/Hong_Kong",
+    "observedAt": "2026-10-04 07:04 Asia/Hong_Kong",
     "secondNativeRuns": {
       "commit": "0d71da046e2d0e29ca540fe9ac03129f0c795e5a",
       "mac": "37155930792",
@@ -273,6 +293,99 @@
       "status": "completed/failure; no cancellations or deadlocks",
       "nativeArtifactsProduced": false,
       "desktopAndGameAcceptanceEntered": false
+    },
+    "fourthNativeRuns": {
+      "commit": "e0b1210317b87ab5bb1809d56e40882c1c8762f4",
+      "mac": {
+        "fullTestsPerArch": {
+          "tests": 855,
+          "pass": 851,
+          "fail": 0,
+          "skip": 4
+        },
+        "packageJobsPassed": 2,
+        "integrationJobsPassed": 6,
+        "uiJobsFailed": 4,
+        "gameJobsFailed": 2,
+        "originalLogsSHA256": "73c4e9e4878ca528687a098e1dafe4f2bbd7998470936268f12235c8f2f299df",
+        "failures": [
+          {
+            "scope": "arm64 APP/DMG common-feature GUI",
+            "cause": "Independent job missing out directory; base app/skin/native material succeeded"
+          },
+          {
+            "scope": "arm64/x64 actual game",
+            "cause": "Game job incorrectly depends on prior UI job material-fixture executable; version26.2 installation occurred, world/focus/save not reached"
+          },
+          {
+            "scope": "x64 APP/DMG",
+            "cause": "Actual current runner GPU EGL initialization failed repeatedly; renderer has unsupported-3D fallback and no canvas in30samples",
+            "productVsHostedDriver": "not yet resolved; no threshold or delay workaround"
+          }
+        ],
+        "scope": [
+          {
+            "artifact": "mac-update-x64",
+            "jobHead": "e0b1210317b87ab5bb1809d56e40882c1c8762f4",
+            "jobComplete": true,
+            "scope": "Actual signed package local same-version IPC update/tamper reject/backup/rollback; not public-release online upgrade"
+          },
+          {
+            "artifact": "mac-tools-x64",
+            "jobHead": "e0b1210317b87ab5bb1809d56e40882c1c8762f4",
+            "jobComplete": true,
+            "scope": "Current-source production download/install and actual native FRP/Terracotta daemon IPC"
+          },
+          {
+            "artifact": "mac-startup-arm64",
+            "jobHead": "e0b1210317b87ab5bb1809d56e40882c1c8762f4",
+            "jobComplete": true,
+            "scope": "Current-source startup coordinator on native runtime, normal/reduced motion; not full packaged boot"
+          },
+          {
+            "artifact": "mac-startup-x64",
+            "jobHead": "e0b1210317b87ab5bb1809d56e40882c1c8762f4",
+            "jobComplete": true,
+            "scope": "Current-source startup coordinator on native runtime, normal/reduced motion; not full packaged boot"
+          },
+          {
+            "artifact": "mac-tools-arm64",
+            "jobHead": "e0b1210317b87ab5bb1809d56e40882c1c8762f4",
+            "jobComplete": true,
+            "scope": "Current-source production download/install and actual native FRP/Terracotta daemon IPC"
+          },
+          {
+            "artifact": "mac-update-arm64",
+            "jobHead": "e0b1210317b87ab5bb1809d56e40882c1c8762f4",
+            "jobComplete": true,
+            "scope": "Actual signed package local same-version IPC update/tamper reject/backup/rollback; not public-release online upgrade"
+          }
+        ],
+        "actualHostedOS": "15.7.9",
+        "signing": "ad-hoc, not Developer ID/notarized"
+      },
+      "linux": {
+        "x64": {
+          "tests": 855,
+          "pass": 852,
+          "fail": 0,
+          "skipped": 3,
+          "durationMs": 54287.306546
+        },
+        "arm64": {
+          "tests": 855,
+          "pass": 851,
+          "fail": 1,
+          "skipped": 3,
+          "durationMs": 55209.862119
+        },
+        "x64Packaging": "Three formats generated; exact builder filename mismatch failed before native package verifier",
+        "arm64Packaging": "Skipped after cancellation fixture resolved before abort, followed by fixture cleanup write failure",
+        "windowsArchiveInspection": "Static clean extraction and payload/ELF/manifest inspection only; not Linux native execution",
+        "originalLogsSHA256": "91aa4746e9c56d03e46ce24140bd8fed7fd767db13b28171480d991f4e9c0f17"
+      },
+      "status": "completed/failure; successful package and bounded integration results retained separately",
+      "completeDesktopOrGameAcceptance": false
     }
   },
   "privacy": {

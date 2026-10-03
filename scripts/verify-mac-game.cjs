@@ -7,6 +7,24 @@ const app = path.resolve(process.argv[2]), arch = process.argv[3]
 assert.equal(process.arch, arch)
 const proof = path.resolve(`release/mac-game-proof-${arch}`)
 fs.mkdirSync(proof, { recursive: true })
+// This job owns its native observation tool; it does not consume another job's
+// temporary material fixture. Keep compilation and signature checks before any
+// launcher or game process starts so a setup failure cannot strand either one.
+const probeSource = path.resolve('scripts/mac-material-fixture.swift')
+const fixture = path.join(proof, 'native-window-probe')
+const probeTarget = `${arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos13.0`
+execFileSync('swiftc', [probeSource, '-target', probeTarget, '-o', fixture], { timeout: 60000 })
+execFileSync('lipo', [fixture, '-verify_arch', arch === 'x64' ? 'x86_64' : 'arm64'])
+execFileSync('codesign', ['--force', '--sign', '-', fixture])
+execFileSync('codesign', ['--verify', '--strict', fixture])
+const probeHash = file => require('node:crypto').createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+fs.writeFileSync(path.join(proof, 'native-window-probe.json'), JSON.stringify({
+  source: path.relative(process.cwd(), probeSource), sourceSHA256: probeHash(probeSource),
+  executable: fixture, sha256: probeHash(fixture), arch, target: probeTarget,
+  binary: execFileSync('file', [fixture], { encoding: 'utf8' }).trim(),
+  signing: 'local ad-hoc; strict signature verified',
+  observation: 'CGWindowListCopyWindowInfo and frontmostApplication query the actual owned process window and focus'
+}, null, 2))
 const log = fs.openSync(path.join(proof, 'launcher.log'), 'w'), env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE
 // Hosted Intel Macs expose a paravirtual GPU whose Metal argument encoder
@@ -97,8 +115,6 @@ async function main() {
   metadata.arguments.game.push('--demo'); fs.writeFileSync(idPath, JSON.stringify(metadata))
   await evaluate(`window.kamucl.invoke('game:launch',${JSON.stringify(installed.installedId)},null,${JSON.stringify(folder)})`)
   let nativeWindow, lastState
-  const fixture = path.resolve(`release/mac-proof-${arch}-app/material-fixture`)
-  assert(fs.existsSync(fixture), 'native window probe is missing: '+fixture)
   for (let i = 0; i < 240; i++) {
     const batch = await evaluate('window.__gameTestEvents.splice(0)'); events.push(...batch)
     for (const e of batch) {

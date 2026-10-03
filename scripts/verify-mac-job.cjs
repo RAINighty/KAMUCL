@@ -4,6 +4,7 @@ const {execFileSync}=require('node:child_process')
 const [group,arch,stage='app']=process.argv.slice(2),pkg=require('../package.json')
 assert.equal(process.platform,'darwin');assert.equal(process.arch,arch)
 assert.equal(process.env.GITHUB_ACTIONS,'true','native job driver requires a disposable runner')
+fs.mkdirSync(path.resolve('out'),{recursive:true})
 assert(['ui','game','startup','tools','update'].includes(group));assert(['app','dmg'].includes(stage))
 const proof=path.resolve(`release/mac-job-${arch}-${stage}-${group}`);fs.mkdirSync(proof,{recursive:true})
 const receipt={version:pkg.version,arch,stage,group,commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),startedAt:new Date().toISOString(),complete:false,steps:[]}

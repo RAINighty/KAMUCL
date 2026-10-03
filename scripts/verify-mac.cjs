@@ -3,6 +3,8 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const ownedQA=require('./qa-owned-process-119.cjs')
 const appPath=path.resolve(process.argv[2]),arch=process.argv[3],version=require('../package.json').version
 assert.equal(process.platform,'darwin');assert.equal(process.arch,arch)
+// An independent package-validation job has no prior build output directory.
+fs.mkdirSync(path.resolve('out'),{recursive:true})
 // Current feature contract, independent of release version: single LOGO mascot and current editor/import/selection behavior.
 const mascotProofRevision='119',mascotRecordingKind='logo'
 const stage=process.argv[4]||(appPath.split(path.sep).includes('dmg-mount')?'dmg':'app');assert(['app','dmg'].includes(stage),'proof stage must be app or dmg')
@@ -19,6 +21,32 @@ const fixture=spawn(fixtureExe,[control],{stdio:'ignore'})
 const child=spawn(exe,['--remote-debugging-port=9229'],{env,stdio:['ignore',log,log]})
 const ownedTracks=[ownedQA.trackOwnedChild(child,'native-base-app'),ownedQA.trackOwnedChild(fixture,'material-fixture')]
 const wait=ms=>new Promise(r=>setTimeout(r,ms))
+async function gpuFailureDiagnostic(originalError){
+ // Observe the same failed process after the formal attempt ends. No startup
+ // flags, rendering backend, visibility assertion or frame budget is changed.
+ const directory=path.join(proof,'gpu-failure-diagnostic');fs.mkdirSync(directory,{recursive:true})
+ const result={classification:'Failure-only diagnostic of the original owned process; not acceptance evidence',formalResultUnchanged:true,pid:child.pid,arch,stage,startedAt:new Date().toISOString(),formalError:{name:originalError.name,message:originalError.message},errors:[]}
+ const save=()=>fs.writeFileSync(path.join(directory,'diagnostic.json'),JSON.stringify(result,null,2))
+ const get=async url=>{const response=await fetch(url,{signal:AbortSignal.timeout(3000)});assert(response.ok,'diagnostic endpoint '+response.status);return response.json()}
+ const query=async(url,method,params={})=>{
+  const socket=new WebSocket(url);let timer
+  try{return await new Promise((resolve,reject)=>{
+   timer=setTimeout(()=>reject(Error(method+' diagnostic timeout')),5000)
+   socket.addEventListener('error',()=>reject(Error(method+' diagnostic socket error')),{once:true})
+   socket.addEventListener('open',()=>socket.send(JSON.stringify({id:1,method,params})),{once:true})
+   socket.addEventListener('message',event=>{const value=JSON.parse(event.data);if(value.id===1)value.error?reject(Error(JSON.stringify(value.error))):resolve(value.result)})
+  })}finally{clearTimeout(timer);socket.close()}
+ }
+ save()
+ try{fs.writeFileSync(path.join(directory,'graphics.txt'),execFileSync('/usr/sbin/system_profiler',['SPDisplaysDataType'],{timeout:20000,maxBuffer:4*1024*1024}));result.systemProfiler=true}catch(error){result.errors.push({phase:'system-profiler',message:error.message})}
+ try{const target=await get('http://127.0.0.1:9229/json/version');result.browser={Browser:target.Browser,'User-Agent':target['User-Agent'],'Protocol-Version':target['Protocol-Version']};result.systemInfo=await query(target.webSocketDebuggerUrl,'SystemInfo.getInfo')}catch(error){result.errors.push({phase:'same-process-gpu-info',message:error.message})}
+ try{
+  const target=(await get('http://127.0.0.1:9229/json')).find(page=>page.url.includes('/renderer/index.html'));assert(target,'original diagnostic renderer missing')
+  const screenshot=await query(target.webSocketDebuggerUrl,'Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false});fs.writeFileSync(path.join(directory,'failure-diagnostic.png'),Buffer.from(screenshot.data,'base64'))
+  const response=await query(target.webSocketDebuggerUrl,'Runtime.evaluate',{returnByValue:true,expression:`(()=>{const c=document.querySelector('.viewer3d canvas'),r=c?.getBoundingClientRect();const contexts=['webgl2','webgl'].map(kind=>{const canvas=document.createElement('canvas'),errors=[];canvas.addEventListener('webglcontextcreationerror',event=>errors.push(event.statusMessage));try{const context=canvas.getContext(kind),debug=context?.getExtension('WEBGL_debug_renderer_info');const result={kind,created:!!context,creationErrors:errors,renderer:debug?context.getParameter(debug.UNMASKED_RENDERER_WEBGL):null,vendor:debug?context.getParameter(debug.UNMASKED_VENDOR_WEBGL):null};context?.getExtension('WEBGL_lose_context')?.loseContext();return result}catch(error){return{kind,created:false,creationErrors:errors,error:String(error)}}});return{userAgent:navigator.userAgent,viewerCanvas:!!c,fallbackText:document.querySelector('.viewer3d-fallback')?.textContent??null,bounds:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null,viewport:{width:innerWidth,height:innerHeight,devicePixelRatio},contexts}})()`});result.renderer=response.exceptionDetails?{exceptionDetails:response.exceptionDetails}:response.result?.value
+ }catch(error){result.errors.push({phase:'original-renderer-context',message:error.message})}
+ result.finishedAt=new Date().toISOString();save()
+}
 async function main(){
  let page
  for(let i=0;i<60;i++){
@@ -129,7 +157,9 @@ async function main(){
  fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,stage,binary,userAgent,mainUI:true,macUI,skin:{facePixels,shirtPixels,capture:skinCapture},nativeMaterial,url:page.url},null,2));ws.close()
  console.log('PASS native macOS '+arch+' packaged app '+version)
 }
-ownedQA.preservingCleanup(main,async()=>{
+ownedQA.preservingCleanup(async()=>{
+ try{return await main()}catch(error){try{await gpuFailureDiagnostic(error)}catch(diagnosticError){console.warn('Failure diagnostic could not complete; original error retained',diagnosticError.message)}throw error}
+},async()=>{
  const cleanup={classification:'Owned QA lifecycle only; no external process signalling',before:await ownedQA.ownedInventory(ownedTracks),children:ownedTracks.map(t=>t.ledger)}
  const results=await Promise.allSettled(ownedTracks.map(t=>ownedQA.finishOwnedChild(t,{terminate:true,timeoutMs:5000})))
  cleanup.after=await ownedQA.ownedInventory(ownedTracks,cleanup.before.rows?.map(r=>r.pid));cleanup.complete=results.every(r=>r.status==='fulfilled')
