@@ -1,7 +1,7 @@
 // After Intel APP six-case ABA and DMG formal collection; attribution only.
 const fs=require('node:fs'),path=require('node:path'),{execFileSync}=require('node:child_process'),{createHash}=require('node:crypto'),assert=require('node:assert/strict')
 const allowedFile=name=>!name.toLowerCase().includes('private')&&/\.(?:json|bgra|png|log)$/.test(name)
-function eligible({version,arch,stage,ci}){return version==='1.1.9'&&arch==='x64'&&stage==='dmg'&&ci==='true'}
+function eligible({version,arch,stage,ci}){return version===require('../package.json').version&&require('./ui-capabilities.cjs').singleLogo&&arch==='x64'&&stage==='dmg'&&ci==='true'}
 function copySafe(from,to,receipt,root=to){
  fs.mkdirSync(to,{recursive:true})
  for(const entry of fs.readdirSync(from,{withFileTypes:true})){

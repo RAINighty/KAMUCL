@@ -3,12 +3,14 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const ownedQA=require('./qa-owned-process-119.cjs')
 const appPath=path.resolve(process.argv[2]),arch=process.argv[3],version=require('../package.json').version
 assert.equal(process.platform,'darwin');assert.equal(process.arch,arch)
-const mascotProofRevision=version==='1.1.9'?'119':'118',mascotRecordingKind=version==='1.1.9'?'logo':'leader'
+// Current feature contract, independent of release version: single LOGO mascot and current editor/import/selection behavior.
+const mascotProofRevision='119',mascotRecordingKind='logo'
 const stage=process.argv[4]||(appPath.split(path.sep).includes('dmg-mount')?'dmg':'app');assert(['app','dmg'].includes(stage),'proof stage must be app or dmg')
 const exe=path.join(appPath,'Contents/MacOS/KAMUCL'),proof=path.resolve(`release/mac-proof-${arch}-${stage}`)
 fs.mkdirSync(proof,{recursive:true})
 const binary=execFileSync('file',[exe],{encoding:'utf8'});assert(binary.includes(arch==='x64'?'x86_64':'arm64'))
 const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
+const themes=['transparent','black-orange','blue-white','custom'],themeRuns=[]
 const log=fs.openSync(path.join(proof,'process.log'),'w')
 const fixtureExe=path.join(proof,'material-fixture'),control=path.join(proof,'material-color.txt')
 execFileSync('swiftc',['scripts/mac-material-fixture.swift','-o',fixtureExe])
@@ -31,6 +33,8 @@ async function main(){
  let content=''
  for(let i=0;i<30;i++){try { const r=await call('Runtime.evaluate',{expression:'document.body.innerText',returnByValue:true});content=r.result.value||''; } catch(e) { if(!String(e).includes('Cannot find default execution context'))throw e; }if(content.includes('首页')&&content.includes(version))break;await wait(1000)}
  assert(content.includes('首页')&&content.includes(version),'main UI missing')
+ const userAgent=(await call('Runtime.evaluate',{expression:'navigator.userAgent',returnByValue:true})).result.value
+ assert(userAgent.includes('Electron/'+require('../package.json').devDependencies.electron),'native APP must use the current shared locked Electron runtime')
  const checks=await call('Runtime.evaluate',{expression:`(async()=>{const folders=await window.kamucl.invoke('folders:list');const scan=await window.kamucl.invoke('folders:scan',folders.active);return {platform:document.documentElement.dataset.platform,customButtons:document.querySelectorAll('.win-btn').length,logoTop:document.querySelector('.logo-area').getBoundingClientRect().top,folderStatus:scan.status,folderPath:folders.active}})()`,awaitPromise:true,returnByValue:true});
  const macUI=checks.result.value;assert.equal(macUI.platform,'darwin');assert.equal(macUI.customButtons,0);assert(macUI.logoTop>=38,'native traffic light area overlaps branding');assert.equal(macUI.folderStatus,'ready','default folder missing on first launch');
  await wait(3000)
@@ -87,8 +91,7 @@ async function main(){
  for(let i=0;i<skinPixels.length;i+=3){const [r,g,b]=skinPixels.subarray(i,i+3);if(r>140&&r>g*1.12&&g>b*1.05)facePixels++;if(g>85&&g>r*1.25&&b>r*1.2)shirtPixels++}
  fs.writeFileSync(path.join(proof,'default-skin-capture.json'),JSON.stringify({...skinCapture,facePixels,shirtPixels},null,2))
  assert(facePixels>20&&shirtPixels>20,'default skin texture not rendered')
- // The black-purple default intentionally uses a 96% solid surface. Test native
- // material using the existing translucent black-orange theme, without changing defaults.
+ // Shared current dark themes use the same translucent shell; exercise native desktop material.
  await call('Runtime.evaluate',{expression:`window.kamucl.invoke('settings:set',{theme:'black-orange'})`,awaitPromise:true})
  // Settings IPC persists state; the normal settings view updates its Vue store.
  // Reload to exercise the same saved-theme startup path without poking Vue internals.
@@ -123,7 +126,7 @@ async function main(){
    assert(nativeMaterial.difference>2,'native macOS window still opaque over changing desktop background')
  }
  await call('Runtime.evaluate',{expression:`window.kamucl.invoke('settings:set',{theme:'transparent'})`,awaitPromise:true})
- fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,stage,binary,mainUI:true,macUI,skin:{facePixels,shirtPixels,capture:skinCapture},nativeMaterial,url:page.url},null,2));ws.close()
+ fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,stage,binary,userAgent,mainUI:true,macUI,skin:{facePixels,shirtPixels,capture:skinCapture},nativeMaterial,url:page.url},null,2));ws.close()
  console.log('PASS native macOS '+arch+' packaged app '+version)
 }
 ownedQA.preservingCleanup(main,async()=>{
@@ -136,10 +139,10 @@ ownedQA.preservingCleanup(main,async()=>{
  // The existing native workflow calls this script for both the APP and mounted DMG.
  // Keep the common-feature checks here so they cannot be omitted by a workflow step.
  const extensionProof=path.join(proof,'extensions');fs.mkdirSync(extensionProof,{recursive:true})
- const requiredProofs=['extension-ui-black-orange.json','skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json','skin-editor-ui-black-orange.json','gallery-favorites-118-ui-black-orange.json',...(version==='1.1.9'?['import-routing-119-ui-black-orange.json','selection-ui-119-black-orange.json','kamu-motion-diagnostic-119-cold-black-orange.json','kamu-motion-diagnostic-119-after-header-black-orange.json','kamu-native-recorder-diagnostic-119-'+stage+'-black-orange.json',...(process.env.KAMUCL_NATIVE_COMPOSITOR_ABA119==='1'?['kamu-native-compositor-diagnostic-119-black-orange.json']:[])]:[])]
+ const requiredProofs=['extension-ui-black-orange.json','skin-palette-ui-black-orange.json','mascot-header-ui-black-orange.json','gallery-favorites-ui-black-orange.json','skin-editor-ui-black-orange.json','gallery-favorites-118-ui-black-orange.json','import-routing-119-ui-black-orange.json','selection-ui-119-black-orange.json','kamu-motion-diagnostic-119-cold-black-orange.json','kamu-motion-diagnostic-119-after-header-black-orange.json','kamu-native-recorder-diagnostic-119-'+stage+'-black-orange.json']
  const proofNames=[...requiredProofs,'native-gui-focus-live.json','skin-palette-ready-live.json','skin-palette-preference-live.json','main-inspector-ready-live.json','mascot-header-keyboard-ready-live.json','mascot-header-performance-live.json','mascot-header-performance-diagnostic.json','mascot-header-timeline.json','mascot-header-timeline-raw.json','mascot-header-native-focus-live.json','mascot-header-reverse-live.json','mascot-header-body-sweep-live.json','mascot-header-layout-live.json','mascot-header-visibility-live.json','mascot-header-persistence-live.json','mascot-header-overlap-live.json','mascot-header-screencast-live.json','gallery-favorites-motion-live.json','mascot-slap-117.wav','mascot-sweep-117.webm','mascot-slap-118.wav','mascot-sweep-118.webm','mascot-motion-118.webm','mascot-kamu-119.webm'],shots='release/ui-refinement-black-orange'
  const attemptStarted=Date.now(),fresh=file=>fs.existsSync(file)&&fs.statSync(file).mtimeMs>=attemptStarted
- if(version==='1.1.9'){
+ {
   requiredProofs.push('skin-palette-state-119-black-orange.json')
   proofNames.push('skin-palette-state-119-black-orange.json','kamu-native-compositor-trace-119.json','kamu-native-compositor-trace-119-events.json','kamu-native-compositor-trace-action.json','kamu-native-compositor-trace-observations.json','kamu-native-compositor-trace-preflight.json','kamu-motion-diagnostic-119-native-trace-black-orange.json')
  }
@@ -150,7 +153,7 @@ ownedQA.preservingCleanup(main,async()=>{
   // or a later independent normal GUI run fails/times out. Previously collected
   // traces remain evidence; repeating optional trace/ABA experiments by default
   // must not consume the workflow budget needed by required native checks.
-  if(version==='1.1.9'&&process.env.KAMUCL_NATIVE_TRACE119==='1'){
+  if(process.env.KAMUCL_NATIVE_TRACE119==='1'){
    const began=Date.now(),preflight={version,arch,stage,classification:'instrumented diagnostic only; not normal motion acceptance',startedAt:new Date(began).toISOString(),timeoutMs:180000,complete:false}
    console.log('DIAGNOSTIC native-trace preflight start '+preflight.startedAt)
    try{execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_SKIP_EXTENSION_BASE:'1',KAMUCL_UI_MODULE:'native-trace',KAMUCL_TEST_THEME:'black-orange'},stdio:'inherit',timeout:180000});preflight.complete=true}
@@ -159,16 +162,16 @@ ownedQA.preservingCleanup(main,async()=>{
   }
   // Separate disposable process starts native mascot audio cold, without the full
   // header's MediaRecorder/tap hooks. Preserve its diagnostic evidence separately.
-  if(version==='1.1.9')execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_SKIP_EXTENSION_BASE:'1',KAMUCL_UI_MODULE:'motion119',KAMUCL_TEST_THEME:'black-orange'},stdio:'inherit',timeout:180000})
+  execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_SKIP_EXTENSION_BASE:'1',KAMUCL_UI_MODULE:'motion119',KAMUCL_TEST_THEME:'black-orange'},stdio:'inherit',timeout:180000})
   execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{
    env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_TEST_THEME:'black-orange',KAMUCL_NATIVE_RECORDER_STAGE119:stage,KAMUCL_NATIVE_VIDEO_STAGE119:stage},
    stdio:'inherit',timeout:480000
   })
   // An optional recorder may fail, but its current failure receipt must still be
   // archived. A successful GUI process alone cannot prove its raw evidence exists.
-  if(version==='1.1.9')nativeVideoEvidence=require('./native-video-evidence-119.cjs')({root:'out',version,stage,startedAt:attemptStarted})
+  nativeVideoEvidence=require('./native-video-evidence-119.cjs')({root:'out',version,stage,startedAt:attemptStarted})
   for(const name of requiredProofs){const file=path.join('out',name);assert(fresh(file),'successful GUI run is missing current proof '+name);const result=JSON.parse(fs.readFileSync(file));assert.equal(result.version,version,'GUI proof must match this build: '+name);if('complete' in result)assert.equal(result.complete,true,'GUI proof must be complete: '+name)}
-  if(version==='1.1.9'){
+  {
    const ledger=JSON.parse(fs.readFileSync('out/skin-palette-state-119-black-orange.json'))
    assert.equal(ledger.saveHandlerRestored,true,'palette QA must restore the original save handler')
    assert.equal(ledger.saves.length,2,'palette acceptance must retain both original exports')
@@ -177,6 +180,15 @@ ownedQA.preservingCleanup(main,async()=>{
   const frameManifest=path.join('out',`mascot-${mascotProofRevision}-frames-black-orange`,'frames.json');assert(fresh(frameManifest),'successful GUI run is missing current compositor frame manifest');assert.equal(JSON.parse(fs.readFileSync(frameManifest)).version,version,'compositor frames must match this build')
   const recordingManifest=path.join('out',`mascot-${mascotProofRevision}-${mascotRecordingKind}-screencast-black-orange`,'recording.json');assert(fresh(recordingManifest),'successful GUI run is missing current actual screencast');const recording=JSON.parse(fs.readFileSync(recordingManifest));assert.equal(recording.version,version)
   const cadenceFile=path.join('out','mascot-header-screencast-live.json');assert(fresh(cadenceFile),'successful GUI run is missing current native display cadence proof');const cadence=JSON.parse(fs.readFileSync(cadenceFile)),budget=require('./mascot-capture-budget.cjs')({activeDisplay:cadence.activeDisplay},recording.fps);assert.equal(cadence.actualFps,recording.fps,'native display cadence must refer to this exact recording');assert.equal(cadence.minimumFps,budget.minimumFps,'wrapper and GUI must use the same native display capture target');assert.equal(cadence.passed,budget.passed,'benchmark passed result must match actual capture');assert.equal(cadence.frameRatePassed,budget.passed,'capture result cannot hide a below-target benchmark');assert(recording.frames.length>=2&&Number.isFinite(recording.fps)&&recording.fps>0&&recording.elapsed>0,'capture evidence must include multiple real frames and valid timing');performanceBenchmark={...budget,status:budget.passed?'passed':'below-target'};if(!budget.passed)console.warn('BENCHMARK BELOW TARGET: native compositor capture '+recording.fps+' fps < '+budget.minimumFps+' fps; functional completeness is reported independently')
+  for(const theme of themes){
+   const startedAt=Date.now(),row={theme,startedAt:new Date(startedAt).toISOString(),complete:false};themeRuns.push(row)
+   try{
+    execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_SKIP_EXTENSION_BASE:'1',KAMUCL_UI_MODULE:'ux110',KAMUCL_TEST_THEME:theme},stdio:'inherit',timeout:240000})
+    const file=path.join('out','appearance-motion-'+theme+'-110.json');assert(fs.existsSync(file)&&fs.statSync(file).mtimeMs>=startedAt,'current native theme proof missing')
+    const result=JSON.parse(fs.readFileSync(file));assert.equal(result.version,version);assert.equal(result.complete,true);assert.equal(result.theme,theme)
+    row.complete=true;row.result=result
+   }finally{row.finishedAt=new Date().toISOString();fs.writeFileSync(path.join(extensionProof,'themes.json'),JSON.stringify({version,arch,stage,complete:themeRuns.length===themes.length&&themeRuns.every(row=>row.complete),runs:themeRuns},null,2))}
+  }
   complete=true
 
  }catch(error){extensionError=String(error);throw error}
@@ -189,13 +201,13 @@ ownedQA.preservingCleanup(main,async()=>{
   if(fs.existsSync(frames))for(const name of fs.readdirSync(frames))if((name==='frames.json'||/^frame-\d+\.png$/.test(name))&&fresh(path.join(frames,name))){fs.mkdirSync(frameProof,{recursive:true});fs.copyFileSync(path.join(frames,name),path.join(frameProof,name));copied.push(`mascot-${mascotProofRevision}-frames-black-orange/`+name)}
   const recording=path.join('out',`mascot-${mascotProofRevision}-${mascotRecordingKind}-screencast-black-orange`),recordingProof=path.join(extensionProof,`mascot-${mascotProofRevision}-${mascotRecordingKind}-screencast-black-orange`)
   if(fs.existsSync(recording))for(const name of fs.readdirSync(recording))if((name==='recording.json'||/^frame-\d+\.jpg$/.test(name))&&fresh(path.join(recording,name))){fs.mkdirSync(recordingProof,{recursive:true});fs.copyFileSync(path.join(recording,name),path.join(recordingProof,name));copied.push(`mascot-${mascotProofRevision}-${mascotRecordingKind}-screencast-black-orange/`+name)}
-  if(version==='1.1.9'){const intro=path.join('out','mascot-119-logo-intro-black-orange'),introProof=path.join(extensionProof,'mascot-119-logo-intro-black-orange');if(fs.existsSync(intro))for(const name of fs.readdirSync(intro))if((name==='recording.json'||/^frame-\d+\.jpg$/.test(name))&&fresh(path.join(intro,name))){fs.mkdirSync(introProof,{recursive:true});fs.copyFileSync(path.join(intro,name),path.join(introProof,name));copied.push('mascot-119-logo-intro-black-orange/'+name)}}
-  if(version==='1.1.9')for(const mode of ['cold','after-header','native-trace'])for(const kind of ['cold-intro','first-native','warm-native','warm-no-backdrop','warm-restored-backdrop']){const name='kamu-motion-119-'+mode+'-'+kind+'-black-orange',dir=path.join('out',name),target=path.join(extensionProof,name);if(fs.existsSync(dir))for(const item of fs.readdirSync(dir))if((item==='recording.json'||/^frame-\d+\.jpg$/.test(item))&&fresh(path.join(dir,item))){fs.mkdirSync(target,{recursive:true});fs.copyFileSync(path.join(dir,item),path.join(target,item));copied.push(name+'/'+item)}}
-  if(version==='1.1.9')for(const phase of ['original-sidebar','without-vibrancy','restored-sidebar']){const name='kamu-native-compositor-119-'+phase+'-black-orange',dir=path.join('out',name),target=path.join(extensionProof,name);if(fs.existsSync(dir))for(const item of fs.readdirSync(dir))if((item==='recording.json'||/^frame-\d+\.jpg$/.test(item))&&fresh(path.join(dir,item))){fs.mkdirSync(target,{recursive:true});fs.copyFileSync(path.join(dir,item),path.join(target,item));copied.push(name+'/'+item)}}
-  if(version==='1.1.9')for(const phase of ['recorder-on','recorder-off','recorder-restored']){const name='kamu-native-recorder-119-'+stage+'-'+phase+'-black-orange',dir=path.join('out',name),target=path.join(extensionProof,name);if(fs.existsSync(dir))for(const item of fs.readdirSync(dir))if((item==='recording.json'||/^frame-\d+\.jpg$/.test(item))&&fresh(path.join(dir,item))){fs.mkdirSync(target,{recursive:true});fs.copyFileSync(path.join(dir,item),path.join(target,item));copied.push(name+'/'+item)}}
-  if(version==='1.1.9')for(const phase of ['original-sidebar-before','original-sidebar-after','without-vibrancy-before','without-vibrancy-after','restored-sidebar-before','restored-sidebar-after','finally-restored']){const name='kamu-native-compositor-119-'+phase+'-native-black-orange.png';if(fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}}
-  if(version==='1.1.9')for(const phase of ['recorder-on','recorder-off','recorder-restored'])for(const when of ['before','after']){const name='extension-native-recorder-119-'+stage+'-'+phase+'-'+when+'-black-orange.png';if(fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}}
-  if(version==='1.1.9'){
+  {const intro=path.join('out','mascot-119-logo-intro-black-orange'),introProof=path.join(extensionProof,'mascot-119-logo-intro-black-orange');if(fs.existsSync(intro))for(const name of fs.readdirSync(intro))if((name==='recording.json'||/^frame-\d+\.jpg$/.test(name))&&fresh(path.join(intro,name))){fs.mkdirSync(introProof,{recursive:true});fs.copyFileSync(path.join(intro,name),path.join(introProof,name));copied.push('mascot-119-logo-intro-black-orange/'+name)}}
+  for(const mode of ['cold','after-header','native-trace'])for(const kind of ['cold-intro','first-native','warm-native','warm-no-backdrop','warm-restored-backdrop']){const name='kamu-motion-119-'+mode+'-'+kind+'-black-orange',dir=path.join('out',name),target=path.join(extensionProof,name);if(fs.existsSync(dir))for(const item of fs.readdirSync(dir))if((item==='recording.json'||/^frame-\d+\.jpg$/.test(item))&&fresh(path.join(dir,item))){fs.mkdirSync(target,{recursive:true});fs.copyFileSync(path.join(dir,item),path.join(target,item));copied.push(name+'/'+item)}}
+  for(const phase of ['original-sidebar','without-vibrancy','restored-sidebar']){const name='kamu-native-compositor-119-'+phase+'-black-orange',dir=path.join('out',name),target=path.join(extensionProof,name);if(fs.existsSync(dir))for(const item of fs.readdirSync(dir))if((item==='recording.json'||/^frame-\d+\.jpg$/.test(item))&&fresh(path.join(dir,item))){fs.mkdirSync(target,{recursive:true});fs.copyFileSync(path.join(dir,item),path.join(target,item));copied.push(name+'/'+item)}}
+  for(const phase of ['recorder-on','recorder-off','recorder-restored']){const name='kamu-native-recorder-119-'+stage+'-'+phase+'-black-orange',dir=path.join('out',name),target=path.join(extensionProof,name);if(fs.existsSync(dir))for(const item of fs.readdirSync(dir))if((item==='recording.json'||/^frame-\d+\.jpg$/.test(item))&&fresh(path.join(dir,item))){fs.mkdirSync(target,{recursive:true});fs.copyFileSync(path.join(dir,item),path.join(target,item));copied.push(name+'/'+item)}}
+  for(const phase of ['original-sidebar-before','original-sidebar-after','without-vibrancy-before','without-vibrancy-after','restored-sidebar-before','restored-sidebar-after','finally-restored']){const name='kamu-native-compositor-119-'+phase+'-native-black-orange.png';if(fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}}
+  for(const phase of ['recorder-on','recorder-off','recorder-restored'])for(const when of ['before','after']){const name='extension-native-recorder-119-'+stage+'-'+phase+'-'+when+'-black-orange.png';if(fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}}
+  {
    const name='kamu-native-video-diagnostic-119-'+stage+'-black-orange.json';if(fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}
    const dirName='kamu-native-video-119-'+stage+'-black-orange',dir=path.join('out',dirName),target=path.join(extensionProof,dirName);
    if(fs.existsSync(dir))for(const item of fs.readdirSync(dir))if(/^(?:frame-\d{6}\.(?:bgra|png|json)|(?:capture|ready|failure|identity|request|clicks-start|action-complete)\.json|(?:helper|compile)\.log)$/.test(item)&&fresh(path.join(dir,item))){fs.mkdirSync(target,{recursive:true});fs.copyFileSync(path.join(dir,item),path.join(target,item));copied.push(dirName+'/'+item)}
@@ -203,12 +215,20 @@ ownedQA.preservingCleanup(main,async()=>{
   for(const name of fs.readdirSync('out'))if(/^extension-118-skin-dirty-fixture-(?:native|compositor)-failure-\d+-black-orange\.png$/.test(name)&&fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}
   for(const name of fs.readdirSync('out'))if(/^(?:extension-118-skin-palette-state-(?:native|compositor)-failure-black-orange|skin-palette-export-119-black-orange-(?:\d+|latest-success))\.png$/.test(name)&&fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}
   if(fs.existsSync(shots))for(const name of fs.readdirSync(shots))if(name.startsWith('extension-')&&name.endsWith('.png')&&fresh(path.join(shots,name))){fs.copyFileSync(path.join(shots,name),path.join(extensionProof,name));copied.push(name)}
-  fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,functionalComplete:complete,performanceBenchmark,performancePassed:performanceBenchmark?.passed??null,nativeVideoEvidence,observerABA119,acceptance:'functional results only; independent visual, interaction and motion review is separate',error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
+  for(const theme of themes){
+   for(const dir of [path.join('release','ui-refinement-'+theme),path.join('out','skin-walk-110-'+theme)])if(fs.existsSync(dir)){
+    const target=path.join(extensionProof,'current-themes',theme,path.basename(dir));fs.mkdirSync(target,{recursive:true})
+    for(const name of fs.readdirSync(dir))if(/^(?:110-.*\.png|recording\.json|frame-\d+\.jpg)$/.test(name)&&fresh(path.join(dir,name))){fs.copyFileSync(path.join(dir,name),path.join(target,name));copied.push('current-themes/'+theme+'/'+path.basename(dir)+'/'+name)}
+   }
+   const file=path.join('out','appearance-motion-'+theme+'-110.json');if(fresh(file)){const target=path.join(extensionProof,'current-themes',theme);fs.mkdirSync(target,{recursive:true});fs.copyFileSync(file,path.join(target,path.basename(file)))}
+  }
+  const nativeAccepted=complete&&performanceBenchmark?.passed===true&&nativeVideoEvidence?.complete===true&&nativeVideoEvidence.nativeDeliveryBenchmark?.passed===true
+  fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,functionalComplete:complete,nativeAccepted,performanceBenchmark,performancePassed:performanceBenchmark?.passed??null,nativeVideoEvidence,observerABA119,acceptance:'functional and both original capture benchmarks required; independent visual, interaction and motion review is separate',error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
   for(const name of fs.readdirSync('out').filter(n=>/^qa-owned-process-119-[0-9a-f-]{36}\.json$/.test(n)))if(fresh(path.join('out',name))){const target=path.join(extensionProof,'owned-process-ledgers',name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join('out',name),target)}
   // One separate, disposable Intel APP diagnostic after archiving the normal
   // result, including its original failure. Diagnostics cannot replace it.
   // Keep workflow permissions/budget and all formal capture assertions intact.
-  if(version==='1.1.9'&&arch==='x64'&&stage==='app'&&process.env.CI==='true'){
+  if(process.env.KAMUCL_MAC_DIAGNOSTICS==='1'&&arch==='x64'&&stage==='app'&&process.env.CI==='true'){
    const began=Date.now();observerABA119={classification:'Independent instrumentation-only observer A/B/A; not formal acceptance',startedAt:new Date(began).toISOString(),timeoutMs:180000,complete:false,normalAcceptanceChanged:false}
    console.log('DIAGNOSTIC observer ABA start '+observerABA119.startedAt)
    try{execFileSync(process.execPath,['scripts/verify-ui-refinement.cjs'],{env:{...env,KAMUCL_GUI_APP:exe,KAMUCL_EXTENSION_GUI:'1',KAMUCL_EXTENSION_ONLY:'1',KAMUCL_SKIP_EXTENSION_BASE:'1',KAMUCL_UI_MODULE:'native-compositor',KAMUCL_OBSERVER_ABA119:'1',KAMUCL_TEST_THEME:'black-orange'},stdio:'inherit',timeout:observerABA119.timeoutMs});observerABA119.processExitCode=0}
@@ -227,8 +247,11 @@ ownedQA.preservingCleanup(main,async()=>{
   }
   // Only after DMG formal proofs are archived, in a separate owned process.
   // The helper bounds 85s execution + 5s cleanup and excludes private CPU data.
-  require('./native-trace-control-preflight-119.cjs').run({version,arch,stage,ci:process.env.CI,env,exe,extensionProof})
+  if(process.env.KAMUCL_MAC_DIAGNOSTICS==='1')require('./native-trace-control-preflight-119.cjs').run({version,arch,stage,ci:process.env.CI,env,exe,extensionProof})
 
  }
- console.log('FUNCTIONAL PASS native macOS '+arch+' extension GUI '+version+'; capture benchmark '+performanceBenchmark.status)
+ assert.equal(performanceBenchmark?.passed,true,'original native CDP recording is below its unchanged display capture target; evidence retained')
+ assert.equal(nativeVideoEvidence?.complete,true,'original ScreenCaptureKit capture did not complete; failure evidence retained')
+ assert.equal(nativeVideoEvidence.nativeDeliveryBenchmark?.passed,true,'original ScreenCaptureKit recording is below its unchanged display target; evidence retained')
+ console.log('NATIVE CHECKS PASS macOS '+arch+' current feature GUI '+version+'; original CDP and SCK benchmarks passed; independent review remains separate')
 }).catch(e=>{console.error(e);process.exitCode=1})

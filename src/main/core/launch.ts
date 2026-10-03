@@ -25,7 +25,9 @@ import { getSettings } from './settings'
 import { getValidAccount, selectedAccount } from './accounts'
 import { validateJavaRuntime } from './javaRuntimeHealth'
 import { ensureJava, requiredMajor, scanJavaForLaunch, resolveJavaExecutable, selectHealthyJava, probeJavaAsync } from './java'
-import { macJavaArchitecture } from './javaArchitecture'
+import { gameJavaArchitecture } from './javaArchitecture'
+import { requireDesktopGamePlatform } from '../../shared/platform'
+import { assertNativeElf, resolveNativeIntegrity } from './platformNatives'
 import {
   assetsDir,
   allFolders,
@@ -266,6 +268,7 @@ export async function launch(
   options: LaunchOptions = {}
 ): Promise<void> {
   if (restartPending) throw new Error('正在重启游戏，请稍后再启动')
+  requireDesktopGamePlatform(process.platform)
   const token = gameSession.reserve(versionId)
   launchLog.info(`开始启动实例 ${versionId}${serverAddress ? `（直达服务器 ${serverAddress}）` : ''}`)
   invocation = { versionId, folder: gameDir(), emit, sendLog, onState, serverAddress, options: { ...options } }
@@ -451,6 +454,7 @@ async function launchOwned(
       if (reused) log(`[KAMUCL] 已复用注册目录中 ${reused} 个运行库文件`)
       await repairNeoRuntime(merged, clientJar, readVersionJson(baseId), emit)
       const launchFiles = launchLibraryFiles(merged)
+      await mapLaunchFiles(launchFiles, file => resolveNativeIntegrity(file, deadline.signal))
       let checkedLibraries = 0, lastCheckProgress = 0
       const invalid = await mapLaunchFiles(launchFiles, async file => {
         const reason = await invalidLaunchArtifact(file)
@@ -478,8 +482,15 @@ async function launchOwned(
       // d) classpath 与 natives 解压
       emit({ stage: 'launch', progress: 0.5, text: '准备运行库与 natives' })
       const { artifacts, natives } = resolvedLibraries(merged)
-      const nativesPath = nativesDir(versionId)
+      const nativesPath = process.platform === 'linux' ? path.join(nativesDir(versionId), `linux-${process.arch}`) : nativesDir(versionId)
       fs.mkdirSync(nativesPath, { recursive: true })
+      // Legacy LWJGL2 x64 bundles contain both 32- and 64-bit alternatives.
+      // ARM64 requires every selected native to match; modern x64 classifier
+      // artifacts are single architecture. Do not reject valid legacy bundles.
+      if (process.platform === 'linux') for (const jar of [...new Set([...(process.arch === 'arm64' ? natives : []), ...artifacts.filter(file => /-natives-linux(?:-arm64)?\.jar$/.test(file))])]) {
+        const zip = new AdmZip(jar)
+        for (const entry of zip.getEntries()) if (!entry.isDirectory && /\.so(?:\.\d+)*$/.test(entry.entryName)) assertNativeElf(entry.getData(), process.arch, `${path.basename(jar)}:${entry.entryName}`)
+      }
       for (const jar of natives) {
         if (!fs.existsSync(jar)) continue
         try {
@@ -488,8 +499,9 @@ async function launchOwned(
             if (entry.isDirectory || entry.entryName.startsWith('META-INF/')) continue
             zip.extractEntryTo(entry, nativesPath, true, true)
           }
-        } catch {
-          // 单个 natives 解压失败不阻断启动
+        } catch (error) {
+          if (process.platform === 'linux') throw new Error(`Linux 原生运行库解压失败：${path.basename(jar)}；${String(error)}`)
+          // Preserve the existing Windows/macOS extraction behavior.
         }
       }
       const classpath = [...new Set([...artifacts, ...natives, clientJar])].join(path.delimiter)
@@ -537,7 +549,7 @@ async function launchOwned(
         emit({ stage: 'java', progress: 1, text: '使用手动指定的 Java' })
       } else {
         const need = requiredMajor(merged)
-        const found = await selectHealthyJava(await scanJavaForLaunch(), need, macJavaArchitecture(merged))
+        const found = await selectHealthyJava(await scanJavaForLaunch(), need, gameJavaArchitecture(merged))
         if (!found) {
           throw new Error(
             `该版本需要 Java ${need} (64位)，但未找到（Java 自动管理已关闭）。请在设置中选择 Java 或开启自动管理`
@@ -553,7 +565,7 @@ async function launchOwned(
       if (selectedJavaPath !== javaPath) log(`[KAMUCL] Java 转发入口已解析到真实运行时: ${javaPath}`)
       const javaInfo = await probeJavaAsync(javaPath)
       const need = requiredMajor(merged)
-      const requiredArch = macJavaArchitecture(merged)
+      const requiredArch = gameJavaArchitecture(merged)
       if (!javaInfo || !javaInfo.is64Bit || javaInfo.major < need || (requiredArch && javaInfo.architecture !== requiredArch)) {
         throw new Error('所选 Java 版本或架构不适配：需要 Java ' + need + '+（64 位' + (requiredArch ? '，' + requiredArch : '') + '），请修改实例设置或开启自动管理')
       }

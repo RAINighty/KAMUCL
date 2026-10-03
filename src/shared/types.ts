@@ -1319,7 +1319,8 @@ export interface ServerPingResult {
   latencyMs: number
 }
 
-export interface SystemInfo {
+export interface SystemInfo extends Partial<import('./platform').PlatformInfo> {
+  credentialStorage?: { persistent: boolean; sessionOnly: boolean; message: string }
   /** macOS 系统辅助功能“降低透明度”；仅用于说明，不修改系统偏好。 */
   reducedTransparency?: boolean
   /** 物理内存总量（MB，向下取整） */

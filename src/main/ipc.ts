@@ -1,3 +1,4 @@
+import { currentPlatformInfo } from './platform'
 import { registerRecordingsIpc } from './core/recordingsIpc'
 import { probeImport } from './core/importProbe'
 import { registerSkinEditorIpc } from './core/skinEditorIpc'
@@ -177,9 +178,11 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   // ---------------- 设置 ----------------
   ipcMain.handle(IPC.settingsGet, () => settings.getSettings())
   ipcMain.handle(IPC.appSystemInfo, () => ({
+    credentialStorage: accounts.accountStorageStatus(),
     totalMemMB: Math.floor(os.totalmem() / 1024 / 1024),
     freeMemMB: Math.floor(os.freemem() / 1024 / 1024),
-    reducedTransparency: process.platform === 'darwin' ? systemPreferences.accessibilityDisplayShouldReduceTransparency : undefined
+    reducedTransparency: process.platform === 'darwin' ? systemPreferences.accessibilityDisplayShouldReduceTransparency : undefined,
+    ...currentPlatformInfo()
   }))
   ipcMain.handle(IPC.directOverview, () => direct.directOverview())
   ipcMain.handle(IPC.directHost, (_e, request: DirectHostRequest) => direct.startDirectHost(request))
@@ -981,7 +984,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
     const opts = {
       properties: ['openFile' as const],
       title: '选择 KAMUCL 安装包',
-      filters: [{ name: 'KAMUCL 安装包', extensions: [process.platform === 'darwin' ? 'zip' : 'exe'] }]
+      filters: [{ name: 'KAMUCL 安装包', extensions: process.platform === 'linux' ? ['AppImage', 'deb', 'gz'] : [process.platform === 'darwin' ? 'zip' : 'exe'] }]
     }
     const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     if (result.canceled || !result.filePaths[0]) return null

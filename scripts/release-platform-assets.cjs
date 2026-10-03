@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict')
 
 function platformValue(platform) {
-  if (platform !== 'all' && platform !== 'windows') throw Error('Unsupported release platform: ' + platform)
+  if (!['all', 'windows', 'desktop'].includes(platform)) throw Error('Unsupported release platform: ' + platform)
   return platform
 }
 
@@ -32,7 +32,9 @@ function productAssetNames(version, platform = 'all') {
   platformValue(platform)
   const prefix = `KAMUCL-${version}`
   const windows = [`${prefix}.exe`, `${prefix}-windows-x64.zip`, `${prefix}-windows-x64-unpacked.zip`]
-  return platform === 'windows' ? windows : [...windows, ...['arm64', 'x64'].flatMap(arch => ['dmg', 'zip'].map(ext => `${prefix}-mac-${arch}.${ext}`))]
+  const mac = ['arm64', 'x64'].flatMap(arch => ['dmg', 'zip'].map(ext => `${prefix}-mac-${arch}.${ext}`))
+  const linux = ['x64', 'arm64'].flatMap(arch => ['AppImage', 'deb', 'tar.gz'].map(ext => `${prefix}-linux-${arch}.${ext}`))
+  return platform === 'windows' ? windows : [...windows, ...mac, ...(platform === 'desktop' ? linux : [])]
 }
 
 function releaseAssetNames(version, platform = 'all') {

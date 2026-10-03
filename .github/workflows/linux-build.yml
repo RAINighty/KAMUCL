@@ -1,0 +1,144 @@
+name: Linux native packages
+on:
+  workflow_dispatch:
+    inputs:
+      desktop_qa:
+        description: Run real X11/XWayland desktop acceptance on labelled self-hosted machines
+        type: boolean
+        default: false
+  push:
+    branches: [master]
+    paths: ['.github/workflows/linux-build.yml', 'scripts/*linux*.cjs', 'native/LinuxGameWindow.cpp', 'src/main/core/linuxUpdate*.ts', 'package.json']
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Native compiler and package validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libx11-dev squashfs-tools libfuse2t64
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit
+      - run: npm run license:check
+      - run: node scripts/build-bridge.cjs
+      - run: node scripts/verify-bridge-exit.cjs
+      - name: Build matching architecture AppImage, DEB and portable archive
+        run: node scripts/pack-linux.cjs ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-packages-${{ matrix.arch }}
+          path: |
+            release/*-linux-*.AppImage
+            release/*-linux-*.deb
+            release/*-linux-*.tar.gz
+            release/SHA256SUMS-linux-*.txt
+            release/linux-proof-*
+          if-no-files-found: error
+  compatibility:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+            os: '24.04'
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            os: '24.04'
+          - runner: ubuntu-26.04
+            arch: x64
+            os: '26.04'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages-${{ matrix.arch }}
+          path: release
+      - name: X server and fixture window manager for CI smoke
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb openbox mesa-utils dbus-x11 ffmpeg libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1
+          # This disposable hosted VM is not a player's desktop. Keep Chromium sandbox enabled.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Exact clean portable package GUI smoke, explicitly not native desktop acceptance
+        run: xvfb-run -a -s '-screen 0 1600x1100x24' dbus-run-session -- sh -c 'openbox >/tmp/kamucl-openbox.log 2>&1 & node scripts/verify-linux-desktop.cjs ${{ matrix.arch }} --fixture-smoke'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-smoke-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            release/linux-desktop-*
+          if-no-files-found: error
+  desktop:
+    if: github.event_name == 'workflow_dispatch' && inputs.desktop_qa
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            label: X64
+            os: '24.04'
+          - arch: arm64
+            label: ARM64
+            os: '24.04'
+          - arch: x64
+            label: X64
+            os: '26.04'
+          - arch: arm64
+            label: ARM64
+            os: '26.04'
+    runs-on: [self-hosted, Linux, '${{ matrix.label }}', kamucl-desktop, 'ubuntu-${{ matrix.os }}']
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages-${{ matrix.arch }}
+          path: release
+      - name: Real desktop and hardware renderer gate with original video and frame timings
+        run: node scripts/verify-linux-desktop.cjs ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-desktop-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            release/linux-desktop-*
+          if-no-files-found: error

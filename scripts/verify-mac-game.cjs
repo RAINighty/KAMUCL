@@ -240,9 +240,8 @@ main().catch(e => { console.error(e); process.exitCode = 1 }).finally(async () =
   mainWs?.close(); ws?.close()
   const ended=new Promise(resolve=>{if(child.exitCode!==null)resolve();else child.once('exit',resolve)})
   child.kill('SIGTERM');await ended;fs.closeSync(log)
-  // Collect independent animation/tools/update evidence even if gameplay failed;
-  // any failure still fails this required workflow step.
-  try{await require('./verify-mac-extra.cjs')(app,arch)}catch(e){console.error(e);process.exitCode=1}
+  // Startup/tools/update run in independent required jobs against this exact bundle.
+  // A failed or slow game run must not consume their native validation budget.
   } finally {
     try { await captureObserver.stop() } catch (e) { console.error(e); process.exitCode = 1 }
   }

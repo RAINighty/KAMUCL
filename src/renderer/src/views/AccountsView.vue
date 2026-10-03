@@ -5,6 +5,7 @@ import {
   copyText,
   errText,
   getSelectedAccount,
+  getSystemInfo,
   listYggdrasilProviders,
   loginYggdrasil,
   msBeginLogin,
@@ -21,6 +22,7 @@ import {
 } from '../api'
 import { refreshAccounts, store, toast } from '../store'
 import Avatar from '../components/Avatar.vue'
+const credentialNotice = ref('')
 import type {
   Account,
   MsDeviceCodeInfo,
@@ -318,6 +320,7 @@ function accountTypeLabel(account: Account): string {
 }
 
 onMounted(() => {
+  void getSystemInfo().then(info => { credentialNotice.value = info.credentialStorage?.message ?? '' }).catch(() => {})
   void loadProviders()
   store.yggdrasilImportHandler = openProviderImport
   if (store.pendingYggdrasilImport) {
@@ -398,6 +401,7 @@ async function onRemove(acc: Account) {
       </div>
     </div>
 
+    <p v-if="credentialNotice" class="muted" role="status">{{ credentialNotice }}</p>
     <!-- 添加账号 -->
     <div class="card">
       <h3 class="section-title">添加账号</h3>

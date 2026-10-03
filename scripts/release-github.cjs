@@ -6,7 +6,7 @@
  * 3. 上传并验证全部附件后公开 Release
  *
  * 认证优先级：GITHUB_TOKEN 环境变量 → gh CLI → git 凭据管理器（推送用的凭据）。
- * 用法：node scripts/release-github.cjs [--platform all|windows] [--dry-run] [--notes-file reviewed.md]
+ * 用法：node scripts/release-github.cjs [--platform all|windows|desktop] [--dry-run] [--notes-file reviewed.md]
  */
 const fs = require('node:fs')
 const { parseReleaseArgs, releaseAssetNames, assertUniqueAssetNames, assertRemotePlatformScope } = require('./release-platform-assets.cjs')
@@ -99,6 +99,7 @@ async function taggedCommit(token) {
 }
 
 async function main() {
+  if (!dryRun && options.platform !== 'windows') require('./platform-release-gate.cjs').verifyPlatformRelease(root, version)
   const packages = releaseAssetNames(version, options.platform).map(name => path.join(root, 'release', name))
   packages.push(...require('./release-history-assets.cjs')(path.join(root, 'release'), version))
   assertUniqueAssetNames([...packages.map(file => path.basename(file)), 'SHA256SUMS.txt'])
@@ -118,6 +119,7 @@ async function main() {
   const body = notesPath ? fs.readFileSync(path.resolve(root, notesPath), 'utf8') : latestNoteBody()
   if (!body.trim()) throw new Error('Release 说明为空，停止发布')
   if (dryRun) {
+    if (options.platform !== 'windows') console.log('Preview only: native platform acceptance has not been inferred or granted by this dry run.')
     console.log('Release platform: ' + options.platform)
     console.log('--- dry run，Release body ---')
     console.log(body)

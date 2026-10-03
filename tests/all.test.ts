@@ -1,5 +1,7 @@
 import './download-cancellation.test'
 import './appearance-motion-110.test'
+import './platform-parity-111.test'
+import './linux-platform-111.test'
 import './extension-features.test'
 import './voxlink-116.test'
 import './game-pipe-concurrency.test'

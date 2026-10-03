@@ -24,6 +24,10 @@ export const FRPC_OFFICIAL_URL_WIN_AMD64 =
 
 export function frpcAsset(platform = process.platform, arch = process.arch): { url: string; sha256?: string } {
   if (platform === 'win32') return { url: FRPC_OFFICIAL_URL_WIN_AMD64 }
+  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) return {
+    url: `https://nya.globalslb.net/natfrp/client/frpc/0.51.0-sakura-14/frpc_linux_${arch === 'x64' ? 'amd64' : 'arm64'}`,
+    sha256: arch === 'x64' ? '8d3fcf1e24537719c36c6270c122fcdc09954d22ae9dd74105241675e6dce4d0' : '7f1bf530eb6b46b47e9b1e4bb022d689b5f26f5132581c29c5f43d922a42e595'
+  }
   const sha256 = arch === 'arm64' ? '465db9daea0e14e3adaa89926640afa8b44737dadc1cf0b75f9b091850d2e331'
     : arch === 'x64' ? '74ee362350314dd5ac8936fbe2299fc76671051e10beb46c8dd37c36a4503935' : undefined
   if (platform !== 'darwin' || !sha256) throw new Error(`樱花穿透暂不支持 ${platform}/${arch}`)
@@ -170,7 +174,12 @@ export function ensureFrpcInstalled(onLog?: (line: string) => void): Promise<str
 }
 
 function killProcessTree(pid: number): void {
-  if (!pid || process.platform !== 'win32') return
+  if (!pid) return
+  if (process.platform !== 'win32') {
+    // Only the private group we created; never another client or the JVM group.
+    try { process.kill(-pid, 'SIGTERM') } catch { /* already stopped */ }
+    return
+  }
   try {
     // taskkill /T /F /PID <pid> 兜底：frpc 子进程不会因 parent.kill 全部退出
     const { spawn: spawnSync } = require('node:child_process') as typeof import('node:child_process')
@@ -284,6 +293,7 @@ export class FrpController {
     const startedAt = new Date().toISOString()
     const proc = spawn(target, args, {
       windowsHide: true,
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe']
     })
     const pid = proc.pid ?? 0

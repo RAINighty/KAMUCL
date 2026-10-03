@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
   push:
     branches: [master]
-    paths: ['.github/workflows/mac-build.yml', 'scripts/verify-mac.cjs', 'scripts/verify-mac-game.cjs', 'package.json']
+    paths: ['.github/workflows/mac-build.yml', 'scripts/verify-mac*.cjs', 'scripts/pack-mac.mjs', 'native/MacGameWindow.swift', 'package.json']
 permissions:
   contents: read
 jobs:
-  mac:
+  package:
     strategy:
       fail-fast: false
       matrix:
@@ -22,71 +22,165 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
       - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit
+      - run: npm run license:check
       - run: node scripts/build-bridge.cjs
       - run: node scripts/verify-bridge-exit.cjs
-      - run: npm run build
-      - name: Enable native material in disposable UI test session
-        # Hosted runner images disable transparency globally; never change this on players' Macs.
-        run: defaults write com.apple.universalaccess reduceTransparency -bool false
-      - name: Package native application
-        # This release upgrades the Windows compositor only. Keep the existing
-        # macOS runtime: Electron 44 fails GPU initialization on Intel CI.
-        run: npx electron-builder --mac dir --${{ matrix.arch }} --config.electronVersion=33.4.11 --publish never
+      - name: Package exact shared runtime, local signature, ZIP and DMG
+        run: node scripts/pack-mac.mjs ${{ matrix.arch }} --package-only
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - name: Sign locally, verify and archive
-        env:
-          ARCH: ${{ matrix.arch }}
-        run: |
-          APP=$(find release -maxdepth 2 -name KAMUCL.app -print -quit)
-          codesign --force --deep --sign - "$APP"
-          codesign --verify --deep --strict "$APP"
-          node scripts/verify-mac.cjs "$APP" "$ARCH"
-          VERSION=$(node -p "require('./package.json').version")
-          ditto -c -k --sequesterRsrc --keepParent "$APP" "release/KAMUCL-${VERSION}-mac-${ARCH}.zip"
-          cd release
-          shasum -a 256 "KAMUCL-${VERSION}-mac-${ARCH}.zip" > "SHA256SUMS-mac-${ARCH}.txt"
-      - name: Build and launch installable DMG
-        env:
-          ARCH: ${{ matrix.arch }}
-        run: |
-          set -euo pipefail
-          VERSION=$(node -p "require('./package.json').version")
-          mkdir -p "$RUNNER_TEMP/dmg-stage" "$RUNNER_TEMP/dmg-mount"
-          ditto -x -k "release/KAMUCL-${VERSION}-mac-${ARCH}.zip" "$RUNNER_TEMP/dmg-stage"
-          codesign --verify --deep --strict "$RUNNER_TEMP/dmg-stage/KAMUCL.app"
-          ln -s /Applications "$RUNNER_TEMP/dmg-stage/Applications"
-          printf '将 KAMUCL.app 拖入 Applications，然后从应用程序中打开。\n此应用尚未进行 Apple 开发者签名及公证，首次运行可能需要在系统设置中确认。\n' > "$RUNNER_TEMP/dmg-stage/安装说明.txt"
-          DMG="release/KAMUCL-${VERSION}-mac-${ARCH}.dmg"
-          hdiutil create -volname "KAMUCL ${ARCH}" -srcfolder "$RUNNER_TEMP/dmg-stage" -format UDZO -fs HFS+ "$DMG"
-          hdiutil verify "$DMG"
-          hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$RUNNER_TEMP/dmg-mount"
-          node scripts/verify-mac.cjs "$RUNNER_TEMP/dmg-mount/KAMUCL.app" "$ARCH"
-          sleep 3
-          hdiutil detach "$RUNNER_TEMP/dmg-mount"
-          cd release
-          shasum -a 256 "KAMUCL-${VERSION}-mac-${ARCH}.dmg" >> "SHA256SUMS-mac-${ARCH}.txt"
-      - name: Verify Java fallback and actual Minecraft window
-        env:
-          ARCH: ${{ matrix.arch }}
-        run: |
-          APP=$(find release -maxdepth 2 -name KAMUCL.app -print -quit)
-          node scripts/verify-mac-game.cjs "$APP" "$ARCH"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mac-${{ matrix.arch }}
+          name: mac-packages-${{ matrix.arch }}
           path: |
             release/*-mac-*.zip
             release/*-mac-*.dmg
             release/SHA256SUMS-mac-*.txt
+            release/mac-package-*.json
+          if-no-files-found: error
+  ui:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            stage: app
+          - runner: macos-15
+            arch: arm64
+            stage: dmg
+          - runner: macos-15-intel
+            arch: x64
+            stage: app
+          - runner: macos-15-intel
+            arch: x64
+            stage: dmg
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-packages-${{ matrix.arch }}
+          path: release
+      - name: Enable desktop material in disposable native session
+        run: defaults write com.apple.universalaccess reduceTransparency -bool false
+      - name: Validate exact APP or mounted DMG and current common feature evidence
+        run: node scripts/verify-mac-job.cjs ui ${{ matrix.arch }} ${{ matrix.stage }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-ui-${{ matrix.arch }}-${{ matrix.stage }}
+          path: |
             release/mac-proof-*
+            release/mac-job-*
+          if-no-files-found: error
+  game:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-packages-${{ matrix.arch }}
+          path: release
+      - name: Actual native Minecraft installation, world, save, focus and Dock reopening
+        run: node scripts/verify-mac-job.cjs game ${{ matrix.arch }} app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-game-${{ matrix.arch }}
+          path: |
             release/mac-game-proof-*
+            release/mac-job-*
+          if-no-files-found: error
+  integration:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            group: startup
+          - runner: macos-15
+            arch: arm64
+            group: tools
+          - runner: macos-15
+            arch: arm64
+            group: update
+          - runner: macos-15-intel
+            arch: x64
+            group: startup
+          - runner: macos-15-intel
+            arch: x64
+            group: tools
+          - runner: macos-15-intel
+            arch: x64
+            group: update
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-packages-${{ matrix.arch }}
+          path: release
+      - name: Build local test coordinators from this exact source
+        run: |
+          node scripts/build-bridge.cjs
+          npm run build
+      - name: Independent native startup, network tools or transactional update
+        run: node scripts/verify-mac-job.cjs ${{ matrix.group }} ${{ matrix.arch }} app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-${{ matrix.group }}-${{ matrix.arch }}
+          path: |
+            release/mac-extra-*
+            release/mac-tools-proof-*
+            release/mac-job-*
           if-no-files-found: error

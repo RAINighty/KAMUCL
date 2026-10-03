@@ -18,7 +18,7 @@ function assertScaleContract(entry){
 }
 module.exports=async function feedbackScale(h){
  const {call,evaluate,main,nav,wait,version,recordScreencast}=h,theme=process.env.KAMUCL_TEST_THEME||'black-orange'
- assert.equal(version,'1.1.9');assert.equal(typeof recordScreencast,'function')
+ assert.equal(version,require('../package.json').version);assert(require('./ui-capabilities.cjs').singleLogo);assert.equal(typeof recordScreencast,'function')
  const runId=new Date().toISOString().replace(/[:.]/g,'-')
  const proof={version,theme,runId,complete:false,classification:'opt-in noninteger feedback scale diagnostic; screenshot requests may affect timing, separate from formal baseline motion acceptance',hardwareListening:'not performed',cases:[]}
  const file='out/feedback-scale-119-'+runId+'-'+theme+'.json',persist=()=>{const content=JSON.stringify(proof,null,2);fs.writeFileSync(file,content);fs.writeFileSync('out/feedback-scale-119-'+theme+'.json',content)}

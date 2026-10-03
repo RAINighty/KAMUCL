@@ -11,6 +11,7 @@ import { getSettings } from './settings'
 import * as yggdrasil from './yggdrasil'
 import { microsoftFetch } from './microsoftTls'
 import { logScope } from './launcherLog'
+import { protectedCredentialStorage, credentialStorageStatus } from './credentialProtection'
 
 const authLog = logScope('ms-auth')
 
@@ -69,13 +70,17 @@ const SECRET_KEYS: SecretKey[] = [
 ]
 
 let cached: AccountsFile | null = null
+// Preserve already encrypted credentials while a keyring is temporarily locked.
+// Session-only logins never overwrite these with a basic_text ciphertext.
+const storedSecrets = new Map<string, StoredAccount['secure']>()
+export function accountStorageStatus() { return credentialStorageStatus(safeStorage) }
 
 function storeFile(): string {
   return path.join(app.getPath('userData'), 'accounts.json')
 }
 
 function encryptSecret(value: unknown): string {
-  if (!safeStorage.isEncryptionAvailable()) {
+  if (!protectedCredentialStorage(safeStorage)) {
     throw new Error('系统安全存储当前不可用，无法安全保存登录令牌')
   }
   const plain = typeof value === 'string' ? value : JSON.stringify(value)
@@ -84,7 +89,7 @@ function encryptSecret(value: unknown): string {
 
 function decryptSecret(value: string): string | undefined {
   try {
-    if (!safeStorage.isEncryptionAvailable()) return undefined
+    if (!protectedCredentialStorage(safeStorage)) return undefined
     return safeStorage.decryptString(Buffer.from(value, 'base64'))
   } catch {
     return undefined
@@ -123,8 +128,9 @@ function serializeAccount(account: Account): StoredAccount {
   for (const key of SECRET_KEYS) {
     const value = account[key]
     delete (stored as unknown as Record<string, unknown>)[key]
-    if (value !== undefined && value !== '') secure[key] = encryptSecret(value)
+    if (value !== undefined && value !== '' && !(process.platform === 'linux' && !protectedCredentialStorage(safeStorage))) secure[key] = encryptSecret(value)
   }
+  if (process.platform === 'linux' && !protectedCredentialStorage(safeStorage)) Object.assign(secure, storedSecrets.get(account.id))
   if (Object.keys(secure).length) stored.secure = secure
   return stored
 }
@@ -136,6 +142,7 @@ function load(): AccountsFile {
     const raw = JSON.parse(fs.readFileSync(storeFile(), 'utf-8')) as StoredAccountsFile
     const accounts = Array.isArray(raw.accounts)
       ? raw.accounts.map((stored) => {
+          if (stored.secure) storedSecrets.set(stored.id, { ...stored.secure })
           const parsed = deserializeAccount(stored)
           migrate ||= parsed.legacySecrets
           return parsed.account
@@ -148,7 +155,7 @@ function load(): AccountsFile {
   } catch {
     cached = { accounts: [], selectedId: null }
   }
-  if (migrate && safeStorage.isEncryptionAvailable()) {
+  if (migrate && protectedCredentialStorage(safeStorage)) {
     try {
       persist()
     } catch (error) {
@@ -165,7 +172,10 @@ function persist(): void {
     accounts: data.accounts.map(serializeAccount),
     selectedId: data.selectedId
   }
-  fs.writeFileSync(storeFile(), JSON.stringify(stored, null, 2), 'utf-8')
+  fs.writeFileSync(storeFile(), JSON.stringify(stored, null, 2), { encoding: 'utf-8', mode: 0o600 })
+  if (process.platform === 'linux') fs.chmodSync(storeFile(), 0o600)
+  storedSecrets.clear()
+  for (const row of stored.accounts ?? []) if (row.secure) storedSecrets.set(row.id, { ...row.secure })
 }
 
 /** 渲染进程只拿展示字段，token、登录标识和用户属性始终留在主进程。 */

@@ -99,20 +99,24 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
     if(process.env.KAMUCL_UI_MODULE==='ux110')await require('./verify-appearance-motion-110-ui.cjs')(harness);
     if(!process.env.KAMUCL_SKIP_EXTENSION_BASE)await require('./verify-extension-ui.cjs')(harness);
     const selectedModule=process.env.KAMUCL_UI_MODULE||process.env.KAMUCL_117_MODULE;
-    if(version==='1.1.9'&&selectedModule==='motion119')await require('./verify-kamu-motion-diagnostic-119.cjs')({...harness,motionDiagnosticInvocation:'standalone-cold-process'});
+    const capabilities=require('./ui-capabilities.cjs');
+    if(capabilities.singleLogo&&selectedModule==='motion119')await require('./verify-kamu-motion-diagnostic-119.cjs')({...harness,motionDiagnosticInvocation:'standalone-cold-process'});
     if(selectedModule==='native-trace')await require('./verify-kamu-native-trace-119.cjs')(harness);
     if(selectedModule==='native-recorder')await require('./verify-kamu-native-recorder-119.cjs')(harness);
     if(selectedModule==='native-video')await require('./verify-kamu-native-video-119.cjs')(harness);
     if(selectedModule==='native-compositor')await require('./verify-kamu-native-compositor-119.cjs')(harness);
-    if(version==='1.1.9'&&selectedModule==='feedback-scale')await require('./verify-kamu-feedback-scale-119-ui.cjs')(harness);
+    if(capabilities.singleLogo&&selectedModule==='feedback-scale')await require('./verify-kamu-feedback-scale-119-ui.cjs')(harness);
     // Run the unchanged motion gate before longer editing fixtures, so a native
     // failure yields render diagnostics without an unrelated earlier UI race.
-    for(const [id,file] of [['header','verify-mascot-header-ui.cjs'],['skin118','verify-skin-editor-ui.cjs'],['palette','verify-skin-palette-ui.cjs'],['gallery','verify-gallery-favorites-ui.cjs'],['gallery118','verify-gallery-favorites-118-ui.cjs'],...(/\b1\.1\.9\b/.test(version)?[['import119','verify-import-routing-119-ui.cjs'],['selection119','verify-selection-ui-119.cjs']]:[])]){
+    const modules=[['header','verify-mascot-header-ui.cjs'],['skin118','verify-skin-editor-ui.cjs'],['palette','verify-skin-palette-ui.cjs'],['gallery','verify-gallery-favorites-ui.cjs'],['gallery118','verify-gallery-favorites-118-ui.cjs'],...(capabilities.importRouting?[['import119','verify-import-routing-119-ui.cjs']]:[]),...(capabilities.themedSelection?[['selection119','verify-selection-ui-119.cjs']]:[])];
+    const knownModules=new Set([...modules.map(([id])=>id),'ux110','motion119','native-trace','native-recorder','native-video','native-compositor','feedback-scale']);
+    if(selectedModule&&!knownModules.has(selectedModule))throw Error('Unknown required UI module: '+selectedModule);
+    for(const [id,file] of modules){
       if(!selectedModule||selectedModule===id){
         await require('./'+file)({...harness,screenshot:name=>harness.screenshot(name.startsWith('extension-')?name:'extension-118-'+name)});
         // Full header module returns only after restoring its recorder/audio graph
         // and draw hooks. Compare the untouched native graph in this same window.
-        if(version==='1.1.9'&&id==='header'){
+        if(capabilities.singleLogo&&id==='header'){
           await require('./verify-kamu-motion-diagnostic-119.cjs')({...harness,motionDiagnosticInvocation:'after-header'});
           if(process.platform==='darwin'){
             await require('./verify-kamu-native-recorder-119.cjs')(harness);

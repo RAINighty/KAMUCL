@@ -25,6 +25,18 @@ import { app, BrowserWindow, type IpcMain } from 'electron'
 const TC_VERSION = '0.4.2'
 // 与 VoxLink MOD TerracottaBinary.java 一致的平台资产与 SHA-256
 const ASSETS: Record<string, { pkg: string; sha256: string; packageSha256: string; exe: string }> = {
+  'linux-x64': {
+    pkg: `terracotta-${TC_VERSION}-linux-x86_64-pkg.tar.gz`,
+    packageSha256: '675c4fd6c74d49ed8165151ba2be5b6582e0af20fb6d912074543c2484b1e10a',
+    sha256: 'dc8eed0338a1888743ab38468d88b9dd8a60d60c29df072adba7c8d2edaf7937',
+    exe: `terracotta-${TC_VERSION}-linux-x86_64`
+  },
+  'linux-arm64': {
+    pkg: `terracotta-${TC_VERSION}-linux-arm64-pkg.tar.gz`,
+    packageSha256: '845285ff264ac5fbc16db1a1605ad190e7fa64196516068cc309de5a1d2bf66d',
+    sha256: '1cc03ed2ccaab8a7b64e8eb375ccfb8c1d4cd28f4c1a242fe3b492522f9f4aad',
+    exe: `terracotta-${TC_VERSION}-linux-arm64`
+  },
   'win32-x64': {
     pkg: `terracotta-${TC_VERSION}-windows-x86_64-pkg.tar.gz`,
     packageSha256: '07ebe139e3ca5f74576e58b1a96efe59abdfbe148d3f1a49bfdca8b6f70745f0',
@@ -207,7 +219,7 @@ async function startProcess(): Promise<number> {
   // isolated daemon directly; do not install/stop the player's global HMCL service.
   const mac = process.platform === 'darwin'
   const env = mac ? { ...process.env, HOME: tcDir() } : process.env
-  proc = spawn(exe, mac ? ['--daemon'] : [process.platform === 'win32' ? '--hmcl2' : '--hmcl', portFile], { windowsHide: true, env, detached: mac })
+  proc = spawn(exe, mac ? ['--daemon'] : [process.platform === 'win32' ? '--hmcl2' : '--hmcl', portFile], { windowsHide: true, env, detached: process.platform !== 'win32' })
   const child = proc
   child.on('error', e => { if (proc === child) { proc = null; setState({phase: 'idle', error: e.message}); emit('error', e.message) } })
   proc.stdout?.on('data', (d: Buffer) => emit('log', { level: 'info', msg: d.toString().trim() }))
@@ -307,7 +319,7 @@ async function killTree(): Promise<void> {
       execFileAsync('taskkill', ['/T', '/F', '/PID', String(p.pid)]).catch(() => {})
       setTimeout(resolve, 800)
     })
-  } else if (process.platform === 'darwin' && p.pid) {
+  } else if (process.platform !== 'win32' && p.pid) {
     // The Mac daemon and its EasyTier children share the private process group
     // created above. Never target a global service or the game's process group.
     try { process.kill(-p.pid, 'SIGTERM') } catch { /* already stopped */ }

@@ -16,7 +16,8 @@ import { waitIfTaskPaused, isCancelError } from './tasks'
 import { logScope } from './launcherLog'
 import { JavaProbeCache } from './javaProbeCache'
 import { mapLaunchFiles, SharedPreparation } from './launchPreparation'
-import { macJavaArchitecture } from './javaArchitecture'
+import { gameJavaArchitecture } from './javaArchitecture'
+import { requireDesktopGamePlatform } from '../../shared/platform'
 import { provisionJava, javaPackageSize } from './javaSources'
 import { httpFetch } from './httpClient'
 import { validateJavaRuntime } from './javaRuntimeHealth'
@@ -893,9 +894,10 @@ export function selectJavaByMajor<T extends { major: number; is64Bit: boolean; a
  */
 const javaPreparations = new SharedPreparation<string>()
 export function ensureJava(versionJson: VersionJson, emit: ProgressEmit): Promise<string> {
+  requireDesktopGamePlatform(process.platform)
   // NeoForge repair and game launch may need the same JRE concurrently. Never
   // let two downloads/extractions replace the same runtime under one another.
-  const key = `${pathKey(path.resolve(runtimesDir()))}:${requiredMajor(versionJson)}:${macJavaArchitecture(versionJson) ?? process.arch}`
+  const key = `${pathKey(path.resolve(runtimesDir()))}:${requiredMajor(versionJson)}:${gameJavaArchitecture(versionJson) ?? process.arch}`
   return javaPreparations.run(key, () => ensureJavaInternal(versionJson, emit))
 }
 
@@ -917,7 +919,7 @@ export async function selectHealthyJava(available: JavaInfo[], need: number, arc
 async function ensureJavaInternal(versionJson: VersionJson, emit: ProgressEmit): Promise<string> {
   const need = requiredMajor(versionJson)
   const started = Date.now()
-  const architecture = macJavaArchitecture(versionJson)
+  const architecture = gameJavaArchitecture(versionJson)
   const local = await selectHealthyJava(await scanJavaForLaunch(), need, architecture)
   if (local) {
     if (local.major === need) javaLog.debug(`本机已有 Java ${need}（64位）：${local.path}`)

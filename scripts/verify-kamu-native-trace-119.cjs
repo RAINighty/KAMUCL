@@ -2,7 +2,7 @@
 // The later cold/native acceptance processes do not reuse this traced renderer.
 const fs=require('node:fs')
 async function nativeTraceModule(h,dependencies={}){
- if(h.version!=='1.1.9'||await h.main('process.platform')!=='darwin')throw Error('native-trace requires the 1.1.9 disposable Darwin harness')
+ if(h.version!==require('../package.json').version||!require('./ui-capabilities.cjs').singleLogo||await h.main('process.platform')!=='darwin')throw Error('native-trace requires the current disposable Darwin harness')
  const trace=dependencies.trace||require('./native-compositor-trace-119.cjs'),motion=dependencies.motion||require('./verify-kamu-motion-diagnostic-119.cjs')
  const writeProof=dependencies.writeProof||((name,value)=>fs.writeFileSync('out/'+name,JSON.stringify(value,null,2)))
  const recordScreencast=async(name,action,duration)=>{

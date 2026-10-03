@@ -34,6 +34,11 @@ import type { LocalUpdateCheck, PluginInfo, ReleaseInfo, Settings, ThemeName, Up
 import { QQ_GROUP_NUMBER } from '@shared/branding'
 import { useMotion } from '../motion'
 const { systemReduced } = useMotion()
+const systemMotionHelp = window.kamucl.platform === 'darwin'
+  ? '若需要动画，请在系统设置 → 辅助功能 → 显示中关闭“减少动态效果”。'
+  : window.kamucl.platform === 'win32'
+    ? '若需要动画，请在 Windows 设置 → 辅助功能 → 视觉效果开启动画效果。'
+    : '若需要动画，请检查本机桌面的辅助功能或动画设置。'
 import HomeLayoutEditor from '../components/HomeLayoutEditor.vue'
 import { settingsCatalog, settingsCategories, settingsScopes, scopeOfCategory, searchSettings, type SettingsCategory, type SettingsScope } from '@shared/settingsCatalog'
 import { updateSettings } from '../settingsUpdates'
@@ -714,7 +719,7 @@ async function onRemovePlugin(p: PluginInfo) {
 
       <!-- 个性化背景与启动卡图片；首页结构固定为图一布局。 -->
       <div data-ui="SettingsView:9816c9c5870a" class="background-settings" v-show="category === 'appearance'"><HomeLayoutEditor /></div>
-    <div data-ui="SettingsView:0683ad7389b1" v-if="store.settings && category === 'appearance'" class="card group group-inline setting-target" data-section="motion" tabindex="-1"><div><h3 class="group-title">减少动态效果</h3><p data-ui="SettingsView:53f72432b671" class="muted">停止装饰动画与自动轮播，缩短过渡。系统开启减少动态效果时也会自动生效。</p><p v-if="systemReduced" class="muted" role="status">当前系统已关闭动画：启动时显示完整头像，皮肤保持站姿。若需要动画，请在 Windows 设置 → 辅助功能 → 视觉效果开启动画效果。</p></div><label class="switch"><input data-ui="SettingsView:35ef39b7e9bc" type="checkbox" aria-label="减少动态效果" :checked="store.settings.reduceMotion === true" @change="save({ reduceMotion: ($event.target as HTMLInputElement).checked })"/><span data-ui="SettingsView:4490d3e5d395" class="switch-ui"/></label></div>
+    <div data-ui="SettingsView:0683ad7389b1" v-if="store.settings && category === 'appearance'" class="card group group-inline setting-target" data-section="motion" tabindex="-1"><div><h3 class="group-title">减少动态效果</h3><p data-ui="SettingsView:53f72432b671" class="muted">停止装饰动画与自动轮播，缩短过渡。系统开启减少动态效果时也会自动生效。</p><p v-if="systemReduced" class="muted" role="status">当前系统已关闭动画：启动时显示完整头像，皮肤保持站姿。{{ systemMotionHelp }}</p></div><label class="switch"><input data-ui="SettingsView:35ef39b7e9bc" type="checkbox" aria-label="减少动态效果" :checked="store.settings.reduceMotion === true" @change="save({ reduceMotion: ($event.target as HTMLInputElement).checked })"/><span data-ui="SettingsView:4490d3e5d395" class="switch-ui"/></label></div>
 
       <!-- 下载 + 下载目标文件夹：同一行横向排布，窄窗口自动换行 -->
       <div data-ui="SettingsView:9df9d3d48082" v-show="category === 'downloads'" class="settings-grid">

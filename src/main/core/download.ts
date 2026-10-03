@@ -12,12 +12,13 @@ import { downloadFetch } from './downloadFetch'
 import { abortableDelay, inheritTaskControl, isTaskPaused, waitIfTaskPaused } from './tasks'
 import { DownloadProgressTracker, SmoothedSpeedEstimator, type DownloadProgressSnapshot } from './downloadProgress'
 import { DownloadSourcePool } from './downloadSources'
+import { resolveNativeIntegrity } from './platformNatives'
 
 export type MirrorPref = 'official' | 'bmclapi'
 export type ProgressFn = (done: number, total: number, networkBytes?: number) => void
 export interface DownloadBatchProgress extends DownloadProgressSnapshot { activeFiles?: string[]; speedBps: number; etaSeconds: number | null; paused: boolean }
 export type AllProgressFn = (done: number, total: number, speedBps: number, detail: DownloadBatchProgress) => void
-export interface DownloadTask { label?: string; url: string; urls?: string[]; dest: string; sha1?: string; sha512?: string; sha256?: string; size?: number; reuseDirs?: string[]; reuseFiles?: string[] }
+export interface DownloadTask { label?: string; url: string; urls?: string[]; dest: string; sha1?: string; sha512?: string; sha256?: string; size?: number; reuseDirs?: string[]; reuseFiles?: string[]; nativeChecksumUrl?: string }
 interface Integrity { sha1?: string; sha512?: string; sha256?: string; size?: number; systemProxy?: boolean }
 export const BMCL_MAVEN_ROOT = 'https://bmclapi2.bangbang93.com/maven/'
 export function mirrorUrl(input: string, mirror: MirrorPref): string {
@@ -484,6 +485,7 @@ export async function downloadAll(tasks: DownloadTask[], progress?: AllProgressF
         if (!next) return
         const index = next.index, task = tasks[index]; active.set(index, task.label ?? path.basename(task.dest))
         try {
+          await resolveNativeIntegrity(task, controller.signal)
           await downloadFile(task.url, task.dest, (done,total,wire = 0) => { networkBytes += wire; tracker.record(index,done,total) }, task.sha1, mirror, controller.signal, task.urls, { sha512: task.sha512, sha256: task.sha256, size: task.size, reuseDirs: task.reuseDirs, reuseFiles: task.reuseFiles, sourcePool, maxSegments: () => Math.max(1, Math.floor(downloadLimiter.maxConcurrent / Math.max(1, active.size))) })
           tracker.recordComplete(index, (await fs.promises.stat(task.dest)).size); active.delete(index)
         } catch (error) { firstError ??= error; controller.abort(error); return }
