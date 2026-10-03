@@ -8,7 +8,22 @@ on:
         default: false
   push:
     branches: [master]
-    paths: ['.github/workflows/linux-build.yml', 'scripts/*linux*.cjs', 'native/LinuxGameWindow.cpp', 'src/main/core/linuxUpdate*.ts', 'package.json']
+    paths:
+      - '.github/workflows/linux-build.yml'
+      - 'src/**'
+      - 'tests/**'
+      - 'native/**'
+      - 'scripts/**'
+      - 'bridge/**'
+      - 'build/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'electron.vite.config.*'
+      - 'tsconfig*.json'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
+      - 'licenses/**'
+      - 'docs/CORRESPONDING_SOURCE.md'
 permissions:
   contents: read
 jobs:

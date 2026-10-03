@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [master]
-    paths: ['.github/workflows/mac-build.yml', 'scripts/verify-mac*.cjs', 'scripts/pack-mac.mjs', 'native/MacGameWindow.swift', 'package.json']
+    paths: ['.github/workflows/mac-build.yml', 'src/**', 'tests/**', 'scripts/**', 'native/**', 'bridge/**', 'build/**', 'package.json', 'package-lock.json', 'electron.vite.config.ts', 'tsconfig*.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/**', 'docs/CORRESPONDING_SOURCE.md']
 permissions:
   contents: read
 jobs:

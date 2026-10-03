@@ -1,6 +1,6 @@
 {
   "version": "1.1.11",
-  "recordedAt": "2026-10-03T21:00:06.879Z",
+  "recordedAt": "2026-10-03T21:38:54+00:00",
   "status": "native-qualification-incomplete; local-engineering-candidate",
   "baseline": {
     "version": "1.1.10",
@@ -9,11 +9,13 @@
   },
   "validation": {
     "publicTests": {
-      "total": 843,
-      "passed": 842,
+      "total": 848,
+      "passed": 847,
       "failed": 0,
       "skipped": 1,
-      "skipReason": "Linux native updater shell cannot execute on the Windows host"
+      "skipReason": "Linux native updater shell cannot execute on the Windows host",
+      "log": "out/test111-frp-native-fixture-final.log",
+      "durationMs": 108151.897
     },
     "gateProtocolNegativeTests": {
       "total": 41,
@@ -38,7 +40,15 @@
       "import119",
       "selection119"
     ],
-    "actualAudioListening": "not-performed"
+    "actualAudioListening": "not-performed",
+    "frpFixtureCorrection": {
+      "productSourceChanged": false,
+      "independentlyReviewed": true,
+      "configurations": ["win32/x64", "darwin/arm64", "darwin/x64", "linux/arm64", "linux/x64"],
+      "classification": "isolated real-controller tests; not native OS acceptance",
+      "realHostProcessKill": false,
+      "nativeFullRerunRequired": true
+    }
   },
   "inventory": {
     "routes": 15,
@@ -134,7 +144,8 @@
     "Initial Node update picker test lacked Electron app; fixed",
     "Initial dry-run incorrectly required formal acceptance; real publication retains its gate",
     "DEB updated label broke old literal-only test; corrected to check shared real label wiring",
-    "gallery118 old total metadata count included automatic artwork reads; original failure retained and real mutation handler observations passed"
+    "gallery118 old total metadata count included automatic artwork reads; original failure retained and real mutation handler observations passed",
+    "ab54 native Mac run37154520494 and Linux run37154520531 cancelled after FRP fixture initial download awaited a later cancellation-stage release; no native package produced"
   ],
   "uncovered": [
     "current macOS native builds, credentials, Intel GPU/motion, game/world/save/quit, services and updates",
@@ -144,12 +155,21 @@
     "HarmonyOS SDK, legal signing, device and native JVM/JNI/LWJGL/GLFW/audio/game"
   ],
   "remote": {
-    "master": "85bfe93c016a004b7ddbd397c6b8769bedd25c50",
-    "main": "1f2819a9b3ade9810df48d2c69efabcd1808f264",
+    "master": "ab54c5f1c00d2f0ef371401102f295604ac7e438",
+    "main": "db13257a082331815c604c56090dd20eb218e76c",
     "v111Tag": false,
     "v111Release": false,
-    "push": "rejected: OAuth token lacks workflow scope",
-    "authorization": "two direct connection timeouts; proxy retry expired; scope remains repo/read:org/gist"
+    "push": "successful; main synchronized by cherry-pick with independent history",
+    "authorization": "human completed standard workflow OAuth authorization; previous rejected push, connection timeouts and expired codes retained as history",
+    "observedAt": "2026-10-04 05:33 Asia/Hong_Kong",
+    "firstNativeRuns": {
+      "commit": "ab54c5f1c00d2f0ef371401102f295604ac7e438",
+      "mac": "37154520494",
+      "linux": "37154520531",
+      "status": "cancelled after isolated FRP test fixture deadlock; full test and build must rerun",
+      "linuxDedicatedTests": { "passed": 8, "classification": "actual native shell and backend tests; not complete desktop/game acceptance" },
+      "nativeArtifactsProduced": false
+    }
   },
   "privacy": {
     "privateAccountDataIncluded": false,
