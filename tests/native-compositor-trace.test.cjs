@@ -49,3 +49,31 @@ test('native-trace registration flushes failed action frames and retains the ori
  await assert.rejects(runModule(h,{trace:async(same,action)=>action({observe:async()=>{}}),motion:async ctx=>ctx.recordScreencast('failed',async()=>{throw original},250),writeProof:(name,value)=>proofs.push({name,value})}),e=>e===original)
  assert.deepEqual(calls,['flushed']);assert.equal(proofs.length,2);assert.equal(proofs[0].value.recording.duration,250);assert.equal(proofs[1].value.samples[0].at,1)
 })
+
+const cpuQA=require('../scripts/native-cpu-profile-119.cjs')
+function cpuFixture(){return{startTime:100,endTime:500,nodes:[{id:1,children:[2,3],callFrame:{functionName:'(root)',url:'',scriptId:'0',lineNumber:-1,columnNumber:-1}},{id:2,hitCount:1,callFrame:{functionName:'rA',url:'file:///static/assets/index-ABC.js',scriptId:'7',lineNumber:3,columnNumber:4}},{id:3,callFrame:{functionName:'(garbage collector)',url:'',scriptId:'0',lineNumber:-1,columnNumber:-1}}],samples:[2,3],timeDeltas:[100,100]}}
+test('CPU projection preserves samples/times/tree and engine enums; fake asset/eval/private names are redacted',()=>{
+ const original=cpuFixture(),before=structuredClone(original),assets=new Map([['file:///static/assets/index-ABC.js','index-ABC.js']]),result=cpuQA.filterProfile(original,assets)
+ assert.deepEqual(original,before);assert.deepEqual(result.samples,original.samples);assert.deepEqual(result.timeDeltas,original.timeDeltas);assert.equal(result.startTime,100);assert.equal(result.nodes[0].callFrame.functionName,'(root)');assert.equal(result.nodes[2].callFrame.functionName,'(garbage collector)');assert.equal(result.nodes[1].callFrame.asset,'index-ABC.js')
+ for(const mutate of [x=>x.nodes[1].callFrame.url+='?private=1',x=>x.nodes[1].callFrame.url='eval://private',x=>x.nodes[1].callFrame.functionName='PrivateTypedAccountPassword']){const p=cpuFixture();mutate(p);const filtered=cpuQA.filterProfile(p,assets);assert.equal(filtered.nodes[1].callFrame.redacted,true);assert(!JSON.stringify(filtered).includes('PrivateTyped'));assert(!JSON.stringify(filtered).includes('eval://'))}
+ for(const mutate of [x=>x.samples[0]=999,x=>x.timeDeltas.pop(),x=>x.nodes[0].children=[999],x=>x.nodes[0].id=2]){const p=cpuFixture();mutate(p);assert.throws(()=>cpuQA.filterProfile(p,assets))}
+})
+test('CPU stop/disable and private original survive actual traced action failure; public keeps only projection',async()=>{
+ const calls=[],publicProofs=[],privateOriginals=[],original=Error('trusted contact failed'),profile=cpuFixture(),h={evaluate:async()=>({now:50,timeOrigin:1000}),call:async method=>{calls.push(method);return method==='Profiler.stop'?{profile}:{}}}
+ await assert.rejects(cpuQA.withCPUProfile(h,'unused',()=>{throw original},{assets:new Map([['file:///static/assets/index-ABC.js','index-ABC.js']]),writePrivate:b=>privateOriginals.push(b),writePublic:p=>publicProofs.push(p)}),e=>e===original)
+ assert.deepEqual(calls,['Profiler.enable','Profiler.setSamplingInterval','Profiler.start','Profiler.stop','Profiler.disable']);assert.deepEqual(JSON.parse(privateOriginals[0]),profile);assert.equal(publicProofs[0].complete,false);assert(publicProofs[0].profileStopped&&publicProofs[0].disabled);assert(!JSON.stringify(publicProofs[0]).includes('file:///static'))
+})
+test('requested compilation/GC/main-task/layout events retain numeric timing without private URL arguments',()=>{
+ const names=['V8.CompileCode','V8.GCScavenger','ThreadControllerImpl::RunTask','Paint','UpdateLayerTree','Commit'],events=names.map((name,index)=>({name,cat:'v8',ph:'X',ts:100+index,dur:67000,args:{url:'file:///private-user',source:'private body',data:{nodeId:3}}})),kept=runTrace.redactEvents(events,'owned-marker')
+ assert.deepEqual(kept.map(e=>e.name),names);assert(kept.every(e=>e.dur===67000));assert(!JSON.stringify(kept).includes('private'))
+ assert.equal(runTrace.redactEvents([{name:'V8.Compile file:///private',cat:'v8',ph:'X',ts:1}],'owned-marker').length,0)
+})
+test('after-DMG trace-only gate preserves prior six-case proof, deadline failure and safe filtered collection',t=>{
+ const preflight=require('../scripts/native-trace-control-preflight-119.cjs'),root=fs.mkdtempSync(path.join(os.tmpdir(),'kamu-trace-control-test-'))
+ t.after(()=>{assert.equal(path.dirname(root),os.tmpdir());assert(path.basename(root).startsWith('kamu-trace-control-test-'));fs.rmSync(root,{recursive:true,force:true})})
+ const outRoot=path.join(root,'out'),appRoot=path.join(root,'app'),extensionProof=path.join(root,'dmg');for(const d of [outRoot,appRoot,extensionProof])fs.mkdirSync(d)
+ fs.mkdirSync(path.join(appRoot,'original'));fs.writeFileSync(path.join(appRoot,'observer-aba-preflight.json'),JSON.stringify({complete:true,processExitCode:0,directories:[{name:'original'}]}));fs.writeFileSync(path.join(appRoot,'original','observer-aba.json'),JSON.stringify({complete:true,cases:Array.from({length:6},()=>({complete:true}))}))
+ const options={version:'1.1.9',arch:'x64',stage:'dmg',ci:'true',env:{},exe:'fixture-only',outRoot,appRoot,extensionProof};assert(preflight.eligible(options));for(const patch of [{arch:'arm64'},{stage:'app'},{ci:'false'}])assert(!preflight.eligible({...options,...patch}))
+ const result=preflight.run(options,{invoke:(exe,args,o)=>{assert.equal(o.timeout,85000);assert.equal(o.killSignal,'SIGTERM');assert.equal(o.env.KAMUCL_OBSERVER_TRACE_CONTROL119,'1');const d=path.join(outRoot,'kamu-observer-trace-control-119-12345678-1234-1234-1234-123456789abc-black-orange');fs.mkdirSync(d);fs.writeFileSync(path.join(d,'observer-aba.json'),JSON.stringify({startedAt:new Date().toISOString(),complete:false,error:'original deadline retained'}));fs.writeFileSync(path.join(d,'trace-cpu.json'),'{}');fs.writeFileSync(path.join(d,'private-cpu.json'),'PRIVATE');throw Object.assign(Error('timeout'),{code:'ETIMEDOUT',signal:'SIGTERM'})}})
+ assert.equal(result.complete,false);assert.equal(result.error.code,'ETIMEDOUT');assert.equal(result.deadlineMs,90000);assert.equal(result.directories.length,1);assert(result.directories[0].files.some(f=>f.file==='trace-cpu.json'));assert(!result.directories[0].files.some(f=>f.file.includes('private')));assert(!preflight.allowedFile('private-cpu.json'));assert(!preflight.allowedFile('qa-account.txt'));assert.equal(result.normalAcceptanceChanged,false)
+})

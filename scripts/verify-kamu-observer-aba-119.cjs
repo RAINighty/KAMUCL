@@ -3,6 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {installRendererObserver,withRestoration}=require('./verify-kamu-native-compositor-119.cjs')
 const {nativeVideoSnapshot,captureRequest,captureStatistics,stopOwnedHelper,verifyPixels}=require('./verify-kamu-native-video-119.cjs')
 const {assertSameWindow,introSettled}=require('./verify-kamu-native-recorder-119.cjs')
+const ownedQA=require('./qa-owned-process-119.cjs')
 function observerCases(){return[
  {name:'clocks-A-original',group:'clocks',role:'A',options:{probeClocks:true,queryFeedback:true,measureProbe:true}},
  {name:'clocks-B-no-extra-clocks',group:'clocks',role:'B',options:{probeClocks:false,queryFeedback:true,measureProbe:true}},
@@ -11,6 +12,12 @@ function observerCases(){return[
  {name:'queries-B-no-feedback-queries',group:'queries',role:'B',options:{probeClocks:true,queryFeedback:false,measureProbe:true}},
  {name:'queries-A-restored',group:'queries',role:'A',options:{probeClocks:true,queryFeedback:true,measureProbe:true}}
 ]}
+function traceControlCases(){return['control-A-before','trace-A','control-A-restored'].map((name,index)=>({name,group:'trace-control',role:'A',trace:index===1,options:{probeClocks:true,queryFeedback:true,measureProbe:true}}))}
+async function runDiagnosticCase(h,entry,action,dependencies={}){
+ if(!entry.trace)return action()
+ const trace=dependencies.trace||require('./native-compositor-trace-119.cjs'),cpu=dependencies.cpu||require('./native-cpu-profile-119.cjs').withCPUProfile
+ return cpu(h,path.join(entry.directory,'trace'),()=>trace(h,action,{enabled:true,separateRun:true,outputBase:path.join(entry.directory,'trace'),completionTimeoutMs:20000,maxBytes:32*1024*1024}))
+}
 function assertNormalMotion(state){
  assert.equal(state.motion?.noPreference,true,'observer ABA requires actual no-preference media')
  assert.equal(state.motion?.reduced,false,'observer ABA cannot run in reduced-motion media')
@@ -52,15 +59,18 @@ function assertCaptureIdentity(request,identity){
  assert.equal(identity.pixelFormat,'BGRA8');assert.equal(identity.minimumFrameInterval.numeric,true);assert.equal(identity.minimumFrameInterval.seconds,0);assert.equal(identity.queueDepth,5)
 }
 
-async function diagnostic(h){
+async function diagnostic(h,{traceControl=false}={}){
  const {main,evaluate,call,nav,wait,version}=h
  assert.equal(await main('process.platform'),'darwin','observer ABA requires actual Darwin')
- const theme=process.env.KAMUCL_TEST_THEME||'black-orange',stem=`kamu-observer-aba-119-${randomUUID()}-${theme}`,root=path.resolve('out',stem),file=path.join(root,'observer-aba.json')
+ const theme=process.env.KAMUCL_TEST_THEME||'black-orange',stem=`kamu-observer-${traceControl?'trace-control':'aba'}-119-${randomUUID()}-${theme}`,root=path.resolve('out',stem),file=path.join(root,'observer-aba.json'),configs=traceControl?traceControlCases():observerCases()
  assert(!fs.existsSync(root),'immutable new diagnostic root required');fs.mkdirSync(root,{recursive:true})
  const proof={version,stage:stem,complete:false,functionalComplete:false,classification:'Instrumentation-only observer SCK A/B/A; never replaces formal header/native baselines or their failures',normalAcceptanceChanged:false,physicalListening:'not performed',originalSourceSpacingMs:90,cases:[],startedAt:new Date().toISOString()}
+ proof.classification=traceControl?'Independent 3 A control/trace/control after original formal and six-case ABA; CPU/trace overhead cannot establish normal acceptance':proof.classification
+ proof.sourceSHA256=createHash('sha256').update(fs.readFileSync(__filename)).digest('hex');proof.stateQueries=[]
+ proof.ownedBefore=h.ownedTrack?await ownedQA.ownedInventory([h.ownedTrack]):null
  const persist=()=>fs.writeFileSync(file,JSON.stringify(proof,null,2)),saved=()=>evaluate("window.kamucl.invoke('mascots:state')")
  const native=()=>main(`(${nativeVideoSnapshot.toString()})(testElectron,process.pid)`)
- const state=()=>evaluate(`(()=>{const e=document.querySelector('.mascot-stage'),strip=e?.querySelector('.figure-strip'),r=strip?.getBoundingClientRect(),b=document.querySelector('[data-hit=kamu]');return{now:performance.now(),timeOrigin:performance.timeOrigin,open:!!e,readyAt:Number(e?.dataset.readyAt),activation:Number(e?.dataset.activation),introAnimations:strip?.getAnimations().filter(a=>a.playState!=='finished'&&a.playState!=='idle').length,footprint:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null,phase:e?.dataset.phase,queue:Number(e?.dataset.queue),contacts:Number(e?.dataset.contacts||0),sounds:Number(e?.dataset.soundsPlayed||0),disabled:b?.disabled,hidden:document.hidden,focus:document.hasFocus(),bufferPreparation:e?.dataset.audioPreparation,motion:{noPreference:matchMedia('(prefers-reduced-motion: no-preference)').matches,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,stageReduced:e?.classList.contains('reduced')??null},viewport:{width:innerWidth,height:innerHeight,scale:visualViewport?.scale??1},backend:e?.dataset.renderBackend}})()`)
+ const state=()=>ownedQA.measuredStateQuery(()=>evaluate(`(()=>{const e=document.querySelector('.mascot-stage'),strip=e?.querySelector('.figure-strip'),r=strip?.getBoundingClientRect(),b=document.querySelector('[data-hit=kamu]');return{now:performance.now(),timeOrigin:performance.timeOrigin,open:!!e,readyAt:Number(e?.dataset.readyAt),activation:Number(e?.dataset.activation),introAnimations:strip?.getAnimations().filter(a=>a.playState!=='finished'&&a.playState!=='idle').length,footprint:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null,phase:e?.dataset.phase,queue:Number(e?.dataset.queue),contacts:Number(e?.dataset.contacts||0),sounds:Number(e?.dataset.soundsPlayed||0),disabled:b?.disabled,hidden:document.hidden,focus:document.hasFocus(),bufferPreparation:e?.dataset.audioPreparation,motion:{noPreference:matchMedia('(prefers-reduced-motion: no-preference)').matches,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,stageReduced:e?.classList.contains('reduced')??null},viewport:{width:innerWidth,height:innerHeight,scale:visualViewport?.scale??1},backend:e?.dataset.renderBackend}})()`),proof.stateQueries)
  const until=async(label,predicate,ms=6000)=>{const began=Date.now();let last;do{last=await state();if(await predicate(last))return last;await wait(30)}while(Date.now()-began<ms);proof.failureState={label,last};persist();assert.fail(label)}
  const click=async selector=>{
   const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw Error('Missing observer ABA target');const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,h=document.elementFromPoint(x,y);if(h!==e&&!e.contains(h))throw Error('Occluded observer ABA target');return{x,y}})()`)
@@ -83,16 +93,18 @@ async function diagnostic(h){
   catch(error){fs.writeFileSync(path.join(root,'compile.log'),String(error.stdout||'')+String(error.stderr||'')+String(error));throw error}
   finally{proof.compile.finishedAt=new Date().toISOString();persist()}
   assert.equal(await evaluate('!!window.__kamuCompositorDiag'),false,'never replace an existing observer');observerAttempted=true;proof.observer=await evaluate(`(${installRendererObserver.toString()})()`)
-  for(const config of observerCases()){
+  for(const config of configs){
    const entry={...config,directory:path.join(root,config.name),complete:false,classification:'Instrumentation diagnostic only',startedAt:new Date().toISOString()};proof.cases.push(entry);fs.mkdirSync(entry.directory);persist()
-   let child,exitPromise,operationError;const exitState={exited:false},read=name=>JSON.parse(fs.readFileSync(path.join(entry.directory,name),'utf8'))
+   entry.stateQueryStart=proof.stateQueries.length
+   let child,childTrack,exitPromise,operationError;const exitState={exited:false},read=name=>JSON.parse(fs.readFileSync(path.join(entry.directory,name),'utf8'))
    const awaitFile=async(name,ms=5000)=>{const begin=Date.now();while(!fs.existsSync(path.join(entry.directory,name))){if(exitState.exited)throw Error('Owned SCK helper exited before '+name+': '+JSON.stringify(exitState));if(Date.now()-begin>=ms)throw Error('Owned SCK '+name+' timed out');await wait(20)}return read(name)}
    const mark=async name=>{fs.writeFileSync(path.join(entry.directory,name+'.request'),'requested');return awaitFile(name+'.json',2000)}
-   try{
+   const perform=async()=>{
     await withRestoration(async()=>{
      entry.before=await sampleReference();assertSameStage(proof.reference,entry.before);entry.savedBefore=await saved();fs.writeFileSync(path.join(entry.directory,'request.json'),JSON.stringify(entry.before.request,null,2))
      await evaluate(`window.__kamuCompositorDiag.start(${JSON.stringify(config.options)})`)
      child=spawn(binary,[path.join(entry.directory,'request.json'),entry.directory],{stdio:['ignore','pipe','pipe']});entry.helperPID=child.pid
+     childTrack=ownedQA.trackOwnedChild(child,'owned-SCK-'+config.name);entry.ownedHelper=childTrack.ledger
      const output=fs.createWriteStream(path.join(entry.directory,'helper.log'),{flags:'wx'});child.stdout.pipe(output,{end:false});child.stderr.pipe(output,{end:false})
      exitPromise=new Promise((resolve,reject)=>{child.once('error',error=>{exitState.exited=true;exitState.error=String(error);output.end();reject(error)});child.once('close',(code,signal)=>{Object.assign(exitState,{exited:true,code,signal});output.end();resolve({code,signal})})});exitPromise.catch(()=>{})
      entry.nativeFirstFrame=await awaitFile('ready.json');assertCaptureIdentity(entry.before.request,entry.nativeFirstFrame.identity);entry.atFirstFrame=await sampleReference();assertSameStage(proof.reference,entry.atFirstFrame)
@@ -106,15 +118,17 @@ async function diagnostic(h){
     entry.nativeDeliveryBenchmark=require('./mascot-capture-budget.cjs')(entry.before.native,entry.nativeCadence.completeDeliveryFps)
     assertNaturalAction(entry.before.state,entry.after.state,entry.observations,entry.inputs,{...entry.savedBefore,counts:{...entry.savedBefore.counts,kamu:entry.savedBefore.counts.kamu||0}},entry.savedAfter)
     entry.functionalComplete=true
+   }
+   try{await runDiagnosticCase(h,entry,perform)
    }catch(error){operationError=error;entry.error=String(error);if(error.errors)entry.errors=error.errors.map(String);throw error}
-   finally{try{if(fs.existsSync(path.join(entry.directory,'capture.json'))){entry.capture??=read('capture.json');entry.pngs=await verifyPixels(entry.directory,entry.capture)}entry.complete=entry.functionalComplete===true&&!!entry.pngs?.length}
+   finally{try{if(fs.existsSync(path.join(entry.directory,'capture.json'))){entry.capture??=read('capture.json');entry.pngs=await verifyPixels(entry.directory,entry.capture)}entry.complete=!operationError&&entry.functionalComplete===true&&!!entry.pngs?.length}
     catch(error){entry.complete=false;entry.pixelVerificationError=String(error);throw operationError?new AggregateError([operationError,error],'ABA action and original pixel verification both failed'):error}
-    finally{entry.finishedAt=new Date().toISOString();persist()}}
+    finally{entry.stateQueryEnd=proof.stateQueries.length;entry.ownedAfter=await ownedQA.ownedInventory([...(h.ownedTrack?[h.ownedTrack]:[]),...(childTrack?[childTrack]:[])]);entry.finishedAt=new Date().toISOString();persist()}}
   }
   proof.functionalComplete=true
  }catch(error){outerFailure=error;proof.error=String(error);if(error.errors)proof.errors=error.errors.map(String)}
  finally{
-  await withRestoration(async()=>{if(outerFailure)throw outerFailure},async()=>{if(observerAttempted&&await evaluate('!!window.__kamuCompositorDiag')){proof.observerRestored=await evaluate('window.__kamuCompositorDiag.restore()');persist();assert(proof.observerRestored.restored&&proof.observerRestored.observerRemoved,'all original hooks and observation resources must restore')}},async()=>{try{if(ownsStage&&(await state()).open){await click('.menu-tool');await click('.sound-panel button:last-of-type');await until('owned ABA stage closed',s=>!s.open)}proof.preferencesAfter=(await saved()).sound;if(proof.preferencesBefore)assert.deepEqual(proof.preferencesAfter,proof.preferencesBefore);proof.stageClosed=!(await state()).open}finally{proof.complete=proof.functionalComplete&&proof.stageClosed===true&&proof.cases.length===6&&proof.cases.every(entry=>entry.complete)&&proof.observerRestored?.restored===true;proof.finishedAt=new Date().toISOString();persist()}})
+  await withRestoration(async()=>{if(outerFailure)throw outerFailure},async()=>{if(observerAttempted&&await evaluate('!!window.__kamuCompositorDiag')){proof.observerRestored=await evaluate('window.__kamuCompositorDiag.restore()');persist();assert(proof.observerRestored.restored&&proof.observerRestored.observerRemoved,'all original hooks and observation resources must restore')}},async()=>{try{if(ownsStage&&(await state()).open){await click('.menu-tool');await click('.sound-panel button:last-of-type');await until('owned ABA stage closed',s=>!s.open)}proof.preferencesAfter=(await saved()).sound;if(proof.preferencesBefore)assert.deepEqual(proof.preferencesAfter,proof.preferencesBefore);proof.stageClosed=!(await state()).open}finally{proof.complete=proof.functionalComplete&&proof.stageClosed===true&&proof.cases.length===configs.length&&proof.cases.every(entry=>entry.complete)&&proof.observerRestored?.restored===true;proof.finishedAt=new Date().toISOString();persist()}})
  }
  console.log('OBSERVER ABA diagnostic complete; original below-target values retained; not formal acceptance: '+file)
  return proof
@@ -127,3 +141,5 @@ module.exports.assertCaptureIdentity=assertCaptureIdentity
 
 module.exports.assertNormalMotion=assertNormalMotion
 module.exports.requireNormalMotion=requireNormalMotion
+module.exports.traceControlCases=traceControlCases
+module.exports.runDiagnosticCase=runDiagnosticCase

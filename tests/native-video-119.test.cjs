@@ -94,6 +94,12 @@ test('native statistics preserve original complete timestamps, expose duplicates
   assert.throws(() => captureStatistics({ ...capture, frames: [make(0, 3, 'a', 'idle'), make(1, 4, 'b', 'idle')] }), /two actual/)
 })
 
+test('serial sink diagnostics never replace original frame rows, statuses or below-target PTS cadence',()=>{
+ const frames=[0,1,2].map(index=>({index,complete:true,validSample:true,file:'frame-'+index+'.bgra',status:'complete',sha256:String(index),presentationTime:{numeric:true,seconds:2+index*.05},callbackClock:{machAbsoluteTime:String(100+index)}})),capture={frames,dropCount:null,dropCountKnown:false},before=structuredClone(capture),baseline=captureStatistics(capture)
+ capture.sinkMetrics=frames.map(f=>({index:f.index,startMonotonicSeconds:100,endMonotonicSeconds:100.2,durationMs:200,bgraWrite:{durationMs:150},sidecarWrite:{durationMs:20}}));assert.deepEqual(captureStatistics(capture),baseline);assert.deepEqual(capture.frames,before.frames);assert(baseline.completeDeliveryFps<30)
+ const swift=fs.readFileSync(path.resolve('scripts/mac-logo-capture-119.swift'),'utf8');assert(swift.includes('"sinkMetrics": state.3'));assert(swift.includes('measuredSink(&metrics, "sidecarWrite")'));assert(swift.includes('sinkMetrics.append(metrics)'));assert(!swift.includes('row["sinkMetrics"]'),'separate metric ledger cannot make sidecar/manifest original row differ')
+})
+
 test('owned helper stop is graceful; even stop-request I/O failure terminates only its own child and remains failure', async () => {
   let asked = false, killed = []
   const child = { pid: 444, exitCode: null, signalCode: null, kill: signal => killed.push(signal) }

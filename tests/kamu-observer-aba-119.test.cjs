@@ -85,3 +85,37 @@ test('native capture identity retains original zero interval, BGRA, queue and ge
  }
 })
 
+const qaOwned=require('../scripts/qa-owned-process-119.cjs'),{EventEmitter}=require('node:events')
+test('owned cleanup awaits actual close, signals only the tracked child and preserves original failure',async()=>{
+ const child=new EventEmitter();Object.assign(child,{pid:431,exitCode:null,signalCode:null,kill(signal){assert.equal(signal,'SIGTERM');setTimeout(()=>{this.signalCode=signal;this.emit('exit',null,signal);this.emit('close',null,signal)},3);return true}})
+ const tracked=qaOwned.trackOwnedChild(child,'fixture');await qaOwned.finishOwnedChild(tracked,{terminate:true,timeoutMs:40})
+ assert(tracked.ledger.closed&&tracked.ledger.awaitedClose);assert.deepEqual(tracked.ledger.events.map(e=>e.event),['SIGTERM-request','exit','close'])
+ const original=Error('actual action failed');await assert.rejects(qaOwned.preservingCleanup(()=>{throw original},async()=>{}),e=>e===original)
+ const cleanup=Error('cleanup failed');await assert.rejects(qaOwned.preservingCleanup(()=>{throw original},()=>{throw cleanup}),e=>e instanceof AggregateError&&e.errors[0]===original&&e.errors[1]===cleanup)
+})
+test('owned timeout remains failure and changed or unowned PID is never signalled',async()=>{
+ let signals=0;const child=new EventEmitter();Object.assign(child,{pid:432,exitCode:null,signalCode:null,kill(){signals++;return true}})
+ const tracked=qaOwned.trackOwnedChild(child,'hung');await assert.rejects(qaOwned.finishOwnedChild(tracked,{terminate:true,timeoutMs:3}),/timed out/);assert.equal(signals,1);assert(tracked.ledger.failure);assert(!tracked.ledger.awaitedClose)
+ child.pid=999;await assert.rejects(qaOwned.finishOwnedChild(tracked,{terminate:true,timeoutMs:3}),/identity/);assert.equal(signals,1)
+ assert.throws(()=>qaOwned.trackOwnedChild({pid:undefined},'foreign'),/spawned owned/)
+})
+test('read-only inventory keeps only numeric owned roots and linked descendants without signalling foreign rows',()=>{
+ const text='10 1 S 1.2 1024\n11 10 R 2.3 2048\n12 11 S 0.1 512\n20 1 R 88 4096';assert.deepEqual(qaOwned.selectOwnedInventory(text,[10]).map(r=>r.pid),[10,11,12]);assert(!JSON.stringify(qaOwned.selectOwnedInventory(text,[10])).includes('command'))
+})
+test('state-query measurements retain returned renderer state and original rejection, including duration',async()=>{
+ let time=10;const rows=[],value={now:77,phase:'slap'};assert.equal(await qaOwned.measuredStateQuery(async()=>{time=24;return value},rows,()=>time),value);assert.deepEqual(rows[0],{index:0,requestAt:10,rendererNow:77,returned:true,returnAt:24,durationMs:14})
+ const original=Error('CDP timeout');await assert.rejects(qaOwned.measuredStateQuery(async()=>{time=39;throw original},rows,()=>time),e=>e===original);assert.equal(rows[1].durationMs,15);assert.equal(rows[1].returned,false)
+})
+test('trace cancellation observer restores exact original listener identities and does not delete a foreign listener',()=>{
+ const emitter=new EventEmitter(),original=()=>{},foreign=()=>{};emitter.on('SIGTERM',original);let count=0
+ let restore=qaOwned.installOwnedCancellation(emitter,()=>count++);emitter.emit('SIGTERM');emitter.emit('SIGTERM');assert.equal(count,1);assert.deepEqual(restore(),{observerRemoved:true,originalListenersPreserved:true});assert.equal(emitter.listeners('SIGTERM')[0],original)
+ restore=qaOwned.installOwnedCancellation(emitter,()=>{});emitter.on('SIGTERM',foreign);assert.deepEqual(restore(),{observerRemoved:true,originalListenersPreserved:false});assert.deepEqual(emitter.listeners('SIGTERM'),[original,foreign])
+})
+test('three independent A controls keep original options/actions; only the middle A traces and profiles',async()=>{
+ const {traceControlCases,runDiagnosticCase}=require('../scripts/verify-kamu-observer-aba-119.cjs'),cases=traceControlCases(),calls=[]
+ assert.deepEqual(cases.map(c=>c.trace),[false,true,false]);assert(cases.every(c=>JSON.stringify(c.options)===JSON.stringify(observerCases()[0].options)));assert.equal(observerCases().length,6)
+ for(const c of cases)await runDiagnosticCase({}, {...c,directory:'fixture'},async()=>calls.push(c.name),{cpu:async(h,base,action)=>{calls.push('CPU-start');try{return await action()}finally{calls.push('CPU-stop')}},trace:async(h,action,options)=>{assert.equal(options.separateRun,true);assert.equal(options.maxBytes,32*1024*1024);calls.push('trace-start');try{return await action()}finally{calls.push('trace-stop')}}})
+ assert.deepEqual(calls,['control-A-before','CPU-start','trace-start','trace-A','trace-stop','CPU-stop','control-A-restored'])
+ const original=Error('original contact failed');await assert.rejects(runDiagnosticCase({}, {...cases[1],directory:'fixture'},()=>{throw original},{cpu:async(h,b,a)=>a(),trace:async(h,a)=>a()}),e=>e===original)
+})
+

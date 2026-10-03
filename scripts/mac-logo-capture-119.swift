@@ -36,12 +36,18 @@ func writeJSON(_ value: Any, _ url: URL) throws {
     try bytes.write(to: url, options: .atomic)
 }
 func rectFields(_ r: CGRect) -> [String: Double] { ["x": Double(r.origin.x), "y": Double(r.origin.y), "width": Double(r.width), "height": Double(r.height)] }
+func measuredSink<T>(_ metrics: inout [String: Any], _ name: String, _ action: () throws -> T) rethrows -> T {
+    let began = CACurrentMediaTime()
+    defer { let ended = CACurrentMediaTime(); metrics[name] = ["startMonotonicSeconds": began, "endMonotonicSeconds": ended, "durationMs": (ended - began) * 1000] }
+    return try action()
+}
 
 @available(macOS 12.3, *)
 final class Collector: NSObject, SCStreamOutput, SCStreamDelegate {
     let directory: URL
     let queue = DispatchQueue(label: "kamu.qa.native.logo.frames")
     var records: [[String: Any]] = []
+    var sinkMetrics: [[String: Any]] = []
     var errorMessage: String?
     var previousHash: String?
     var ready = false
@@ -53,6 +59,9 @@ final class Collector: NSObject, SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen else { return }
         let index = records.count
+        let sinkBegan = CACurrentMediaTime()
+        var metrics: [String: Any] = ["index": index, "startMonotonicSeconds": sinkBegan]
+        defer { let ended = CACurrentMediaTime(); metrics["endMonotonicSeconds"] = ended; metrics["durationMs"] = (ended - sinkBegan) * 1000; sinkMetrics.append(metrics) }
         let attachments = (CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]])?.first ?? [:]
         let statusRaw = (attachments[.status] as? NSNumber)?.intValue
         let status = statusRaw.flatMap { SCFrameStatus(rawValue: $0) }
@@ -79,8 +88,8 @@ final class Collector: NSObject, SCStreamOutput, SCStreamDelegate {
                 var bytes = Data(capacity: width * height * 4)
                 for y in 0..<height { bytes.append(base.advanced(by: y * stride).assumingMemoryBound(to: UInt8.self), count: width * 4) }
                 let filename = String(format: "frame-%06d.bgra", index)
-                try bytes.write(to: directory.appendingPathComponent(filename), options: .withoutOverwriting)
-                let hash = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+                try measuredSink(&metrics, "bgraWrite") { try bytes.write(to: directory.appendingPathComponent(filename), options: .withoutOverwriting) }
+                let hash = measuredSink(&metrics, "hash") { SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() }
                 row["file"] = filename; row["width"] = width; row["height"] = height; row["sourceBytesPerRow"] = stride
                 row["packedBytesPerRow"] = width * 4; row["bytes"] = bytes.count; row["sha256"] = hash
                 row["samePixelsAsPrevious"] = previousHash.map { $0 == hash } ?? false
@@ -89,12 +98,12 @@ final class Collector: NSObject, SCStreamOutput, SCStreamDelegate {
             }
             records.append(row)
             // Each JSON survives a later stream error/process interruption.
-            try writeJSON(row, directory.appendingPathComponent(String(format: "frame-%06d.json", index)))
+            try measuredSink(&metrics, "sidecarWrite") { try writeJSON(row, directory.appendingPathComponent(String(format: "frame-%06d.json", index))) }
             if !ready && sample.isValid && status == .complete && row["file"] != nil && CMSampleBufferGetPresentationTimeStamp(sample).isNumeric {
-                try writeJSON(["firstFrame": row, "identity": identity, "clock": clockFields()], directory.appendingPathComponent("ready.json"))
+                try measuredSink(&metrics, "readyWrite") { try writeJSON(["firstFrame": row, "identity": identity, "clock": clockFields()], directory.appendingPathComponent("ready.json")) }
                 ready = true
             }
-        } catch { errorMessage = "Frame preservation failed: \(error)" }
+        } catch { metrics["failed"] = true; errorMessage = "Frame preservation failed: \(error)" }
     }
 }
 
@@ -150,11 +159,12 @@ func runCapture(_ requestURL: URL, _ directory: URL) async throws {
     } catch { failure = error }
     var stopped = false
     if started { do { try await stream.stopCapture(); stopped = true } catch { failure = failure ?? error } }
-    let state = collector.queue.sync { (collector.records, collector.errorMessage, collector.ready) }
+    let state = collector.queue.sync { (collector.records, collector.errorMessage, collector.ready, collector.sinkMetrics) }
     if let error = state.1 { failure = failure ?? NSError(domain: "NativeLogoCapture", code: 19, userInfo: [NSLocalizedDescriptionKey: error]) }
     if !state.2 { failure = failure ?? NSError(domain: "NativeLogoCapture", code: 20, userInfo: [NSLocalizedDescriptionKey: "No valid complete first frame"]) }
     let manifest: [String: Any] = ["complete": failure == nil && stopped, "streamStarted": started, "streamStopped": stopped, "identity": collector.identity,
         "frames": state.0, "error": failure.map { String(describing: $0) } as Any? ?? NSNull(), "finishedClock": clockFields(),
+        "sinkMetrics": state.3, "sinkMetricsScope": "Diagnostic serial callback begin/end and write/hash durations by original frame index, captured once without a second sidecar write. Original frame sidecars and manifest frame rows remain identical; PTS/status/FPS are unchanged. Monotonic durations are not display presentation or exclusive CPU time.",
         "dropCount": NSNull(), "dropCountKnown": false, "dropLimitation": "SCStreamOutput supplies frame statuses but no total missing/dropped frame callback count. Preserve all statuses; no zero-drop claim.",
         "timing": "Original CMSampleBuffer PTS and attachment displayTime; no interpolated frames, fixed-rate encoding, timestamp rewriting or synthetic duplicates"]
     try writeJSON(manifest, directory.appendingPathComponent("capture.json"))

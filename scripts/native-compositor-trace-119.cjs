@@ -2,8 +2,8 @@
 // Caller supplies the SAME existing action/recordScreencast, without changing its
 // input, capture parameters or assertions. Tracing overhead invalidates FPS claims.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto')
-const categories=['toplevel','devtools.timeline','disabled-by-default-devtools.timeline.frame','cc','viz','gpu','renderer.scheduler','blink.user_timing','disabled-by-default-cc.debug','disabled-by-default-viz.debug']
-const relevant=/BeginFrame|BeginMainFrame|RequestMainFrame|NeedsBeginFrame|Deadline|DrawFrame|SubmitCompositorFrame|ReceiveCompositorFrame|SurfaceAggregator|Swap|Presentation|Display::|Paint|Raster|Composite|Commit|Activate|Tile|Layer|Layout|UpdateStyle|UpdateLayout|FireAnimationFrame|AnimationFrame|RunTask|ProcessTask|Wait|Gpu|GPU|Flush|ReadPixels|DrawAndSwap|Scheduler|VSync|vsync|FrameSink/
+const categories=['toplevel','devtools.timeline','disabled-by-default-devtools.timeline.frame','cc','viz','gpu','renderer.scheduler','blink.user_timing','disabled-by-default-cc.debug','disabled-by-default-viz.debug','v8','disabled-by-default-v8.compile','disabled-by-default-v8.gc']
+const relevant=/BeginFrame|BeginMainFrame|RequestMainFrame|NeedsBeginFrame|Deadline|DrawFrame|SubmitCompositorFrame|ReceiveCompositorFrame|SurfaceAggregator|Swap|Presentation|Display::|Paint|Raster|Composite|Commit|Activate|Tile|Layer|Layout|UpdateStyle|UpdateLayout|FireAnimationFrame|AnimationFrame|RunTask|ProcessTask|Wait|Gpu|GPU|Flush|ReadPixels|DrawAndSwap|Scheduler|VSync|vsync|FrameSink|V8[.:]|Compile|Parse|GC[.:]|Scavenge|MarkCompact/
 // Additional Chromium rendering names only. Argument privacy remains numeric
 // allowlist-only; unrelated capture payloads and user timing marks stay excluded.
 const recorderRelevant=/^(?:CopyOutput(?:Request|Result)?(?:::[A-Za-z0-9_]+)?|DirectRenderer::DrawRenderPass|SoftwareRenderer::(?:Draw|Copy)[A-Za-z0-9_]*|(?:DevToolsVideoConsumer|FrameSinkVideoCapturerImpl|VideoCaptureOracle|VideoFrameCapture|ScreenCapture|CaptureFrame|CaptureContent|CaptureScreenshot|CopyFromSurface)(?:::[A-Za-z0-9_]+)?)$/
@@ -19,6 +19,7 @@ function numericArgs(value,key){
 }
 function redactEvents(events,markerName){
   return events.flatMap((e,sourceIndex)=>{
+    if(typeof e.name!=='string'||!/^[A-Za-z0-9_ .:<>-]+$/.test(e.name))return[]
     if(String(e.cat||'').split(',').includes('blink.user_timing')&&e.name!==markerName)return[]
     const meta=e.ph==='M'&&['thread_name','process_name'].includes(e.name)
     if(!meta&&e.name!==markerName&&!relevant.test(e.name||'')&&!recorderRelevant.test(e.name||''))return[]
@@ -63,7 +64,7 @@ async function runTrace(h,action,options={}){
   if(!enabled)return{enabled:false,actionExecuted:false,reason:'opt-in diagnostic only; no automatic registration'}
   if(options.separateRun!==true)throw Error('Tracing requires an explicitly separate diagnostic run')
   if(await h.main('process.platform')!=='darwin')throw Error('Native compositor trace requires Darwin')
-  const base=options.outputBase||path.resolve('out/kamu-native-compositor-trace-119'),proof={version:h.version,enabled:true,complete:false,actionExecuted:false,classification:'separate instrumented diagnostic; never normal performance acceptance',privacy:'Screenshots, netlog, input values, script URLs and arbitrary trace args are not collected to disk. Only rendering event fields plus allowlisted numeric geometry/IDs survive. Unsanitized stream exists only in memory.',categories,errors:[],cleanup:{},startedAt:new Date().toISOString()}
+  const base=options.outputBase||path.resolve('out/kamu-native-compositor-trace-119'),proof={version:h.version,enabled:true,complete:false,actionExecuted:false,classification:'separate instrumented diagnostic; never normal performance acceptance',privacy:'Screenshots, netlog, input values, script URLs and arbitrary trace args are not collected to disk. Only rendering event fields plus allowlisted numeric geometry/IDs survive. Unsanitized stream exists only in memory.',limitations:'V8 compile/GC, renderer task, Paint/UpdateLayerTree/Commit categories/names requested, but support, buffer loss and event/privacy filtering limit coverage. Missing events never establish absence; nested wall durations are not exclusive CPU time.',categories,errors:[],cleanup:{},startedAt:new Date().toISOString()}
   const save=()=>{fs.mkdirSync(path.dirname(base),{recursive:true});fs.writeFileSync(base+'.json',JSON.stringify(proof,null,2))}
   let transport,unsubscribe,started=false,stream,marker,actionError,traceError,resolveComplete,rejectComplete
   const observe=async label=>{

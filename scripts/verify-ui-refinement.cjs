@@ -4,6 +4,7 @@ if (process.argv[2]) {
   process.env.KAMUCL_TEST_THEME = process.argv[2]
 }
 const fs=require('fs'),path=require('path'),os=require('os'),net=require('net'),assert=require('assert/strict'),{spawn}=require('child_process');
+const ownedQA=require('./qa-owned-process-119.cjs'),{randomUUID}=require('node:crypto');
 const version=require('../package.json').version,root=fs.mkdtempSync(path.join(os.tmpdir(),'KAMUCL EXE GUI 中文 ')),profile=path.join(root,'profile'),games=path.join(root,'games');
 fs.mkdirSync(profile);fs.mkdirSync(games);fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({gameDir:games,activeFolder:games,folders:[{path:games,name:'独立验证目录',isDefault:true}],autoUpdate:false,theme:process.env.KAMUCL_TEST_THEME || 'black-orange'}));
 const fixtureDir=path.join(games,'versions','联机验证实例');fs.mkdirSync(fixtureDir,{recursive:true});fs.writeFileSync(path.join(fixtureDir,'联机验证实例.json'),JSON.stringify({id:'联机验证实例',_mcVersion:'1.20.1',_loader:'fabric',_gameDir:true,mainClass:'net.fabricmc.loader.impl.launch.knot.KnotClient',libraries:[]}));fs.writeFileSync(path.join(fixtureDir,'联机验证实例.jar'),'fixture-only-no-launch');
@@ -20,7 +21,14 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
  const server=net.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));
  const mainServer=net.createServer();await new Promise(r=>mainServer.listen(0,'127.0.0.1',r));const mainPort=mainServer.address().port;await new Promise(r=>mainServer.close(r));
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const log=fs.openSync(path.join(root,'process.log'),'w');
- const child=spawn(process.env.KAMUCL_GUI_DEV ? path.resolve('node_modules/electron/dist/electron.exe') : exe,[...(process.env.KAMUCL_GUI_DEV ? ['.'] : []),...(process.env.KAMUCL_GUI_SOFTWARE==='1'?['--use-gl=angle','--use-angle=swiftshader']:[]),`--inspect=127.0.0.1:${mainPort}`,'--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding','--disable-background-timer-throttling',`--user-data-dir=${profile}`,`--remote-debugging-port=${port}`],{env,stdio:['ignore',log,log]});let ws,mainWs;
+ const child=spawn(process.env.KAMUCL_GUI_DEV ? path.resolve('node_modules/electron/dist/electron.exe') : exe,[...(process.env.KAMUCL_GUI_DEV ? ['.'] : []),...(process.env.KAMUCL_GUI_SOFTWARE==='1'?['--use-gl=angle','--use-angle=swiftshader']:[]),`--inspect=127.0.0.1:${mainPort}`,'--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding','--disable-background-timer-throttling',`--user-data-dir=${profile}`,`--remote-debugging-port=${port}`],{env,stdio:['ignore',log,log]});let ws,mainWs,operationError;
+ const ownedTrack=ownedQA.trackOwnedChild(child,'refinement-app'),ownedProcessProof={classification:'Read-only disposable QA child lifecycle; never command lines or external signals',child:ownedTrack.ledger,before:await ownedQA.ownedInventory([ownedTrack])};
+ let restoreOwnedCancellation
+ if(process.env.KAMUCL_OBSERVER_TRACE_CONTROL119==='1')restoreOwnedCancellation=ownedQA.installOwnedCancellation(process,async()=>{
+  const cancelled={classification:'Independent trace deadline failure; only tracked spawned children may be signalled',startedAt:new Date().toISOString(),children:[...ownedQA.trackedChildren].map(t=>t.ledger),complete:false}
+  try{const results=await Promise.allSettled([...ownedQA.trackedChildren].map(t=>ownedQA.finishOwnedChild(t,{terminate:true,timeoutMs:4500})));cancelled.cleanupComplete=results.every(r=>r.status==='fulfilled');cancelled.errors=results.filter(r=>r.status==='rejected').map(r=>r.reason.name)}
+  finally{cancelled.finishedAt=new Date().toISOString();fs.writeFileSync(path.join('out','qa-owned-process-119-'+randomUUID()+'.json'),JSON.stringify(cancelled,null,2));process.exit(1)}
+ })
  try {
   let page;for(let i=0;i<90;i++){assert(child.exitCode===null,'portable exited before UI');try{page=(await(await fetch(`http://127.0.0.1:${port}/json`)).json()).find(p=>p.url.includes('/renderer/index.html'));if(page)break}catch{}await wait(1000)}assert(page,'renderer unavailable');
   ws=new WebSocket(page.webSocketDebuggerUrl);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true})});let id=0;const pending=new Map();ws.addEventListener('message',e=>{const m=JSON.parse(e.data);pending.get(m.id)?.(m);if(m.method==='Runtime.exceptionThrown'||m.method==='Runtime.consoleAPICalled'&&m.params.type==='error')console.error(JSON.stringify(m.params))});
@@ -87,7 +95,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
       for(let i=0;i<frames.length;i++)fs.writeFileSync(path.join(directory,frames[i].file),buffers[i]);
       const intervals=frames.slice(1).map((frame,index)=>frame.timestamp-frames[index].timestamp),elapsed=frames.length>1?frames.at(-1).timestamp-frames[0].timestamp:0,result={version,directory,capture,source:'actual Page.startScreencast full compositor frames scaled to fit 960x620, JPEG quality70, acknowledged before decode and buffered in memory until recording stops; no interpolated frames',startedAt:new Date(startedAt).toISOString(),frames,elapsed,fps:elapsed?(frames.length-1)/elapsed:0,intervals};fs.writeFileSync(path.join(directory,'recording.json'),JSON.stringify(result,null,2));return result;
     };
-    const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version,recordScreencast};
+    const harness={call,evaluate,main,click,nav,screenshot,wait,root,profile,games,other,version,recordScreencast,ownedTrack};
     if(!process.env.KAMUCL_SKIP_EXTENSION_BASE)await require('./verify-extension-ui.cjs')(harness);
     const selectedModule=process.env.KAMUCL_UI_MODULE||process.env.KAMUCL_117_MODULE;
     if(version==='1.1.9'&&selectedModule==='motion119')await require('./verify-kamu-motion-diagnostic-119.cjs')({...harness,motionDiagnosticInvocation:'standalone-cold-process'});
@@ -218,5 +226,12 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   const result={version,complete:true,exeSHA256:process.env.KAMUCL_GUI_DEV?null:require('crypto').createHash('sha256').update(fs.readFileSync(exe)).digest('hex'),catalogReentry:true,disclosureBothDirections:true,dropdownMotion:true,methodEntryMotion:true,settingsScopes:true,compactRuntime:true,settingsScrollRestored:true,asyncLatestWins:true,errorRetry:true,emptySearch:true,modalKeyboard:true,runningState:true,confinedAnimation:true,root,shotDir,issues,settingsTargets:settingIds.length,reducedMotion:true,legacyConfig:true,rapidNavigation:true,themes:process.env.KAMUCL_TEST_THEME||'black-orange',windows:[[960,620,1],[1280,900,1.25],[1440,960,1.5],[980,720,1.5],'maximized']};fs.writeFileSync('out/ui-refinement-'+result.themes+'.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   if(process.env.KAMUCL_UI_HOLD){fs.writeFileSync('out/ui-hold.ready','ready');while(!fs.existsSync('out/ui-hold.done'))await wait(500)}
   await closeApp();
- }finally{if(mainWs?.readyState===WebSocket.OPEN)mainWs.close();if(ws?.readyState===WebSocket.OPEN){ws.send(JSON.stringify({id:999999,method:'Browser.close'}));await wait(1000);ws.close()}fs.closeSync(log)}
+ }catch(error){operationError=error;throw error}
+ finally{await ownedQA.preservingCleanup(async()=>{if(operationError)throw operationError},async()=>{
+  let closeError
+  try{if(mainWs?.readyState===WebSocket.OPEN)mainWs.close();if(ws?.readyState===WebSocket.OPEN){ws.send(JSON.stringify({id:999999,method:'Browser.close'}));await wait(1000);ws.close()}await ownedQA.finishOwnedChild(ownedTrack,{terminate:true,timeoutMs:5000})}
+  catch(error){closeError=error;ownedProcessProof.failure=error.name}
+  finally{const signals=restoreOwnedCancellation?.()??{observerRemoved:true,originalListenersPreserved:true};ownedProcessProof.signalObserverRemoved=signals.observerRemoved;ownedProcessProof.originalSignalListenersPreserved=signals.originalListenersPreserved;ownedProcessProof.after=await ownedQA.ownedInventory([ownedTrack],ownedProcessProof.before.rows?.map(r=>r.pid));ownedProcessProof.complete=!closeError&&signals.observerRemoved&&signals.originalListenersPreserved;fs.closeSync(log);fs.writeFileSync(path.join('out','qa-owned-process-119-'+randomUUID()+'.json'),JSON.stringify(ownedProcessProof,null,2));if(!ownedProcessProof.complete&&!closeError)closeError=Error('owned SIGTERM observer must restore exact original listener identities')}
+  if(closeError)throw closeError
+ })}
 })().catch(e=>{console.error(e);process.exitCode=1});

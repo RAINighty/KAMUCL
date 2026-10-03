@@ -1,5 +1,6 @@
 // Run the actual packaged app on a disposable native macOS CI runner.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{spawn,execFileSync}=require('node:child_process')
+const ownedQA=require('./qa-owned-process-119.cjs')
 const appPath=path.resolve(process.argv[2]),arch=process.argv[3],version=require('../package.json').version
 assert.equal(process.platform,'darwin');assert.equal(process.arch,arch)
 const mascotProofRevision=version==='1.1.9'?'119':'118',mascotRecordingKind=version==='1.1.9'?'logo':'leader'
@@ -14,6 +15,7 @@ execFileSync('swiftc',['scripts/mac-material-fixture.swift','-o',fixtureExe])
 fs.writeFileSync(control,'black')
 const fixture=spawn(fixtureExe,[control],{stdio:'ignore'})
 const child=spawn(exe,['--remote-debugging-port=9229'],{env,stdio:['ignore',log,log]})
+const ownedTracks=[ownedQA.trackOwnedChild(child,'native-base-app'),ownedQA.trackOwnedChild(fixture,'material-fixture')]
 const wait=ms=>new Promise(r=>setTimeout(r,ms))
 async function main(){
  let page
@@ -124,9 +126,12 @@ async function main(){
  fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,stage,binary,mainUI:true,macUI,skin:{facePixels,shirtPixels,capture:skinCapture},nativeMaterial,url:page.url},null,2));ws.close()
  console.log('PASS native macOS '+arch+' packaged app '+version)
 }
-main().finally(async()=>{
- const ended=new Promise(resolve=>{if(child.exitCode!==null)resolve();else child.once('exit',resolve)})
- child.kill('SIGTERM');fixture.kill('SIGTERM');await ended;fs.closeSync(log)
+ownedQA.preservingCleanup(main,async()=>{
+ const cleanup={classification:'Owned QA lifecycle only; no external process signalling',before:await ownedQA.ownedInventory(ownedTracks),children:ownedTracks.map(t=>t.ledger)}
+ const results=await Promise.allSettled(ownedTracks.map(t=>ownedQA.finishOwnedChild(t,{terminate:true,timeoutMs:5000})))
+ cleanup.after=await ownedQA.ownedInventory(ownedTracks,cleanup.before.rows?.map(r=>r.pid));cleanup.complete=results.every(r=>r.status==='fulfilled')
+ fs.closeSync(log);fs.writeFileSync(path.join(proof,'owned-process-cleanup.json'),JSON.stringify(cleanup,null,2))
+ const errors=results.filter(r=>r.status==='rejected').map(r=>r.reason);if(errors.length)throw new AggregateError(errors,'owned native base cleanup failed')
 }).then(()=>{
  // The existing native workflow calls this script for both the APP and mounted DMG.
  // Keep the common-feature checks here so they cannot be omitted by a workflow step.
@@ -199,6 +204,7 @@ main().finally(async()=>{
   for(const name of fs.readdirSync('out'))if(/^(?:extension-118-skin-palette-state-(?:native|compositor)-failure-black-orange|skin-palette-export-119-black-orange-(?:\d+|latest-success))\.png$/.test(name)&&fresh(path.join('out',name))){fs.copyFileSync(path.join('out',name),path.join(extensionProof,name));copied.push(name)}
   if(fs.existsSync(shots))for(const name of fs.readdirSync(shots))if(name.startsWith('extension-')&&name.endsWith('.png')&&fresh(path.join(shots,name))){fs.copyFileSync(path.join(shots,name),path.join(extensionProof,name));copied.push(name)}
   fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,functionalComplete:complete,performanceBenchmark,performancePassed:performanceBenchmark?.passed??null,nativeVideoEvidence,observerABA119,acceptance:'functional results only; independent visual, interaction and motion review is separate',error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))
+  for(const name of fs.readdirSync('out').filter(n=>/^qa-owned-process-119-[0-9a-f-]{36}\.json$/.test(n)))if(fresh(path.join('out',name))){const target=path.join(extensionProof,'owned-process-ledgers',name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join('out',name),target)}
   // One separate, disposable Intel APP diagnostic after archiving the normal
   // result, including its original failure. Diagnostics cannot replace it.
   // Keep workflow permissions/budget and all formal capture assertions intact.
@@ -219,6 +225,9 @@ main().finally(async()=>{
     try{fs.writeFileSync(path.join(extensionProof,'observer-aba-preflight.json'),JSON.stringify(observerABA119,null,2))}catch(error){console.warn('DIAGNOSTIC summary write failed; original formal result remains unchanged',String(error))}console.log('DIAGNOSTIC observer ABA end '+observerABA119.finishedAt+' elapsedMs='+observerABA119.elapsedMs)
    }
   }
+  // Only after DMG formal proofs are archived, in a separate owned process.
+  // The helper bounds 85s execution + 5s cleanup and excludes private CPU data.
+  require('./native-trace-control-preflight-119.cjs').run({version,arch,stage,ci:process.env.CI,env,exe,extensionProof})
 
  }
  console.log('FUNCTIONAL PASS native macOS '+arch+' extension GUI '+version+'; capture benchmark '+performanceBenchmark.status)
