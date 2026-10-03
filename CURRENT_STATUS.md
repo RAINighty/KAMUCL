@@ -1,6 +1,8 @@
 # CURRENT STATUS — KAMUCL 1.1.11 接续候选
 
-## Last verified state
+2026-10-04 06:30（Asia/Hong_Kong）更新：第三轮 `2b1e6f1` 的 Mac run `37157548139` 与 Linux run `37157548122` 均完整结束为 failure，没有取消或死锁。Mac 两架构各 853 项为 846 通过、3 失败、4 项既有系统限定 skip；失败为测试临时目录别名 `/var` 与产品正确返回的 `/private/var` 规范路径不同。Linux x64 为 850 通过、0 失败、3 skip 后进入生产构建，但旧打包检查要求官方 Electron 44.3.0 已不含的 `libEGL.so`；ARM64 为 849 通过、1 失败、3 skip，合成 Windows classifier 被正确的 ARM 安全规则拒绝。已修正测试根目录和原生库夹具，按两份官方 ZIP／SHA 建立准确的运行时清单，保留 ELF、执行位、ICD、资源和许可检查。Windows 最新全套 855 项为 854 通过、0 失败、1 项原有 Linux skip。此次新增 Linux 打包校验变化，Windows 产品输入和成品未改变；完整原生重跑仍必需，尚无 Mac／Linux 成品、桌面／游戏或独立三项合格结论。原始失败日志及时间保留，不能改称通过。
+
+## Previous verified snapshot
 
 2026-10-04 06:05（Asia/Hong_Kong）。当前版本 1.1.11；公开基线为 1.1.10。修复 FRP、POSIX 进程就绪等待与 Windows 更新夹具后的全量公开测试 853 项：852 通过、0 失败、1 项 Linux 原生 shell 测试在 Windows 跳过；TypeScript 通过。初始下载与取消阶段分别观测，五个平台／架构使用隔离夹具执行真实控制器；独立真实子进程观测保留 stdout、正常退出码和仅自建进程终止断言，四个平台／架构更新路由保留目标隔离与记录清理断言。这些合成／局部平台分支验证不能替代原生运行。此前生产构建、许可证、Windows EXE／两 ZIP 干净解压、冷／热启动及完整 payload／ASAR 核对通过。本次后续变更仅测试、工作流和状态文档，全部 Windows 产品构建输入及成品摘要未改变。四主题 ux110 与黑橙的彩蛋、皮肤、色板、图片／收藏、导入和选择必测模块通过；服务夹具与故障注入不作为真实在线服务证据。
 

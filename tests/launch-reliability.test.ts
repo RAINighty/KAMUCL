@@ -26,9 +26,15 @@ test('Maven conflict identity selects child version while preserving classifiers
       const dir = path.join(folder, 'versions', id); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, id + '.json'), JSON.stringify(json))
     }
     assert.deepEqual(runtime.libraryTasks(runtime.resolveVersionChain('child').merged).map(t => path.basename(t.dest)), ['child.jar'])
-    const native = { libraries: [{ name: 'g:a:2', natives: { windows: 'natives-windows', linux: 'natives-windows', osx: 'natives-windows' }, downloads: { artifact: { path: 'a.jar', url: 'https://example.invalid/a' }, classifiers: { 'natives-windows': { path: 'native.jar', url: 'https://example.invalid/n' } } } }] }
+    // Synthetic metadata still obeys the real host ABI. In particular Linux
+    // ARM64 must never accept a renamed Windows/x64 classifier as a fixture.
+    const nativeKeys = { windows: `natives-windows-${process.arch}`, linux: `natives-linux-${process.arch}`, osx: `natives-osx-${process.arch}` }
+    const classifiers = Object.fromEntries(Object.values(nativeKeys).map(key => [key, { path: `${key}.jar`, url: `https://example.invalid/${key}.jar`, sha1: sha1(Buffer.from(key)) }]))
+    const native = { libraries: [{ name: 'g:a:2', natives: nativeKeys, downloads: { artifact: { path: 'a.jar', url: 'https://example.invalid/a' }, classifiers } }] }
     assert.equal(runtime.resolvedLibraries(native).natives.length, 1)
     assert.equal(runtime.resolvedLibraries(native).artifacts.length, 1)
+    const hostKey = process.platform === 'win32' ? nativeKeys.windows : process.platform === 'darwin' ? nativeKeys.osx : nativeKeys.linux
+    assert.equal(path.basename(runtime.resolvedLibraries(native).natives[0]), `${hostKey}.jar`)
   } finally { await runtime.closeHttpClient(); fs.rmSync(root, { recursive: true, force: true }) }
 })
 

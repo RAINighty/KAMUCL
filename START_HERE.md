@@ -1,5 +1,7 @@
 # START HERE — KAMUCL 1.1.11 接续候选
 
+2026-10-04 06:30（Asia/Hong_Kong）更新：第三轮 `2b1e6f1` 的 Mac run `37157548139` 与 Linux run `37157548122` 均完整结束为 failure，没有取消或死锁。Mac 两架构各 853 项为 846 通过、3 失败、4 项既有系统限定 skip；失败为测试临时目录别名 `/var` 与产品正确返回的 `/private/var` 规范路径不同。Linux x64 为 850 通过、0 失败、3 skip 后进入生产构建，但旧打包检查要求官方 Electron 44.3.0 已不含的 `libEGL.so`；ARM64 为 849 通过、1 失败、3 skip，合成 Windows classifier 被正确的 ARM 安全规则拒绝。已修正测试根目录和原生库夹具，按两份官方 ZIP／SHA 建立准确的运行时清单，保留 ELF、执行位、ICD、资源和许可检查。Windows 最新全套 855 项为 854 通过、0 失败、1 项原有 Linux skip。此次新增 Linux 打包校验变化，Windows 产品输入和成品未改变；完整原生重跑仍必需，尚无 Mac／Linux 成品、桌面／游戏或独立三项合格结论。原始失败日志及时间保留，不能改称通过。
+
 本包是多平台移植的接续候选，不是 Mac／Linux／鸿蒙完整验收完成或正式发行的声明。Windows 最新 EXE 与两个 ZIP 已完成干净解压及启动验证；Mac ARM64、Mac Intel、Linux x64／ARM64 的当前原生产物及完整运行证据尚未取得。鸿蒙已生成原生 HAP 接续工程，但缺少官方 SDK、合法签名条件和实机，尚未生成 HAP 或验证游戏。以 CURRENT_STATUS.md、docs/RELEASE-1.1.11.md 和 docs/validation-1.1.11/independent-review.md 为当前权威状态；下方旧版本说明只用于追溯。
 
 Windows x64 使用 _handoff/artifacts/KAMUCL-1.1.11.exe，或解压紧凑 ZIP；无法使用自解压包装器时解压 windows-x64-unpacked ZIP。各附件 SHA256 在 CURRENT_STATUS.md；交接包逐文件清单在 _handoff/manifest.json 与 _handoff/SHA256SUMS.txt。账户、游戏、用户图片、私钥和未提交的 pelican-bicycle.html 不包含在内，接收者自行选择自己的游戏目录和登录。

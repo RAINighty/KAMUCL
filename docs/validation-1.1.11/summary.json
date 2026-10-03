@@ -1,6 +1,6 @@
 {
   "version": "1.1.11",
-  "recordedAt": "2026-10-03T22:05:06+00:00",
+  "recordedAt": "2026-10-03T22:30:28.401Z",
   "status": "native-qualification-incomplete; local-engineering-candidate",
   "baseline": {
     "version": "1.1.10",
@@ -9,14 +9,14 @@
   },
   "validation": {
     "publicTests": {
-      "total": 853,
-      "passed": 852,
+      "total": 855,
+      "passed": 854,
       "failed": 0,
       "skipped": 1,
+      "durationMs": 109888.6364,
       "skipReason": "Linux native updater shell cannot execute on the Windows host",
-      "log": "out/test111-posix-update-fixtures-final.log",
-      "durationMs": 108569.0844,
-      "finalHostEnvironmentIsolation": "private helper environment cleanup followed by 18/18 targeted tests; full suite loaded before this last fixture-only cleanup"
+      "log": "out/test111-runtime-fixtures-final.log",
+      "sha256": "7b480f7c00e50d3eaab37bf94fd1c5b68609d1f9c430f3a65c3bd7929a804eac"
     },
     "gateProtocolNegativeTests": {
       "total": 41,
@@ -45,18 +45,54 @@
     "posixAndUpdateFixtureCorrection": {
       "productSourceChanged": false,
       "independentlyReviewed": true,
-      "spawnAssertionsPreserved": ["stdout", "owned child kill/close", "SIGTERM", "killed", "natural exit code7", "memory metrics"],
-      "updateRoutingConfigurations": ["darwin/arm64", "darwin/x64", "linux/arm64", "linux/x64"],
-      "targetedUpdaterTests": { "passed": 18, "failed": 0, "classification": "isolated controller/filesystem fixtures, not actual OS upgrade acceptance" },
+      "spawnAssertionsPreserved": [
+        "stdout",
+        "owned child kill/close",
+        "SIGTERM",
+        "killed",
+        "natural exit code7",
+        "memory metrics"
+      ],
+      "updateRoutingConfigurations": [
+        "darwin/arm64",
+        "darwin/x64",
+        "linux/arm64",
+        "linux/x64"
+      ],
+      "targetedUpdaterTests": {
+        "passed": 18,
+        "failed": 0,
+        "classification": "isolated controller/filesystem fixtures, not actual OS upgrade acceptance"
+      },
       "nativeFullRerunRequired": true
     },
     "frpFixtureCorrection": {
       "productSourceChanged": false,
       "independentlyReviewed": true,
-      "configurations": ["win32/x64", "darwin/arm64", "darwin/x64", "linux/arm64", "linux/x64"],
+      "configurations": [
+        "win32/x64",
+        "darwin/arm64",
+        "darwin/x64",
+        "linux/arm64",
+        "linux/x64"
+      ],
       "classification": "isolated real-controller tests; not native OS acceptance",
       "realHostProcessKill": false,
       "nativeFullRerunRequired": true
+    },
+    "runtimeAndCanonicalFixtureCorrection": {
+      "productSourceChanged": false,
+      "windowsBuildInputsChanged": false,
+      "linuxPackagingVerifierChanged": true,
+      "classification": "canonical temporary directory and architecture-correct synthetic metadata fixtures; strict official Linux packaging inventory",
+      "nativeFullRerunRequired": true,
+      "officialElectronVersion": "44.3.0",
+      "officialArchives": {
+        "x64": "8b49b9efdd73c0f467edc3c1cd5678392c384ccf224f34ff54179f736e2f384b",
+        "arm64": "c11fde221c08e9bffdb3336579f09bd934a009862f509af5033616876741be24"
+      },
+      "builderMapping": "official LICENSE becomes LICENSE.electron.txt; version file removed by electron-builder; packaged inventory uses actual names",
+      "thresholdsRelaxed": false
     }
   },
   "inventory": {
@@ -156,7 +192,8 @@
     "gallery118 old total metadata count included automatic artwork reads; original failure retained and real mutation handler observations passed",
     "ab54 native Mac run37154520494 and Linux run37154520531 cancelled after FRP fixture initial download awaited a later cancellation-stage release; no native package produced",
     "0d71da native Mac run37155930792 and Linux run37155930845 each reported a legacy Windows EXE pending fixture failure and then cancelled after awaiting an already emitted POSIX spawn event; no native package produced",
-    "initial Linux observation mistook timestamps on skipped build steps for execution; obsolete record retained and corrected using actual step conclusion; original logs unchanged"
+    "initial Linux observation mistook timestamps on skipped build steps for execution; obsolete record retained and corrected using actual step conclusion; original logs unchanged",
+    "2b1e6f native Mac run37157548139 completed with three /var versus /private/var temporary fixture path failures per architecture; Linux run37157548122 ARM rejected a fake Windows native classifier and x64 packaging rejected obsolete libEGL inventory; all original logs retained, not a deadlock or cancellation"
   ],
   "uncovered": [
     "current macOS native builds, credentials, Intel GPU/motion, game/world/save/quit, services and updates",
@@ -166,13 +203,13 @@
     "HarmonyOS SDK, legal signing, device and native JVM/JNI/LWJGL/GLFW/audio/game"
   ],
   "remote": {
-    "master": "0d71da046e2d0e29ca540fe9ac03129f0c795e5a",
-    "main": "ef8ec49d087ff73aec6b0d68f23bbbfc75a652d2",
+    "master": "2b1e6f18a2ccc3dcf5230392d58d8ddfba3dec7f",
+    "main": "55ad9862554a1c8e5a751e3b0f7548565269b8d2",
     "v111Tag": false,
     "v111Release": false,
     "push": "successful; main synchronized by cherry-pick with independent history",
     "authorization": "human completed standard workflow OAuth authorization; previous rejected push, connection timeouts and expired codes retained as history",
-    "observedAt": "2026-10-04 06:05 Asia/Hong_Kong",
+    "observedAt": "2026-10-04 06:30 Asia/Hong_Kong",
     "secondNativeRuns": {
       "commit": "0d71da046e2d0e29ca540fe9ac03129f0c795e5a",
       "mac": "37155930792",
@@ -190,8 +227,52 @@
       "mac": "37154520494",
       "linux": "37154520531",
       "status": "cancelled after isolated FRP test fixture deadlock; full test and build must rerun",
-      "linuxDedicatedTests": { "passed": 8, "classification": "actual native shell and backend tests; not complete desktop/game acceptance" },
+      "linuxDedicatedTests": {
+        "passed": 8,
+        "classification": "actual native shell and backend tests; not complete desktop/game acceptance"
+      },
       "nativeArtifactsProduced": false
+    },
+    "thirdNativeRuns": {
+      "commit": "2b1e6f18a2ccc3dcf5230392d58d8ddfba3dec7f",
+      "mac": {
+        "arm64": {
+          "total": 853,
+          "passed": 846,
+          "failed": 3,
+          "skipped": 4,
+          "durationMs": 72107.397125
+        },
+        "x64": {
+          "total": 853,
+          "passed": 846,
+          "failed": 3,
+          "skipped": 4,
+          "durationMs": 105450.568249
+        },
+        "failures": "three fixture expectations used /var aliases while product correctly returned canonical /private/var paths",
+        "originalLogsSHA256": "bc7774b1092a67232965ca7b2ff81d1f20a002492cd25dab93f4b53026ac0323"
+      },
+      "linux": {
+        "x64": {
+          "total": 853,
+          "passed": 850,
+          "failed": 0,
+          "skipped": 3,
+          "build": "packaging failed because the old runtime inventory required libEGL.so, absent in official Electron44.3.0"
+        },
+        "arm64": {
+          "total": 853,
+          "passed": 849,
+          "failed": 1,
+          "skipped": 3,
+          "build": "skipped after a Windows-classifier fixture was correctly rejected by the ARM fail-closed rule"
+        },
+        "originalLogsSHA256": "791b2e902d03d00f1580c3cfa42041913ddef8f3db504408083707f28f2e8b19"
+      },
+      "status": "completed/failure; no cancellations or deadlocks",
+      "nativeArtifactsProduced": false,
+      "desktopAndGameAcceptanceEntered": false
     }
   },
   "privacy": {
