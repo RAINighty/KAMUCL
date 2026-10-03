@@ -26,7 +26,7 @@ Windows 成品、三主题与真实 PCL 导入已验证；783 项测试、许可
 
 皮肤编辑器采用模板布局并固定关闭／保存操作；勾选、半选和安装弹窗统一主题。LOGO 原位卡慕单人逐次排队拍打，保留其余六人的历史计数。统一 import:probe 优先识别整合包清单，修复 PCL 包夹带存档时的误分类；用户图片、设置、收藏、原始包和现有实例继续保留。
 
-实际日志 out/test-119-windows-only-release-final.log：783/783 通过，失败／跳过／取消／todo 均为零，耗时 75722.0961 ms。Windows 范围独立评审 complete／passed：视觉 9、交互 9.1、动效 9 各自达到 9，当前 Windows 关键缺陷为零；不使用平均分或推断填分。
+实际日志 out/test-119-windows-only-release-final.log：783/783 通过，失败／跳过／取消／未实现测试项均为零，耗时 75722.0961 ms。Windows 范围独立评审 complete／passed：视觉 9、交互 9.1、动效 9 各自达到 9，当前 Windows 关键缺陷为零；不使用平均分或推断填分。
 
 当前附加许可日志 out/licenses-119-windows-only-release-final.log 已通过，SHA256 d2fc75c204b8379dc900667285519f9edf35d111740b03a309f6c42645ebd43e。
 
