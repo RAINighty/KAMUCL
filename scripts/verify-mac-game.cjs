@@ -7,6 +7,9 @@ const app = path.resolve(process.argv[2]), arch = process.argv[3]
 assert.equal(process.arch, arch)
 const proof = path.resolve(`release/mac-game-proof-${arch}`)
 fs.mkdirSync(proof, { recursive: true })
+const { readMacPackageIdentity, collectMacWorldHashes, findMacGameExit, assertMacNormalGameExit } = require('./mac-package-identity.cjs')
+const packageIdentity = readMacPackageIdentity(app, {version:require('../package.json').version,arch,sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),runtimeVersion:require('../package.json').devDependencies.electron,minimumSystemVersion:'13.0.0'})
+fs.writeFileSync(path.join(proof,'package-identity.json'),JSON.stringify(packageIdentity,null,2))
 // This job owns its native observation tool; it does not consume another job's
 // temporary material fixture. Keep compilation and signature checks before any
 // launcher or game process starts so a setup failure cannot strand either one.
@@ -207,21 +210,27 @@ async function main() {
   await wait(10000) // Let the client finish its terrain transition before capturing it.
   await captureObserver.capture('minecraft-world.png', gamePid)
   execFileSync(helper,['close',String(gamePid),'6000'],{timeout:8000})
+  const expectedExit={versionId:installed.installedId,folder,launchId:lastState?.launchId}
   let exited=false
   for(let i=0;i<90;i++){
     events.push(...await evaluate('window.__gameTestEvents.splice(0)'))
-    try{process.kill(gamePid,0)}catch{exited=true;break}
+    try{process.kill(gamePid,0)}catch{exited=true}
+    if(exited&&findMacGameExit(events,expectedExit))break
     await wait(1000)
   }
   assert(exited,'normal Cocoa close did not exit Minecraft')
+  const normalExit=assertMacNormalGameExit(events,expectedExit)
   assert(events.some(e=>e.name==='launchLog'&&/Stopping!|Stopping the|Saving|正常退出|退出.*0/.test(e.value)),'game did not report a normal shutdown')
   const saveDir=path.join(path.dirname(idPath),'saves','Demo_World')
   assert(fs.statSync(path.join(saveDir,'level.dat')).size>0,'demo world metadata was not saved')
   const regionDir=path.join(saveDir,'dimensions','minecraft','overworld','region')
   const regionFiles=fs.readdirSync(regionDir).filter(f=>f.endsWith('.mca')&&fs.statSync(path.join(regionDir,f)).size>0)
   assert(regionFiles.length>0,'demo world chunks were not saved')
+  // Observe final save bytes only after this owned game has exited; never publish the world.
+  const world=collectMacWorldHashes(saveDir)
+  fs.writeFileSync(path.join(proof,'saved-world-hashes.json'),JSON.stringify(world,null,2))
   assert(!fs.readFileSync(path.join(proof,'launcher.log'),'utf8').includes('Object has been destroyed'),'closed window broke background callbacks')
-  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, nativeWindow, gamePid, gameWindow: true, worldStarted,savedWorld:true,regionFiles,nativeFocus:true, gracefulClose:true,closeAndDockReopen:true,ciMetalArgumentBuffers:env.MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS??null,ciMetalHeap:env.MVK_CONFIG_USE_MTLHEAP??null }, null, 2))
+  fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify({ arch, version, packageIdentity, nativeWindow, gamePid, gameWindow: true, worldStarted,savedWorld:true,world,normalExit:{...normalExit,saved:true},regionFiles,nativeFocus:true, gracefulClose:true,closeAndDockReopen:true,ciMetalArgumentBuffers:env.MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS??null,ciMetalHeap:env.MVK_CONFIG_USE_MTLHEAP??null }, null, 2))
   gamePid=null
   console.log('PASS actual Minecraft window', arch, version)
 }

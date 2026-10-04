@@ -5,6 +5,17 @@ const root = path.resolve(__dirname, '..'), version = require('../package.json')
 const proof = path.join(root, 'release/linux-proof-' + arch + '-packages'); fs.mkdirSync(proof, { recursive: true })
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'KAMUCL clean 中文 ')), run = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: 1024 * 1024 * 16 })
 const report = { version, arch, sourceCommit: run('git', ['rev-parse', 'HEAD']).trim(), nativeArchitecture: process.arch, packages: [], complete: false, nativeDesktop: false }
+const { observeLinuxRuntime } = require('./verify-linux-runtime.cjs')
+function verifyIdentity(directory, kind) {
+  const identity = JSON.parse(fs.readFileSync(path.join(directory, 'resources/kamucl-linux.json'), 'utf8'))
+  assert.equal(identity.schemaVersion, 1, 'Unknown Linux package identity schema')
+  assert.equal(identity.product, 'KAMUCL'); assert.equal(identity.platform, 'linux'); assert.equal(identity.version, version); assert.equal(identity.arch, arch); assert.equal(identity.installationKind, kind)
+  assert.equal(identity.sourceCommit, report.sourceCommit, 'Embedded package source differs from the checkout')
+  const observed = observeLinuxRuntime(path.join(directory, 'kamucl'), arch)
+  assert.equal(identity.runtimeVersion, observed.electron, 'Embedded runtime differs from the extracted executable')
+  report.identities ||= []; report.identities.push({ kind, identity, observedExecutable: observed })
+  report.runtimeVersion = observed.electron
+}
 function compareTrees(first, second, skipMetadata = false) {
   let count = 0
   const walk = dir => { for (const name of fs.readdirSync(dir)) { const file = path.join(dir, name), rel = path.relative(first, file), other = path.join(second, rel), stat = fs.lstatSync(file); if (stat.isDirectory()) walk(file); else {
@@ -19,6 +30,7 @@ function compareTrees(first, second, skipMetadata = false) {
   run('/usr/bin/tar', ['-xzf', path.join(root, 'release', prefix + '.tar.gz'), '-C', portable])
   const nativeDir = path.join(root, 'release/linux' + (arch === 'arm64' ? '-arm64' : '') + '-unpacked')
   const count = compareTrees(nativeDir, path.join(portable, 'KAMUCL'))
+  verifyIdentity(path.join(portable, 'KAMUCL'), 'portable-directory')
   const code = await require('esbuild').build({ entryPoints: [path.join(root, 'src/main/core/linuxUpdateIdentity.ts')], bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external' })
   const mod = { exports: {} }; new Function('require', 'module', 'exports', code.outputFiles[0].text)(require, mod, mod.exports)
   await mod.exports.validateLinuxArchive(path.join(root, 'release', prefix + '.tar.gz'))
@@ -30,6 +42,7 @@ function compareTrees(first, second, skipMetadata = false) {
   const debMetadataFile = find(debRoot, 'kamucl-linux.json'); assert(debMetadataFile)
   const metadata = JSON.parse(fs.readFileSync(debMetadataFile, 'utf8')); mod.exports.assertLinuxManifest(JSON.stringify(metadata), version, 'deb', arch)
   const debCount = compareTrees(nativeDir, path.dirname(path.dirname(debMetadataFile)), true)
+  verifyIdentity(path.dirname(path.dirname(debMetadataFile)), 'deb')
   const image = path.join(root, 'release', prefix + '.AppImage'); const bytes = fs.readFileSync(image).subarray(0, 64)
   mod.exports.assertLinuxElf(bytes, arch); assert.equal(bytes.toString('binary', 8, 11), 'AI\x02')
   const imageRoot = path.join(temporary, 'image'); fs.mkdirSync(imageRoot)
@@ -41,6 +54,7 @@ function compareTrees(first, second, skipMetadata = false) {
   for (const desktop of desktops) assert(!fs.readFileSync(path.join(extractedImage, desktop), 'utf8').includes('--no-sandbox'), 'Desktop entry must preserve sandboxing')
   mod.exports.assertLinuxManifest(fs.readFileSync(path.join(extractedImage, 'resources/kamucl-linux.json'), 'utf8'), version, 'appimage', arch)
   const imageCount = compareTrees(nativeDir, extractedImage, true)
+  verifyIdentity(extractedImage, 'appimage')
   for (const extension of ['tar.gz', 'deb', 'AppImage']) {
     const file = path.join(root, 'release', prefix + '.' + extension)
     report.packages.push({ name: path.basename(file), bytes: fs.statSync(file).size, sha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') })

@@ -1,12 +1,18 @@
 # KAMUCL 1.1.11 Linux 接续构建、安装与验收边界
 
+2026-10-04 08:02（Asia/Hong_Kong）当前快照：第五轮 run [37160588146](https://github.com/kamubaba-i/KAMUCL/actions/runs/37160588146) 精确绑定 `5167500b6c27b9bbdd1e80f22d91d3f5904007eb`。Ubuntu 24.04 的 x64／ARM64 原生全套各 857 项：854 通过、0 失败、3 项既有平台 skip。两个打包作业成功，AppImage／DEB／tar.gz 共六包的原生干净解压、ELF／执行位／逐文件摘要和原包清单检查通过；两架构各 portable 26、DEB 25、AppImage 25 个提取文件。
+
+Ubuntu 24.04 两架构及 26.04 x64 的三次 Xvfb compatibility 预检均在 `xdpyinfo` 缺失处失败（`spawnSync xdpyinfo ENOENT`），应用未启动，GUI 模块执行数为 0。后续 `scandir out ENOENT` 又遮蔽首错；原始日志及原不完整 summary 保留，不回填为通过。已冻结补充 `x11-utils`、独立输出目录及保留首错的收尾流程，必须新原生重跑。真实桌面 runner 仍未配置，四种正式 OS／架构均未通过桌面、游戏或完整资格；26.04 ARM64 也无 hosted compatibility 预检。
+
+第五轮 `resources/kamucl-linux.json` 实际仅含 product／platform／arch／version／installationKind；提交身份来自原 CI 外部绑定，未内嵌 sourceCommit，也未执行实际运行时版本观察。新包装修订将实际 Git HEAD 和运行目标 ELF 观察到的 Electron 版本绑定内嵌身份，并逐格式复验；它需要新包，不能重写旧包或以旧 SHA 宣称已完成。本批 Windows 产品输入不变，864 项本机全套为 863 通过、0 失败、1 skip，最新四主题本机 GUI 通过，但不替代 Linux 原生证据。完整资格仍为 false、三项评分 null、无 Release。
+
 2026-10-04 07:04（Asia/Hong_Kong）更新：第四轮候选 `e0b1210` 原生 CI 均结束。Mac `37158774374` 两架构各 855 项为 851 通过、0 失败、4 项既有系统 skip；两个打包及六个限定集成任务成功，4 个 UI 和 2 个游戏任务失败。双架构 ZIP／DMG 已实际生成，Electron 44.3.0、最低 macOS 13、ad-hoc 签名明确记录；不代表完整一致性通过。ARM UI 缺独立输出目录、游戏任务依赖跨任务窗口探针属于 QA 前置问题，已修正。Intel 原截图、30 个无画布样本及三轮 EGL／GPU 错误确认 3D 初始化真实失败，根因仍需原进程诊断。Linux `37158774429` x64 为 852 通过、0 失败、3 skip，三格式实际生成后因 builder 文件名映射失败；ARM64 为 851 通过、1 失败、3 skip，打包跳过。已改为精确命名和私有目录独占发布，取消夹具使用真实未完成传输门控，保留原时间线。最新 Windows 全套 857 项为 856 通过、0 失败、1 项原有 Linux skip；最终 tar 发布调用另经语法及 4 项专项复验。此次产品输入及 Windows 成品未变，QA／Linux 包装变化必须原生重跑。独立修正复核通过，但所有平台完整门控及三项评分仍未完成；没有正式标签或 Release。
 
 2026-10-04 06:30（Asia/Hong_Kong）更新：第三轮 `2b1e6f1` 的 Mac run `37157548139` 与 Linux run `37157548122` 均完整结束为 failure，没有取消或死锁。Mac 两架构各 853 项为 846 通过、3 失败、4 项既有系统限定 skip；失败为测试临时目录别名 `/var` 与产品正确返回的 `/private/var` 规范路径不同。Linux x64 为 850 通过、0 失败、3 skip 后进入生产构建，但旧打包检查要求官方 Electron 44.3.0 已不含的 `libEGL.so`；ARM64 为 849 通过、1 失败、3 skip，合成 Windows classifier 被正确的 ARM 安全规则拒绝。已修正测试根目录和原生库夹具，按两份官方 ZIP／SHA 建立准确的运行时清单，保留 ELF、执行位、ICD、资源和许可检查。Windows 最新全套 855 项为 854 通过、0 失败、1 项原有 Linux skip。此次新增 Linux 打包校验变化，Windows 产品输入和成品未改变；完整原生重跑仍必需，尚无 Mac／Linux 成品、桌面／游戏或独立三项合格结论。原始失败日志及时间保留，不能改称通过。
 
 记录时间：2026-10-04 04:44（本地时间，Asia/Hong_Kong）。
 
-本轮目标为 Ubuntu 24.04 LTS、26.04 LTS 的 x64 与 ARM64，复用当前共享功能、界面与动作实现。**四种组合均尚无当前候选的原生构建、真实桌面及游戏验收通过记录，不能据此文档宣称功能、外观或动效已经完全一致。**
+本轮目标为 Ubuntu 24.04 LTS、26.04 LTS 的 x64 与 ARM64，复用当前共享功能、界面与动作实现。**第五轮已完成 Ubuntu 24.04 两架构原生构建及六包限定完整性检查，但四种组合均没有当前完整真实桌面、游戏及功能／外观／动效一致性合格记录。新包装身份修订尚需重新原生构建。**
 
 2026-10-04 05:33（Asia/Hong_Kong）更新：workflow 标准授权已完成，候选 `ab54c5f` 已推送 master，main 以 cherry-pick 同步为 `db13257`。Linux run `37154520531` 在两个原生架构完成依赖安装后，均停在 FRP 测试夹具的初始下载等待；已取消并保留原始日志，修复夹具后重新运行完整测试，不跳过原生校验。此前 OAuth 拒绝推送和网络失败仍是历史记录；尚无本轮 Linux 成品或完整桌面验收，尚未发布。
 
@@ -16,18 +22,18 @@
 
 | 环境 | 当前原生构建 | 当前真实桌面、游戏与完整验收 |
 | --- | --- | --- |
-| Ubuntu 24.04 x64 | 第四轮三格式实际生成；命名映射失败使原生包检查未执行，Windows 静态解包核对完成；修后待重跑 | 未执行 |
-| Ubuntu 24.04 ARM64 | 第四轮取消夹具失败，打包跳过；修后待重跑 | 未执行 |
-| Ubuntu 26.04 x64 | 未执行 | 未执行 |
-| Ubuntu 26.04 ARM64 | 未执行 | 未执行 |
+| Ubuntu 24.04 x64 | 第五轮原生三格式与干净解压检查通过；新内嵌身份待重建 | Xvfb 预检缺 xdpyinfo，未启动应用；真实桌面／游戏未验 |
+| Ubuntu 24.04 ARM64 | 第五轮原生三格式与干净解压检查通过；新内嵌身份待重建 | Xvfb 预检缺 xdpyinfo，未启动应用；真实桌面／游戏未验 |
+| Ubuntu 26.04 x64 | 无在该 OS 的独立构建；使用 24.04 包预检 | Xvfb 预检缺 xdpyinfo，未启动应用；真实桌面／游戏未验 |
+| Ubuntu 26.04 ARM64 | 未执行 | 无 hosted 预检；真实桌面／游戏未验 |
 
 Linux 专项测试在当前 Windows 开发机上为 7 项通过、1 项跳过，类型检查通过。通过项覆盖凭据保护、ELF 架构、TAR 路径与完整性、包身份和 AppImage 安全拒绝；跳过项是在 Linux 真正运行更新 shell、交换文件与失败恢复的回归。它们不证明 Linux GUI、密钥服务、系统安装器、游戏或帧率已通过。
 
 已加入的入口与验证器：
 
 - [原生打包](../scripts/pack-linux.cjs)：当前架构编译与打包，不用另一架构的运行库拼包。
-- [运行库检查](../scripts/verify-linux-runtime.cjs)：ELF、执行权限、游戏窗口助手、Java 桥、ASAR 与隐私文件边界。
-- [包检查](../scripts/verify-linux-package.cjs)：三种包干净解压、逐文件 SHA256 和执行位核对、源提交与架构绑定。
+- [运行库检查](../scripts/verify-linux-runtime.cjs)：ELF、执行权限、游戏窗口助手、Java 桥、ASAR 与隐私文件边界；新修订直接运行目标 ELF 的 Node 模式观察 platform／arch／Electron 版本，不添加图形或 sandbox 绕过。
+- [包检查](../scripts/verify-linux-package.cjs)：三种包干净解压、逐文件 SHA256 和执行位核对；新修订核对各提取包的内嵌 Git 提交、schemaVersion=1 和实际目标 ELF 运行时身份，实际通过仍待新 CI。
 - [桌面验证](../scripts/verify-linux-desktop.cjs)：真实桌面与夹具 smoke 分开记录，保留原始视频和时间；报告仍列出未覆盖项。
 - [Linux 工作流](../.github/workflows/linux-build.yml)：Ubuntu 24.04 两架构原生打包；24.04 两架构及 26.04 x64 的 Xvfb smoke；四种真实桌面组合须另有对应自托管机器。
 
@@ -35,11 +41,11 @@ Linux 专项测试在当前 Windows 开发机上为 7 项通过、1 项跳过，
 
 在对应架构的 Ubuntu 上使用 Node.js 24、npm 与 JDK 17。JDK 用于编译随包 Java 桥；实际游戏所需 Java 版本由启动器另行选择或下载，并须核对真实架构。以 Node `process.arch` 为准：x64 对应 Debian 包的 `amd64`，ARM64 对应 `arm64`。x64 包和 ARM64 包必须分别原生构建。
 
-以下命令用于最终候选在独立工作目录的重跑；第三轮已执行的路径及失败见上方记录。先检出最终候选并记录完整提交 SHA，安装构建依赖：
+以下命令用于新提交在独立工作目录的重跑；第五轮已有构建结果不包含新内嵌身份，历史路径及失败见上方记录。先检出最终候选并记录完整提交 SHA，安装构建依赖：
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y build-essential libx11-dev squashfs-tools libfuse2t64
+sudo apt-get install -y build-essential libx11-dev squashfs-tools libfuse2t64 libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1 libxtst6 libnotify4 libsecret-1-0
 node --version
 node -p process.arch
 java -version

@@ -10,6 +10,8 @@ const mascotProofRevision='119',mascotRecordingKind='logo'
 const stage=process.argv[4]||(appPath.split(path.sep).includes('dmg-mount')?'dmg':'app');assert(['app','dmg'].includes(stage),'proof stage must be app or dmg')
 const exe=path.join(appPath,'Contents/MacOS/KAMUCL'),proof=path.resolve(`release/mac-proof-${arch}-${stage}`)
 fs.mkdirSync(proof,{recursive:true})
+const packageIdentity=require('./mac-package-identity.cjs').readMacPackageIdentity(appPath,{version,arch,sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),runtimeVersion:require('../package.json').devDependencies.electron,minimumSystemVersion:'13.0.0'})
+fs.writeFileSync(path.join(proof,'package-identity.json'),JSON.stringify(packageIdentity,null,2))
 const binary=execFileSync('file',[exe],{encoding:'utf8'});assert(binary.includes(arch==='x64'?'x86_64':'arm64'))
 const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
 const themes=['transparent','black-orange','blue-white','custom'],themeRuns=[]
@@ -154,7 +156,7 @@ async function main(){
    assert(nativeMaterial.difference>2,'native macOS window still opaque over changing desktop background')
  }
  await call('Runtime.evaluate',{expression:`window.kamucl.invoke('settings:set',{theme:'transparent'})`,awaitPromise:true})
- fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,stage,binary,userAgent,mainUI:true,macUI,skin:{facePixels,shirtPixels,capture:skinCapture},nativeMaterial,url:page.url},null,2));ws.close()
+ fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({version,arch,stage,packageIdentity,binary,userAgent,mainUI:true,macUI,skin:{facePixels,shirtPixels,capture:skinCapture},nativeMaterial,url:page.url},null,2));ws.close()
  console.log('PASS native macOS '+arch+' packaged app '+version)
 }
 ownedQA.preservingCleanup(async()=>{

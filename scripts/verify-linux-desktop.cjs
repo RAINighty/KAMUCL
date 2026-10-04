@@ -4,6 +4,7 @@ const { execFileSync, spawn } = require('node:child_process')
 const root = path.resolve(__dirname, '..'), arch = process.argv[2], fixture = process.argv.includes('--fixture-smoke'), version = require('../package.json').version
 const proof = path.join(root, 'release/linux-desktop-' + arch + '-' + (fixture ? 'fixture-' : 'native-') + Date.now())
 fs.mkdirSync(proof, { recursive: true })
+fs.mkdirSync(path.join(root, 'out'), { recursive: true })
 const report = { version, arch, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), fixture, nativeDesktop: false, complete: false, steps: [], serviceEvidence: 'Community artwork and account identity use explicit isolated fixtures; no real authentication or community CDN claim', unverifiedRequired: ['real account login and credential restart', 'Minecraft native installation, world load and save', 'LAN and Sakura/Terracotta remote peer', 'AppImage/DEB GUI update installer and rollback', 'native system material by compositor', 'actual slap sound listening', 'independent visual/interaction/motion review'] }
 const save = () => fs.writeFileSync(path.join(proof, 'summary.json'), JSON.stringify(report, null, 2))
 const read = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 15000, maxBuffer: 4 * 1024 * 1024 })
@@ -50,7 +51,12 @@ async function runHarness(theme, module, executable) {
   read('/usr/bin/tar', ['-xzf', archive, '-C', clean])
   const application = path.join(clean, 'KAMUCL'), executable = path.join(application, 'kamucl')
   const metadata = JSON.parse(fs.readFileSync(path.join(application, 'resources/kamucl-linux.json'), 'utf8'))
+  assert.equal(metadata.schemaVersion, 1, 'Unknown Linux package identity schema')
   assert.equal(metadata.version, version); assert.equal(metadata.arch, arch); assert.equal(metadata.installationKind, 'portable-directory')
+  assert.equal(metadata.sourceCommit, report.sourceCommit, 'Embedded source must match this desktop test checkout')
+  const runtime = require('./verify-linux-runtime.cjs').observeLinuxRuntime(executable, arch)
+  assert.equal(metadata.runtimeVersion, runtime.electron, 'Embedded runtime must match the actual executable')
+  report.packageIdentity = { metadata, observedExecutable: runtime }; save()
   const dimensions = read('xdpyinfo', []).match(/dimensions:\s+(\d+)x(\d+)/)
   assert(dimensions); report.display = { display: process.env.DISPLAY, width: Number(dimensions[1]), height: Number(dimensions[2]), sessionType: process.env.XDG_SESSION_TYPE || 'unknown' }
   if (!fixture) {
@@ -66,7 +72,8 @@ async function runHarness(theme, module, executable) {
   for (const theme of themes) for (const module of modules) await runHarness(theme, module, executable)
   report.guiComplete = true; report.nativeDesktop = !fixture
   report.complete = true; report.acceptanceComplete = false
-})().catch(error => { report.error = { message: error.message, name: error.name }; console.error(error); process.exitCode = 1 }).finally(async () => {
+})().catch(error => { report.complete = false; report.error = { message: error.message, name: error.name, code: error.code, syscall: error.syscall }; console.error(error); process.exitCode = 1; save() }).finally(async () => {
+  try {
   if (recorder) {
     try {
       if (!recorder.ledger.closed) recorder.child.stdin.write('q\n')
@@ -81,11 +88,15 @@ async function runHarness(theme, module, executable) {
     finally { fs.closeSync(recordLog) }
   }
   for (const directory of ['out', 'release']) {
-    for (const name of fs.readdirSync(path.join(root, directory))) {
+    const evidenceDirectory = path.join(root, directory)
+    if (!fs.existsSync(evidenceDirectory)) continue
+    for (const name of fs.readdirSync(evidenceDirectory)) {
       if (!/^(appearance-motion-|skin-walk-110-|skin-editor-|skin-118-|gallery-118-|favorites-118-|selection-119-|import-119-|mascot-|kamu-|ui-refinement-|main-inspector-ready-live|qa-owned-process-119-)/.test(name)) continue
       const file = path.join(root, directory, name)
       if (fs.statSync(file).mtimeMs >= fs.statSync(path.join(proof, 'summary.json')).birthtimeMs) fs.cpSync(file, path.join(proof, directory + '-' + name), { recursive: true })
     }
   }
-  report.finishedAt = new Date().toISOString(); save()
+  } catch (error) {
+    report.complete = false; report.finalizationError = { message: error.message, name: error.name, code: error.code, syscall: error.syscall }; console.error(error); process.exitCode = 1
+  } finally { report.finishedAt = new Date().toISOString(); save() }
 })

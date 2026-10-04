@@ -1,4 +1,5 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict')
+const { execFileSync } = require('node:child_process')
 const asar = require('asar')
 const ELECTRON_VERSION = '44.3.0'
 // Verified against both official 44.3.0 Linux ZIPs and their SHASUMS256.txt.
@@ -55,6 +56,29 @@ function verifyLinuxElectronRuntime(root, arch, electronVersion = require('../pa
   return assertLinuxElectronFiles(entries, arch, electronVersion)
 }
 
+function assertObservedLinuxRuntime(raw, arch) {
+  assert(['x64', 'arm64'].includes(arch), 'Unsupported Linux architecture')
+  const identity = JSON.parse(raw)
+  assert.equal(identity.platform, 'linux', 'Packaged executable must report Linux')
+  assert.equal(identity.arch, arch, 'Packaged executable reports another architecture')
+  assert.equal(identity.electron, ELECTRON_VERSION, 'Packaged executable reports another Electron runtime')
+  return identity
+}
+
+function observeLinuxRuntime(executable, arch) {
+  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }; delete env.NODE_OPTIONS
+  const raw = execFileSync(executable, ['-p', 'JSON.stringify({platform:process.platform,arch:process.arch,electron:process.versions.electron})'], { env, encoding: 'utf8', timeout: 15000, maxBuffer: 128 * 1024 })
+  return assertObservedLinuxRuntime(raw, arch)
+}
+
+function linuxSourceCommit() {
+  // A source archive without its Git provenance must not invent a commit.
+  const commit = execFileSync('git', ['-C', path.resolve(__dirname, '..'), 'rev-parse', '--verify', 'HEAD'], { encoding: 'utf8', timeout: 10000 }).trim()
+  assert(/^[a-f0-9]{40}$/.test(commit), 'Linux build requires an exact Git source commit')
+  if (process.env.GITHUB_ACTIONS === 'true') assert.equal(commit, process.env.GITHUB_SHA, 'Checkout does not match the declared workflow source')
+  return commit
+}
+
 function verifyLinuxRuntime(directory, arch = process.arch, kind = 'portable-directory') {
   const root = path.resolve(directory)
   verifyLinuxElectronRuntime(root, arch)
@@ -68,7 +92,8 @@ function verifyLinuxRuntime(directory, arch = process.arch, kind = 'portable-dir
   assert.equal(helperHeader[4], 2); assert.equal(helperHeader[5], 1)
   assert.equal(helperHeader.readUInt16LE(18), arch === 'arm64' ? 183 : 62, 'Wrong window helper architecture')
   assert(fs.lstatSync(helper).mode & 0o111, 'Window helper is not executable')
-  const metadata = { product: 'KAMUCL', platform: 'linux', arch, version: require('../package.json').version, installationKind: kind }
+  const observedRuntime = observeLinuxRuntime(path.join(root, 'kamucl'), arch)
+  const metadata = { schemaVersion: 1, product: 'KAMUCL', platform: 'linux', arch, version: require('../package.json').version, installationKind: kind, sourceCommit: linuxSourceCommit(), runtimeVersion: observedRuntime.electron }
   fs.writeFileSync(path.join(root, 'resources/kamucl-linux.json'), JSON.stringify(metadata, null, 2))
   const archive = path.join(root, 'resources/app.asar'), names = asar.listPackage(archive).map(n => n.replaceAll('\\', '/').replace(/^\//, ''))
   for (const name of names) {
@@ -77,7 +102,7 @@ function verifyLinuxRuntime(directory, arch = process.arch, kind = 'portable-dir
     assert(!/pelican-bicycle|accounts\.json|settings\.json|Downloads|独\.zip/.test(name), 'Private or unrelated data included')
   }
   assert.equal(JSON.parse(asar.extractFile(archive, 'package.json').toString()).version, metadata.version)
-  return { directory: root, arch, kind, version: metadata.version, archiveEntries: names.length, complete: true }
+  return { directory: root, arch, kind, version: metadata.version, sourceCommit: metadata.sourceCommit, runtimeVersion: metadata.runtimeVersion, observedRuntime, archiveEntries: names.length, complete: true }
 }
 module.exports = context => { if (context.electronPlatformName === 'linux') verifyLinuxRuntime(context.appOutDir) }
 module.exports.verifyLinuxRuntime = verifyLinuxRuntime
@@ -86,4 +111,6 @@ module.exports.verifyLinuxElectronRuntime = verifyLinuxElectronRuntime
 module.exports.LINUX_ELECTRON_FILES = LINUX_ELECTRON_FILES
 module.exports.LINUX_ELECTRON_SOURCE_MAP = LINUX_ELECTRON_SOURCE_MAP
 module.exports.ELECTRON_VERSION = ELECTRON_VERSION
+module.exports.assertObservedLinuxRuntime = assertObservedLinuxRuntime
+module.exports.observeLinuxRuntime = observeLinuxRuntime
 if (require.main === module) console.log(JSON.stringify(verifyLinuxRuntime(process.argv[2], process.argv[3])))

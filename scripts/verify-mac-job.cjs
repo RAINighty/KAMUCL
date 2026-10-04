@@ -1,11 +1,12 @@
 // Every native job consumes one exact signed package; no cross-run proof stitching.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict'),crypto=require('node:crypto')
 const {execFileSync}=require('node:child_process')
+const {readMacPackageIdentity}=require('./mac-package-identity.cjs')
 const [group,arch,stage='app']=process.argv.slice(2),pkg=require('../package.json')
 assert.equal(process.platform,'darwin');assert.equal(process.arch,arch)
 assert.equal(process.env.GITHUB_ACTIONS,'true','native job driver requires a disposable runner')
 fs.mkdirSync(path.resolve('out'),{recursive:true})
-assert(['ui','game','startup','tools','update'].includes(group));assert(['app','dmg'].includes(stage))
+assert(['ui','game','startup','tools','update','gpu-diagnostic'].includes(group));assert(['app','dmg'].includes(stage))
 const proof=path.resolve(`release/mac-job-${arch}-${stage}-${group}`);fs.mkdirSync(proof,{recursive:true})
 const receipt={version:pkg.version,arch,stage,group,commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),startedAt:new Date().toISOString(),complete:false,steps:[]}
 const save=()=>fs.writeFileSync(path.join(proof,'job.json'),JSON.stringify(receipt,null,2))
@@ -33,17 +34,18 @@ let mount,attached=false
  }else{
   run('ditto',['-x','-k',`release/KAMUCL-${pkg.version}-mac-${arch}.zip`,clean]);appPath=path.join(clean,'KAMUCL.app')
  }
- run('codesign',['--verify','--deep','--strict',appPath])
- run('lipo',[path.join(appPath,'Contents/MacOS/KAMUCL'),'-verify_arch',arch==='x64'?'x86_64':'arm64'])
- run('lipo',[path.join(appPath,'Contents/Resources/app.asar.unpacked/out/main/MacGameWindow'),'-verify_arch',arch==='x64'?'x86_64':'arm64'])
- assert.equal(await sha(path.join(appPath,'Contents/Resources/app.asar')),manifest.appAsarSHA256)
+ const packageIdentity=readMacPackageIdentity(appPath,{version:pkg.version,arch,sourceCommit:receipt.commit,runtimeVersion:pkg.devDependencies.electron,minimumSystemVersion:manifest.minimum})
+ assert.deepEqual(packageIdentity.identity,manifest.buildIdentity);assert.equal(packageIdentity.identitySHA256,manifest.buildIdentitySHA256)
+ assert.equal(packageIdentity.identity.appAsarSHA256,manifest.appAsarSHA256);receipt.packageIdentity=packageIdentity
  const embedded=JSON.parse(require('asar').extractFile(path.join(appPath,'Contents/Resources/app.asar'),'package.json').toString())
  assert.equal(embedded.version,pkg.version)
  receipt.steps.push('clean native extraction or readonly mounted DMG, executable arch, ad-hoc signature and ASAR bytes verified');receipt.application=appPath;save()
  if(group==='ui')run(process.execPath,['scripts/verify-mac.cjs',appPath,arch,stage],{timeout:29*60*1000})
  else if(group==='game')run(process.execPath,['scripts/verify-mac-game.cjs',appPath,arch],{timeout:28*60*1000})
+ else if(group==='gpu-diagnostic')run(process.execPath,['scripts/verify-mac-gpu-diagnostic.cjs',appPath,arch],{timeout:5*60*1000})
  else await require('./verify-mac-extra.cjs')(appPath,arch,group)
- receipt.steps.push('current native '+group+' checks completed');receipt.complete=true
+ receipt.steps.push(group==='gpu-diagnostic'?'isolated GPU diagnostic completed; no formal acceptance result is changed':'current native '+group+' checks completed');receipt.complete=true
+ if(group==='gpu-diagnostic')receipt.classification='Diagnostic only; not GUI, motion or frame-rate acceptance'
 })().catch(error=>{
  receipt.error={name:error.name,message:error.message,status:error.status??null,signal:error.signal??null};console.error(error);process.exitCode=1
  for(const [name,cmd,args] of [['system.txt','/usr/bin/sw_vers',[]],['graphics.txt','/usr/sbin/system_profiler',['SPDisplaysDataType']]]){

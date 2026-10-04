@@ -6,6 +6,7 @@ import os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
+const { IDENTITY_FILE, createMacIdentity } = require('./mac-package-identity.cjs')
 if (process.platform !== 'darwin') throw new Error('Mac 包必须在对应架构的 macOS 13+ 构建和验证。')
 const args = process.argv.slice(2), packageOnly = args.includes('--package-only')
 if (args.some(arg => arg.startsWith('--') && arg !== '--package-only')) throw new Error('Unknown Mac packaging option')
@@ -21,8 +22,6 @@ run('node', ['scripts/build-bridge.cjs'])
 run('npm', ['run', 'build'])
 run('npx', ['electron-builder', '--mac', 'dir', `--${arch}`, '--publish', 'never'])
 const bundle = `release/mac${arch === 'arm64' ? '-arm64' : ''}/KAMUCL.app`
-run('codesign', ['--force', '--deep', '--sign', '-', bundle])
-run('codesign', ['--verify', '--deep', '--strict', bundle])
 run('lipo', [path.join(bundle, 'Contents/MacOS/KAMUCL'), '-verify_arch', arch === 'x64' ? 'x86_64' : 'arm64'])
 run('lipo', [path.join(bundle, 'Contents/Resources/app.asar.unpacked/out/main/MacGameWindow'), '-verify_arch', arch === 'x64' ? 'x86_64' : 'arm64'])
 const minimum = output('plutil', ['-extract', 'LSMinimumSystemVersion', 'raw', path.join(bundle, 'Contents/Info.plist')])
@@ -30,6 +29,16 @@ if (Number(minimum.split('.')[0]) !== 13) throw new Error('Mac package must adve
 const frameworkVersion = output('plutil', ['-extract', 'CFBundleVersion', 'raw', path.join(bundle, 'Contents/Frameworks/Electron Framework.framework/Resources/Info.plist')])
 if (frameworkVersion !== runtimeVersion) throw new Error('Packaged Electron framework differs from the shared runtime')
 const { version } = pkg
+const sourceCommit = output('git', ['rev-parse', 'HEAD'])
+if (process.env.GITHUB_SHA && process.env.GITHUB_SHA !== sourceCommit) throw new Error('CI checkout differs from the declared build source')
+const appAsarSHA256 = await sha(path.join(bundle, 'Contents/Resources/app.asar'))
+const buildIdentity = createMacIdentity({ version, arch, sourceCommit, runtimeVersion: frameworkVersion, minimumSystemVersion: minimum, appAsarSHA256 })
+const identityFile = path.join(bundle, 'Contents/Resources', IDENTITY_FILE)
+fs.writeFileSync(identityFile, JSON.stringify(buildIdentity, null, 2) + '\n')
+// Embedded provenance is covered by the final Resources signature and both archives.
+run('codesign', ['--force', '--deep', '--sign', '-', bundle])
+run('codesign', ['--verify', '--deep', '--strict', bundle])
+const buildIdentitySHA256 = await sha(identityFile)
 run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', bundle, `release/KAMUCL-${version}-mac-${arch}.zip`])
 const stage=fs.mkdtempSync(path.join(os.tmpdir(),'KAMUCL DMG stage '))
 run('ditto',[bundle,path.join(stage,'KAMUCL.app')]);fs.symlinkSync('/Applications',path.join(stage,'Applications'))
@@ -39,7 +48,7 @@ run('hdiutil',['create','-ov','-volname',`KAMUCL ${arch}`,'-srcfolder',stage,'-f
 const files=[`KAMUCL-${version}-mac-${arch}.zip`,path.basename(dmg)],assets=[]
 for(const file of files)assets.push({name:file,bytes:fs.statSync(path.join('release',file)).size,sha256:await sha(path.join('release',file))})
 fs.writeFileSync(`release/SHA256SUMS-mac-${arch}.txt`,assets.map(file=>`${file.sha256}  ${file.name}`).join('\n')+'\n')
-fs.writeFileSync(`release/mac-package-${arch}.json`,JSON.stringify({version,arch,commit:output('git',['rev-parse','HEAD']),runtimeVersion,frameworkVersion,minimum,signing:'ad-hoc; not Developer ID or notarized',packageIntegrity:true,nativeAcceptance:'separate required native APP/DMG/game/tools/update jobs',appAsarSHA256:await sha(path.join(bundle,'Contents/Resources/app.asar')),assets},null,2))
+fs.writeFileSync(`release/mac-package-${arch}.json`,JSON.stringify({version,arch,commit:sourceCommit,runtimeVersion,frameworkVersion,minimum,signing:'ad-hoc; not Developer ID or notarized',packageIntegrity:true,nativeAcceptance:'separate required native APP/DMG/game/tools/update jobs',appAsarSHA256,buildIdentity,buildIdentitySHA256,assets},null,2))
 if(!packageOnly){
  run('node',['scripts/verify-mac.cjs',bundle,arch,'app'])
  const mount=fs.mkdtempSync(path.join(os.tmpdir(),'KAMUCL DMG mount '))

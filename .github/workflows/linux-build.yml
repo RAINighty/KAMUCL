@@ -51,7 +51,7 @@ jobs:
       - name: Native compiler and package validation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++ libx11-dev squashfs-tools libfuse2t64
+          sudo apt-get install -y g++ libx11-dev squashfs-tools libfuse2t64 libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1 libxtst6 libnotify4 libsecret-1-0
       - run: npm ci
       - run: npm test
       - run: npx tsc --noEmit
@@ -102,7 +102,7 @@ jobs:
       - name: X server and fixture window manager for CI smoke
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox mesa-utils dbus-x11 ffmpeg libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1
+          sudo apt-get install -y xvfb openbox mesa-utils x11-utils dbus-x11 ffmpeg libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1
           # This disposable hosted VM is not a player's desktop. Keep Chromium sandbox enabled.
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

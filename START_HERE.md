@@ -1,14 +1,18 @@
 # START HERE — KAMUCL 1.1.11 接续候选
 
+2026-10-04 08:02（Asia/Hong_Kong）当前快照：第五轮绑定已推送提交 `5167500`，Mac run `37160588297` 和 Linux run `37160588146` 均已结束。Mac 两架构各 857 项为 853 通过、0 失败、4 项既有平台 skip；2 个打包、2 个实际 Demo 游戏和 6 个限定集成任务成功，4 个 APP／DMG UI 任务失败。Linux 两架构各 857 项为 854 通过、0 失败、3 skip，六个三格式包的原生干净解压与包检查通过；三次 Xvfb 预检因缺少 `xdpyinfo` 失败，随后 finalizer 的 `scandir out ENOENT` 遮蔽首错，应用未启动。这是 QA 前置失败，不能算应用失败或桌面通过。
+
+本批已冻结 QA 和包装身份修订，Windows 产品构建输入无变化。Windows 最新全套为 864 项：863 通过、0 失败、1 项 Linux 原生 shell skip，TypeScript 通过；四主题最新 final3 实际 GUI 的可见模型、原帧时间、真实像素变化、焦点及受管壁纸解码断言通过，仍属限定本机回归。Mac／Linux 新内嵌 sourceCommit／runtimeVersion 身份必须在本次提交后的新原生构建中验证，目前尚未重建。本批源码 SHA 和 Delivery 外部回执须在提交后更新，不能给第五轮旧包绑定未来提交。全部平台完整资格仍为 false，视觉／交互／动效评分均为 null；没有 v1.1.11 正式标签或 Release。
+
 2026-10-04 07:04（Asia/Hong_Kong）更新：第四轮候选 `e0b1210` 原生 CI 均结束。Mac `37158774374` 两架构各 855 项为 851 通过、0 失败、4 项既有系统 skip；两个打包及六个限定集成任务成功，4 个 UI 和 2 个游戏任务失败。双架构 ZIP／DMG 已实际生成，Electron 44.3.0、最低 macOS 13、ad-hoc 签名明确记录；不代表完整一致性通过。ARM UI 缺独立输出目录、游戏任务依赖跨任务窗口探针属于 QA 前置问题，已修正。Intel 原截图、30 个无画布样本及三轮 EGL／GPU 错误确认 3D 初始化真实失败，根因仍需原进程诊断。Linux `37158774429` x64 为 852 通过、0 失败、3 skip，三格式实际生成后因 builder 文件名映射失败；ARM64 为 851 通过、1 失败、3 skip，打包跳过。已改为精确命名和私有目录独占发布，取消夹具使用真实未完成传输门控，保留原时间线。最新 Windows 全套 857 项为 856 通过、0 失败、1 项原有 Linux skip；最终 tar 发布调用另经语法及 4 项专项复验。此次产品输入及 Windows 成品未变，QA／Linux 包装变化必须原生重跑。独立修正复核通过，但所有平台完整门控及三项评分仍未完成；没有正式标签或 Release。
 
 2026-10-04 06:30（Asia/Hong_Kong）更新：第三轮 `2b1e6f1` 的 Mac run `37157548139` 与 Linux run `37157548122` 均完整结束为 failure，没有取消或死锁。Mac 两架构各 853 项为 846 通过、3 失败、4 项既有系统限定 skip；失败为测试临时目录别名 `/var` 与产品正确返回的 `/private/var` 规范路径不同。Linux x64 为 850 通过、0 失败、3 skip 后进入生产构建，但旧打包检查要求官方 Electron 44.3.0 已不含的 `libEGL.so`；ARM64 为 849 通过、1 失败、3 skip，合成 Windows classifier 被正确的 ARM 安全规则拒绝。已修正测试根目录和原生库夹具，按两份官方 ZIP／SHA 建立准确的运行时清单，保留 ELF、执行位、ICD、资源和许可检查。Windows 最新全套 855 项为 854 通过、0 失败、1 项原有 Linux skip。此次新增 Linux 打包校验变化，Windows 产品输入和成品未改变；完整原生重跑仍必需，尚无 Mac／Linux 成品、桌面／游戏或独立三项合格结论。原始失败日志及时间保留，不能改称通过。
 
-本包是多平台移植的接续候选，不是 Mac／Linux／鸿蒙完整验收完成或正式发行的声明。Windows 最新 EXE 与两个 ZIP 已完成干净解压及启动验证；第四轮已取得 Mac 双架构 ZIP／DMG 和 Linux x64 三格式候选，尚无当前完整运行验收；Linux ARM64 成品仍待生成。鸿蒙已生成原生 HAP 接续工程，但缺少官方 SDK、合法签名条件和实机，尚未生成 HAP 或验证游戏。以 CURRENT_STATUS.md、docs/RELEASE-1.1.11.md 和 docs/validation-1.1.11/independent-review.md 为当前权威状态；下方旧版本说明只用于追溯。
+本包是多平台移植的接续候选，不是 Mac／Linux／鸿蒙完整验收完成或正式发行的声明。Windows 最新 EXE 与两个 ZIP 已完成干净解压及启动验证；第五轮已取得 Mac 双架构 ZIP／DMG 和 Linux 双架构三格式候选，原生包完整性结果及十个成品 SHA 已留存；四个 Mac UI 和三个 Linux QA 预检失败，尚无当前完整运行验收。新包装身份修订待重新构建。鸿蒙已生成原生 HAP 接续工程，但缺少官方 SDK、合法签名条件和实机，尚未生成 HAP 或验证游戏。以 CURRENT_STATUS.md、docs/RELEASE-1.1.11.md 和 docs/validation-1.1.11/independent-review.md 为当前权威状态；下方旧版本说明只用于追溯。
 
 Windows x64 使用 _handoff/artifacts/KAMUCL-1.1.11.exe，或解压紧凑 ZIP；无法使用自解压包装器时解压 windows-x64-unpacked ZIP。各附件 SHA256 在 CURRENT_STATUS.md；交接包逐文件清单在 _handoff/manifest.json 与 _handoff/SHA256SUMS.txt。账户、游戏、用户图片、私钥和未提交的 pelican-bicycle.html 不包含在内，接收者自行选择自己的游戏目录和登录。
 
-源码需要 Node.js 22+、npm、Git、完整 JDK 17+。依次运行 npm ci、node scripts/build-bridge.cjs、npx tsc --noEmit、npm test、npm run license:check、npm run build。Mac／Linux 共同 Electron 基线为 44.3.0，必须在对应原生架构上构建；Mac 最低 macOS 13，Linux 目标 Ubuntu 24.04／26.04 LTS。Mac 打包入口 node scripts/pack-mac.mjs <arm64|x64> --package-only；Linux 入口 node scripts/pack-linux.cjs <arm64|x64>。只构建不构成原生功能或一致性通过，详细验收清单见 docs/validation-1.1.11/parity-matrix.json。Mac 当前为 ad-hoc 签名，不是 Developer ID 签名或公证。
+当前 Mac／Linux 接续构建使用 Node.js 24、npm、Git、完整 JDK 17+；Windows 源码最低需要 Node.js 22+。依次运行 npm ci、node scripts/build-bridge.cjs、npx tsc --noEmit、npm test、npm run license:check、npm run build。Mac／Linux 共同 Electron 基线为 44.3.0，必须在对应原生架构上构建；Mac 最低 macOS 13，Linux 目标 Ubuntu 24.04／26.04 LTS。Mac 打包入口 node scripts/pack-mac.mjs <arm64|x64> --package-only；Linux 入口 node scripts/pack-linux.cjs <arm64|x64>。只构建不构成原生功能或一致性通过，详细验收清单见 docs/validation-1.1.11/parity-matrix.json。Mac 当前为 ad-hoc 签名，不是 Developer ID 签名或公证。
 
 鸿蒙入口 npm run prepare:harmonyos、npm run verify:harmonyos、npm run dist:harmonyos；固定运行时、工程来源及缺失条件见 docs/HARMONYOS.md。不可用 SDK／签名／设备条件会报错，界面资源一致性不等于 JVM／LWJGL／游戏启动链通过。
 

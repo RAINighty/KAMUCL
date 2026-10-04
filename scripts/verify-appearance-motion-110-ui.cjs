@@ -47,18 +47,84 @@ module.exports=async({call,evaluate,main,nav,wait,screenshot,recordScreencast,ve
   await main('testElectron.BrowserWindow.getAllWindows()[0].restore();testElectron.BrowserWindow.getAllWindows()[0].focus()')
   await ready("window.kamucl.invoke('window:visibility')",'native restore');const restoreA=await pose();await wait(400);assert((await pose()).seconds>restoreA.seconds)
   proof.checks.push('OS reduced mode neutral stance, correct settings explanation, no hidden animation, restore resumes')
+  proof.walkCapture={classification:'actual naturally walking model, visibly in the viewport; no extra animation or interpolated frames',nativeWindow:await main("(()=>{const w=testElectron.BrowserWindow.getAllWindows()[0];if(process.platform==='darwin')testElectron.app.focus({steal:true});w.show();w.focus();return{platform:process.platform,visible:w.isVisible(),focused:w.isFocused(),minimized:w.isMinimized(),appHideCapability:typeof testElectron.app.isHidden==='function',appHidden:typeof testElectron.app.isHidden==='function'?testElectron.app.isHidden():null}})()")};save()
+  proof.walkCapture.focusSamples=[]
+  for(let i=0;i<100;i++){
+    const observed=await main("(()=>{const w=testElectron.BrowserWindow.getAllWindows()[0];return{visible:w.isVisible(),focused:w.isFocused(),minimized:w.isMinimized(),appHidden:typeof testElectron.app.isHidden==='function'?testElectron.app.isHidden():null}})()")
+    proof.walkCapture.focusSamples.push({observedAt:new Date().toISOString(),...observed});proof.walkCapture.nativeWindow={...proof.walkCapture.nativeWindow,...observed};save()
+    if(observed.visible&&observed.focused&&!observed.minimized&&!observed.appHidden)break
+    await wait(100)
+  }
+  assert(proof.walkCapture.nativeWindow.visible&&proof.walkCapture.nativeWindow.focused&&!proof.walkCapture.nativeWindow.minimized&&!proof.walkCapture.nativeWindow.appHidden,'walking capture requires observed native focus, not merely a request to focus')
+  await ready("!document.hidden&&window.kamucl.invoke('window:visibility')",'walking capture actual native visibility')
+  await evaluate("document.querySelector('.viewer3d').scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})");await wait(280)
+  proof.walkCapture.bounds=await evaluate("(()=>{const e=document.querySelector('.viewer3d canvas'),r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2),gl=e.getContext('webgl2')||e.getContext('webgl');return{x:r.x,y:r.y,width:r.width,height:r.height,viewportWidth:innerWidth,viewportHeight:innerHeight,hitVisible:hit===e,contextWebGL:gl?{type:gl.constructor.name,lost:gl.isContextLost()}:null}})()");save()
+  const bounds=proof.walkCapture.bounds
+  assert(bounds.contextWebGL&&!bounds.contextWebGL.lost,'walking capture must use the actual live WebGL context')
+  assert(bounds.hitVisible&&bounds.width>0&&bounds.height>0&&bounds.x>=0&&bounds.y>=0&&bounds.x+bounds.width<=bounds.viewportWidth&&bounds.y+bounds.height<=bounds.viewportHeight,'actual walking canvas must be fully visible, not below the home-page fold')
   const recording=await recordScreencast('skin-walk-110',async()=>{},1400);proof.recording=recording;save()
+  assert(recording.frames.every((frame,index)=>Number.isFinite(frame.timestamp)&&(index===0||frame.timestamp>recording.frames[index-1].timestamp)),'original compositor timestamps must be finite and strictly increasing')
+  const originalElapsed=recording.frames.length>1?recording.frames.at(-1).timestamp-recording.frames[0].timestamp:0
+  const originalIntervals=recording.frames.slice(1).map((frame,index)=>frame.timestamp-recording.frames[index].timestamp)
+  const originalFps=originalElapsed?(recording.frames.length-1)/originalElapsed:0
+  assert.equal(recording.elapsed,originalElapsed);assert.equal(recording.fps,originalFps);assert.deepEqual(recording.intervals,originalIntervals)
+  proof.walkCapture.originalTiming={elapsed:originalElapsed,fps:originalFps,frameCount:recording.frames.length,strictlyIncreasing:true};save()
+  assert(recording.frames.length>=10&&recording.fps>=30,'original visible skin-walk capture must meet the existing 30 FPS release minimum')
+  const sharp=require('sharp'),pixelSamples=[]
+  for(const index of [...new Set([0,Math.floor(recording.frames.length/3),Math.floor(recording.frames.length*2/3),recording.frames.length-1])]){
+    const image=sharp(path.join(recording.directory,recording.frames[index].file)),size=await image.metadata(),sx=size.width/bounds.viewportWidth,sy=size.height/bounds.viewportHeight
+    const left=Math.max(0,Math.floor(bounds.x*sx)),top=Math.max(0,Math.floor(bounds.y*sy)),width=Math.min(size.width-left,Math.floor(bounds.width*sx)),height=Math.min(size.height-top,Math.floor(bounds.height*sy))
+    assert(width>0&&height>0)
+    const pixels=await image.extract({left,top,width,height}).removeAlpha().raw().toBuffer();pixelSamples.push({index,pixels,left,top,width,height})
+  }
+  const reference=pixelSamples[0],changes=pixelSamples.slice(1).map(sample=>{assert.equal(sample.pixels.length,reference.pixels.length);let changed=0;for(let i=0;i<sample.pixels.length;i+=3)if(Math.max(Math.abs(sample.pixels[i]-reference.pixels[i]),Math.abs(sample.pixels[i+1]-reference.pixels[i+1]),Math.abs(sample.pixels[i+2]-reference.pixels[i+2]))>12)changed++;return{index:sample.index,changedPixels:changed,fraction:changed/(sample.width*sample.height)}})
+  proof.walkCapture.pixelChanges={classification:'decoded original visible-canvas ROI; JPEG compression noise under12 ignored; frames and times unchanged',samples:pixelSamples.map(({pixels,...sample})=>sample),changes};save()
+  assert(changes.some(sample=>sample.fraction>.005),'natural walking must change pixels in the actual visible canvas')
   // The true OS/native splash preference is checked separately without changing system settings.
   const shell=await evaluate("({surface:getComputedStyle(document.documentElement).getPropertyValue('--shell-surface'),sidebar:getComputedStyle(document.documentElement).getPropertyValue('--bg-2')})")
   if(proof.theme==='transparent'){assert(shell.surface.includes('30%'));assert(shell.sidebar.includes('26%'))}
   proof.shell=shell
-  const wallpaper=path.join(profile,'appearance','backgrounds','qa-wallpaper.png')
+  const nativeUserData=await main("testElectron.app.getPath('userData')")
+  const profileStat=fs.statSync(profile),nativeStat=fs.statSync(nativeUserData)
+  const canonicalProfile=fs.realpathSync(profile),canonicalUserData=fs.realpathSync(nativeUserData)
+  proof.background={fixtureIdentity:{profile,nativeUserData,canonicalProfile,canonicalUserData,profileFileId:{dev:profileStat.dev,ino:profileStat.ino},nativeFileId:{dev:nativeStat.dev,ino:nativeStat.ino}},readinessSamples:[]};save()
+  assert.equal(canonicalProfile,canonicalUserData,'wallpaper fixture must belong to the actual isolated application profile')
+  assert.equal(profileStat.dev,nativeStat.dev);assert.equal(profileStat.ino,nativeStat.ino)
+  // Use the actual managed directory returned by this main process. On macOS
+  // /var and /private/var can name the same directory while the deliberately
+  // lexical image admission rule correctly rejects the non-managed alias.
+  const wallpaper=path.join(nativeUserData,'appearance','backgrounds','qa-wallpaper.png')
   fs.mkdirSync(path.dirname(wallpaper),{recursive:true})
   await require('sharp')(Buffer.from('<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg"><rect width="800" height="600" fill="#c43a9a"/><circle cx="400" cy="300" r="240" fill="#2d8bb0"/></svg>')).png().toFile(wallpaper)
-  await evaluate(`window.kamucl.invoke('settings:set',{background:{mode:'image',image:${JSON.stringify(wallpaper)},opacity:.7,blur:12,fit:'crop'}})`)
-  await call('Page.reload');await wait(2000)
-  proof.background=await evaluate("({style:document.querySelector('.app-bg')?.getAttribute('style')})")
+  const patch=image=>`window.kamucl.invoke('settings:set',{background:{mode:'image',image:${JSON.stringify(image)},opacity:.7,blur:12,fit:'crop'}}).then(s=>s.background)`
+  const alias=path.join(profile,'appearance','backgrounds','qa-wallpaper.png')
+  if(alias!==wallpaper){
+    const aliasStat=fs.statSync(alias),actualStat=fs.statSync(wallpaper)
+    assert.equal(aliasStat.dev,actualStat.dev);assert.equal(aliasStat.ino,actualStat.ino)
+    proof.background.aliasObservation={classification:'diagnostic of the original fixture alias; not a product success assertion',path:alias,canonical:fs.realpathSync(alias),set:await evaluate(patch(alias)),get:await evaluate("window.kamucl.invoke('settings:get').then(s=>s.background)")};save()
+  }
+  proof.background.set=await evaluate(patch(wallpaper))
+  proof.background.get=await evaluate("window.kamucl.invoke('settings:get').then(s=>s.background)");save()
+  assert.equal(proof.background.get.mode,'image');assert.equal(fs.realpathSync(proof.background.get.image),fs.realpathSync(wallpaper))
+  const previousTimeOrigin=await evaluate('performance.timeOrigin'),reloadStarted=performance.now()
+  await call('Page.reload')
+  // Observe a new document and the real style within the original two-second
+  // budget, instead of treating a fixed sleep as proof of image readiness.
+  do{
+    try{
+      const sample=await evaluate("(()=>{const e=document.querySelector('.app-bg');return{timeOrigin:performance.timeOrigin,readyState:document.readyState,style:e?.getAttribute('style'),computed:e?getComputedStyle(e).backgroundImage:null}})()")
+      proof.background.readinessSamples.push({elapsedMs:performance.now()-reloadStarted,...sample});save()
+      if(sample.timeOrigin!==previousTimeOrigin&&sample.readyState==='complete'&&sample.style?.includes('qa-wallpaper.png')){proof.background.style=sample.style;proof.background.computed=sample.computed;break}
+    }catch(error){
+      if(!/Execution context was destroyed|Cannot find context with specified id/i.test(error.message))throw error
+      proof.background.readinessSamples.push({elapsedMs:performance.now()-reloadStarted,navigationContextError:error.message});save()
+    }
+    await wait(Math.max(0,Math.min(100,2000-(performance.now()-reloadStarted))))
+  }while(performance.now()-reloadStarted<2000)
   assert(proof.background.style?.includes('qa-wallpaper.png'),'validated managed wallpaper is actually present')
+  const decodeBudget=Math.max(1,2000-(performance.now()-reloadStarted))
+  proof.background.imageDecode=await evaluate(`new Promise(resolve=>{const css=${JSON.stringify(proof.background.computed)},image=new Image();let timer;const finish=loaded=>{clearTimeout(timer);resolve({loaded,naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight,src:image.src})};timer=setTimeout(()=>finish(false),${decodeBudget});image.onload=()=>finish(true);image.onerror=()=>finish(false);image.src=css.startsWith('url(')?css.slice(4,-1).trim().replace(/^["']|["']$/g,''):''})`);save()
+  assert(proof.background.imageDecode.loaded&&proof.background.imageDecode.naturalWidth>0,'actual managed background image must decode')
   await screenshot('110-wallpaper-glass-home')
   await nav('settings');await evaluate("document.querySelector('[data-section=thumbnail]').open=true")
   await coordinateClick('[aria-label="随机播放启动卡图片"]')

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 
-const { assertLinuxElectronFiles, LINUX_ELECTRON_FILES } = createRequire(path.resolve('package.json'))('./scripts/verify-linux-runtime.cjs')
+const { assertLinuxElectronFiles, LINUX_ELECTRON_FILES, assertObservedLinuxRuntime } = createRequire(path.resolve('package.json'))('./scripts/verify-linux-runtime.cjs')
 function fixture(arch: 'x64' | 'arm64') {
   const header = Buffer.alloc(64)
   header.write('\x7fELF', 'binary'); header[4] = 2; header[5] = 1; header.writeUInt16LE(arch === 'arm64' ? 183 : 62, 18)
@@ -49,4 +49,11 @@ test('Linux Vulkan ICD cannot escape or select an unbundled graphics library', (
     files['vk_swiftshader_icd.json'].data = Buffer.from(JSON.stringify({ file_format_version: '1.0.0', ICD: { library_path: target, api_version: '1.0.5' } }))
     assert.throws(() => assertLinuxElectronFiles(files, 'x64', '44.3.0'), /bundled library/)
   }
+})
+
+test('Linux package runtime identity rejects mismatched or missing actual executable observations', () => {
+  // Parsed process output fixtures exercise rejection; they are not native runs.
+  assert.deepEqual(assertObservedLinuxRuntime('{"platform":"linux","arch":"arm64","electron":"44.3.0"}', 'arm64'), { platform: 'linux', arch: 'arm64', electron: '44.3.0' })
+  for (const raw of ['{"platform":"win32","arch":"arm64","electron":"44.3.0"}', '{"platform":"linux","arch":"x64","electron":"44.3.0"}', '{"platform":"linux","arch":"arm64","electron":"43.0.0"}', '{"platform":"linux","arch":"arm64"}', 'not executable JSON']) assert.throws(() => assertObservedLinuxRuntime(raw, 'arm64'))
+  assert.throws(() => assertObservedLinuxRuntime('{"platform":"linux","arch":"ia32","electron":"44.3.0"}', 'ia32'), /Unsupported Linux architecture/)
 })
