@@ -5,15 +5,18 @@ if (process.argv[2]) {
 }
 const fs=require('fs'),path=require('path'),os=require('os'),net=require('net'),assert=require('assert/strict'),{spawn}=require('child_process');
 const ownedQA=require('./qa-owned-process-119.cjs'),{randomUUID}=require('node:crypto');
-const version=require('../package.json').version,root=fs.mkdtempSync(path.join(os.tmpdir(),'KAMUCL EXE GUI 中文 ')),profile=path.join(root,'profile'),games=path.join(root,'games');
+const macParity=process.env.KAMUCL_UI_MODULE==='mac-parity',parityPhase=process.env.KAMUCL_PARITY_PHASE;
+const version=require('../package.json').version,root=macParity?require('./verify-mac-parity.cjs').parityRoot(process.env):fs.mkdtempSync(path.join(os.tmpdir(),'KAMUCL EXE GUI 中文 ')),profile=path.join(root,'profile'),games=path.join(root,'games'),other=path.join(root,'second-games');
+if(!macParity||parityPhase==='first'){
 fs.mkdirSync(profile);fs.mkdirSync(games);fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({gameDir:games,activeFolder:games,folders:[{path:games,name:'独立验证目录',isDefault:true}],autoUpdate:false,theme:process.env.KAMUCL_TEST_THEME || 'black-orange'}));
 const fixtureDir=path.join(games,'versions','联机验证实例');fs.mkdirSync(fixtureDir,{recursive:true});fs.writeFileSync(path.join(fixtureDir,'联机验证实例.json'),JSON.stringify({id:'联机验证实例',_mcVersion:'1.20.1',_loader:'fabric',_gameDir:true,mainClass:'net.fabricmc.loader.impl.launch.knot.KnotClient',libraries:[]}));fs.writeFileSync(path.join(fixtureDir,'联机验证实例.jar'),'fixture-only-no-launch');
 fs.writeFileSync(path.join(profile,'servers.json'),JSON.stringify([{id:'one',name:'普通服务器',address:'127.0.0.1:9',versionId:'联机验证实例',folder:games},{id:'two',name:'我收藏的服务器',address:'127.0.0.1:10',versionId:'联机验证实例',folder:games}]));
-const other=path.join(root,'second-games');fs.mkdirSync(other);
+fs.mkdirSync(other);
 const settings=JSON.parse(fs.readFileSync(path.join(profile,'settings.json')));settings.folders.push({path:other,name:'整合包收藏',isDefault:false});if(settings.theme==='custom')settings.custom={colors:{bg:'#171520',card:'#242232',accent:'#8759cd',text:'#f6f2ff',textDim:'#bcb7cc',border:'#4a455c',sidebarBg:'#201d2b',sidebarText:'#e5dff2',bannerText:'#ffffff'}};fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify(settings));
 for(const [i,name] of ['26.3 Fabric 生存世界','Mecha Craftaleon 客户端 v10 — 超长名称完整显示测试与更多文字','1.21.11 Forge','26.2 NeoForge','原版建筑存档','旧版测试实例'].entries()) { const folder=i<3?games:other,dir=path.join(folder,'versions',name);fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,name+'.json'),JSON.stringify({id:name,_mcVersion:i===0?'26.3':'1.21.11',_loader:['fabric','fabric','forge','neoforge',undefined,undefined][i],_loaderVersion:i===3?'26.2.1':'0.19.5',mainClass:'net.minecraft.client.main.Main',libraries:[]}));fs.writeFileSync(path.join(dir,name+'.jar'),'fixture-not-launched');}
 for(const folder of [games,other])for(const id of fs.readdirSync(path.join(folder,'versions'))){
   for(const rel of ['mods','resourcepacks','shaderpacks']){const dir=path.join(folder,'versions',id,rel);fs.mkdirSync(dir,{recursive:true});for(const name of ['Fabric API','Long display name for a resource with several words and 中文名称','Replay recording tools']){const zip=new(require('adm-zip'))();zip.addFile('fabric.mod.json',Buffer.from(JSON.stringify({schemaVersion:1,id:name.replace(/[^a-z]/gi,'').toLowerCase(),version:'1.0.0',name})));zip.addFile('pack.mcmeta',Buffer.from(JSON.stringify({pack:{pack_format:15,description:name}})));zip.writeZip(path.join(dir,name+(rel==='mods'?'.jar':'.zip')))}}
+}
 }
 const exe=process.env.KAMUCL_GUI_APP||path.join(root,`KAMUCL-${version}.exe`);if(!process.env.KAMUCL_GUI_DEV&&!process.env.KAMUCL_GUI_APP)fs.copyFileSync(`release/KAMUCL-${version}.exe`,exe);
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -35,8 +38,8 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   const call=(method,params={})=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>{pending.delete(n);reject(Error(method+' timed out: '+(params.expression||'').slice(0,180)))},12000);pending.set(n,m=>{clearTimeout(t);pending.delete(n);m.error?reject(Error(JSON.stringify(m.error))):resolve(m.result)});ws.send(JSON.stringify({id:n,method,params}))});
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value};
   await call('Runtime.enable');await call('Emulation.setFocusEmulationEnabled',{enabled:true});await call('Page.bringToFront');
-  let text='';for(let i=0;i<30;i++){text=await evaluate("document.body?.innerText || ''");if(text?.includes(version)&&text.includes('开始游戏')&&await evaluate("!!document.querySelector('.viewer3d canvas')"))break;await wait(1000)}
-  assert(text.includes(version)&&text.includes('开始游戏'));assert(await evaluate("!!document.querySelector('.viewer3d canvas')"),'skin canvas missing');await wait(6500);
+  let text='';for(let i=0;i<30;i++){text=await evaluate("document.body?.innerText || ''");if(text?.includes(version)&&text.includes('开始游戏')&&(macParity||await evaluate("!!document.querySelector('.viewer3d canvas')")))break;await wait(1000)}
+  assert(text.includes(version)&&text.includes('开始游戏'));if(!macParity)assert(await evaluate("!!document.querySelector('.viewer3d canvas')"),'skin canvas missing');await wait(6500);
 
   const mainReadiness={port:mainPort,maximumMs:6000,samples:[]},mainStarted=Date.now();let mainPage;
   while(Date.now()-mainStarted<mainReadiness.maximumMs){
@@ -50,8 +53,11 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
 
   const shotDir=path.resolve('release/ui-refinement-'+(process.env.KAMUCL_TEST_THEME||'black-orange'));fs.mkdirSync(shotDir,{recursive:true});
   fs.writeFileSync('out/ui-live.json',JSON.stringify({root,port,mainPort,pid:child.pid,shotDir}));
+  if(macParity)await main("globalThis.testElectron=process.mainModule.require('electron')");
+  else{
   const skinFixture = await evaluate("(()=>{const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');g.fillStyle='#49a595';g.fillRect(0,0,64,64);g.fillStyle='#a07856';g.fillRect(8,8,8,8);return c.toDataURL()})()");
   await main(`globalThis.testElectron=process.mainModule.require('electron');globalThis.uiSkin=${JSON.stringify(skinFixture)};globalThis.uiAccount={id:'ui-fixture',type:'microsoft',username:'界面验证账户',uuid:'00000000000000000000000000000001'};for(const [channel,handler] of [['accounts:selected',()=>uiAccount],['accounts:list',()=>[uiAccount]],['skin:profile',()=>({username:uiAccount.username,skins:[{id:'fixture',variant:'classic',dataUrl:uiSkin,url:''}],capes:[]})],['skin:history',()=>[]],['skin:avatar',()=>uiSkin]]){testElectron.ipcMain.removeHandler(channel);testElectron.ipcMain.handle(channel,handler)}`);
+  }
   await call('Page.reload'); await wait(2200);
   if(process.platform==='darwin'){
     // CDP focus emulation does not activate NSApp. The disposable native QA
@@ -105,11 +111,12 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
     if(selectedModule==='native-recorder')await require('./verify-kamu-native-recorder-119.cjs')(harness);
     if(selectedModule==='native-video')await require('./verify-kamu-native-video-119.cjs')(harness);
     if(selectedModule==='native-compositor')await require('./verify-kamu-native-compositor-119.cjs')(harness);
+    if(selectedModule==='mac-parity')await require('./verify-mac-parity-ui.cjs')({...harness,phase:parityPhase});
     if(capabilities.singleLogo&&selectedModule==='feedback-scale')await require('./verify-kamu-feedback-scale-119-ui.cjs')(harness);
     // Run the unchanged motion gate before longer editing fixtures, so a native
     // failure yields render diagnostics without an unrelated earlier UI race.
     const modules=[['header','verify-mascot-header-ui.cjs'],['skin118','verify-skin-editor-ui.cjs'],['palette','verify-skin-palette-ui.cjs'],['gallery','verify-gallery-favorites-ui.cjs'],['gallery118','verify-gallery-favorites-118-ui.cjs'],...(capabilities.importRouting?[['import119','verify-import-routing-119-ui.cjs']]:[]),...(capabilities.themedSelection?[['selection119','verify-selection-ui-119.cjs']]:[])];
-    const knownModules=new Set([...modules.map(([id])=>id),'ux110','motion119','native-trace','native-recorder','native-video','native-compositor','feedback-scale']);
+    const knownModules=new Set([...modules.map(([id])=>id),'ux110','motion119','native-trace','native-recorder','native-video','native-compositor','feedback-scale','mac-parity']);
     if(selectedModule&&!knownModules.has(selectedModule))throw Error('Unknown required UI module: '+selectedModule);
     for(const [id,file] of modules){
       if(!selectedModule||selectedModule===id){

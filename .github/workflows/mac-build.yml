@@ -91,6 +91,41 @@ jobs:
             release/mac-proof-*
             release/mac-job-*
           if-no-files-found: error
+  parity:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-packages-${{ matrix.arch }}
+          path: release
+      - name: Enable desktop material in disposable native session
+        run: defaults write com.apple.universalaccess reduceTransparency -bool false
+      - name: Full navigation coordinates, offline persistence, queue limit and real public MOD install
+        run: node scripts/verify-mac-job.cjs parity ${{ matrix.arch }} app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-parity-${{ matrix.arch }}-app
+          path: |
+            release/mac-parity-proof-*
+            release/mac-job-*
+          if-no-files-found: error
   game:
     needs: package
     strategy:

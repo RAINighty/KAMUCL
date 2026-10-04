@@ -4,6 +4,7 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const JSON5 = require('json5')
 const { root, integration, output, project, digest, files } = require('./prepare-harmonyos.cjs')
+const { sourceHashes } = require('./harmony-native-adaptations.cjs')
 
 function assert(condition, message) { if (!condition) throw new Error(message) }
 const readJson = async file => JSON5.parse(await fs.readFile(file, 'utf8'))
@@ -41,6 +42,22 @@ async function verify() {
   const sourceStage = await fs.readFile(path.join(project, 'web_engine/src/main/ets/application/WebAbilityStage.ets'), 'utf8')
   assert(sourceWindow.includes('XComponent') && sourceWindow.includes('libraryname: "adapter"') && sourceWindow.includes('runBrowser'), 'Native maintainer surface adapter missing')
   assert(sourceStage.includes('kGetLastActiveWidget') && sourceStage.includes('instanceKey'), 'Maintainer focus handover route missing')
+  const adaptations = await readJson(path.join(output, 'native-adaptation-evidence.json'))
+  assert(adaptations.runtime === lock.electronVersion, 'Native adaptations belong to another runtime')
+  const requiredAdaptations = Object.keys(sourceHashes).map(file => 'web_engine/src/main/ets/' + file).sort()
+  assert(JSON.stringify(adaptations.changes.map(change => change.path).sort()) === JSON.stringify(requiredAdaptations), 'Native adaptation list is incomplete or duplicated')
+  for (const change of adaptations.changes) {
+    assert(change.originalSHA256 === sourceHashes[change.path.slice('web_engine/src/main/ets/'.length)], 'Native adaptation uses an unreviewed template')
+    assert(digest(await fs.readFile(path.join(project, change.path))) === change.adaptedSHA256, `Native adaptation changed after preparation: ${change.path}`)
+  }
+  assert(sourceStage.includes('PrepareTermination.CANCEL') && sourceStage.includes('if (GlobalThisHelper.isTerminationApproved())'), 'Native termination bypasses the product close state machine')
+  const sourceLifecycle = await fs.readFile(path.join(project, 'web_engine/src/main/ets/adapter/AppLifecycleAdapter.ets'), 'utf8')
+  assert(sourceLifecycle.includes('GlobalThisHelper.confirmTermination()'), 'Completed Electron quit cannot finish native termination')
+  assert(sourceStage.includes('this.bindingsReady = true') && sourceStage.includes('this.dispatchPendingTermination()'), 'Early close intention is not replayed after native bindings become ready')
+  assert(sourceStage.includes('GlobalThisHelper.isBrowserReady()') && sourceLifecycle.includes('GlobalThisHelper.markBrowserReady()'), 'Close readiness substitutes bindings for actual native Browser startup')
+  const sourceDialog = await fs.readFile(path.join(project, 'web_engine/src/main/ets/adapter/DialogAdapter.ets'), 'utf8')
+  assert(sourceDialog.includes('await Inject.get(PermissionManagerAdapter).persistGrantedDirectories(directories)'), 'Standard Electron directory dialog bypasses persistent permission handling')
+  checks.push({ name: 'native-close-and-directory-source-adaptations', files: adaptations.changes.length, passed: true, scope: adaptations.scope })
   checks.push({ name: 'native-surface-source-present', passed: true, scope: 'Source inspection only, not ArkTS compilation or device execution.' })
   for (const lib of lock.libraries) {
     const binary = await fs.readFile(path.join(project, 'electron/libs/arm64-v8a', lib.name))
@@ -49,7 +66,7 @@ async function verify() {
   }
   checks.push({ name: 'maintainer-library-integrity-and-architecture', libraries: lock.libraries.length, passed: true })
   const projectFiles = await files(project)
-  const privateNames = /(?:^|[\\/])(?:settings\.json|accounts\.json|launcher-current\.log|favorites\.json|pelican-bicycle\.html|local\.properties)$|\.(?:p12|pfx|p7b|cer|key|pem|exe|dll|node|dylib)$/i
+  const privateNames = /(?:^|[\\/])(?:settings\.json|accounts\.json|launcher-current\.log|favorites\.json|pelican-bicycle\.html|local\.properties|MacGameWindow|LinuxGameWindow)$|\.(?:p12|pfx|p7b|cer|key|pem|exe|dll|node|dylib)$/i
   assert(!projectFiles.some(file => privateNames.test(file)), 'User data, credentials or a foreign executable entered the native project')
   assert(!projectFiles.some(file => /[\\/]node_modules[\\/]koffi[\\/]/.test(file)), 'Foreign native ffi dependency was packaged')
   for (const file of projectFiles) if (/\.(?:json5|properties)$/.test(file)) {

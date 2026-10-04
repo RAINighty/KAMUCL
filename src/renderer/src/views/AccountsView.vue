@@ -23,6 +23,12 @@ import {
 import { refreshAccounts, store, toast } from '../store'
 import Avatar from '../components/Avatar.vue'
 const credentialNotice = ref('')
+const credentialsPersistent = ref<boolean | null>(null)
+const securityNote = computed(() => {
+  const password = '密码只用于本次认证请求，不会保存。'
+  if (credentialsPersistent.value === true) return password + '登录令牌由当前系统的安全存储加密保存。'
+  return password + (credentialNotice.value || '正在检查当前系统的安全存储状态。')
+})
 import type {
   Account,
   MsDeviceCodeInfo,
@@ -320,7 +326,10 @@ function accountTypeLabel(account: Account): string {
 }
 
 onMounted(() => {
-  void getSystemInfo().then(info => { credentialNotice.value = info.credentialStorage?.message ?? '' }).catch(() => {})
+  void getSystemInfo().then(info => {
+    credentialsPersistent.value = info.credentialStorage?.persistent ?? null
+    credentialNotice.value = info.credentialStorage?.message ?? '无法确认当前系统的安全存储状态。'
+  }).catch(() => { credentialNotice.value = '无法获取当前系统的安全存储状态。' })
   void loadProviders()
   store.yggdrasilImportHandler = openProviderImport
   if (store.pendingYggdrasilImport) {
@@ -513,7 +522,7 @@ async function onRemove(acc: Account) {
             {{ yggLogin.busy ? '正在认证…' : '登录' }}
           </button>
         </div>
-        <p class="security-note">密码只用于本次认证请求，不会保存；令牌由 Windows 安全存储加密。</p>
+        <p class="security-note">{{ securityNote }}</p>
       </div>
     </div>
 

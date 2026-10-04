@@ -32,7 +32,7 @@ let previousPose:number[]|undefined
 const writtenStyles=new WeakMap<Element,Map<string,string>>(),writtenData=new Map<string,string>()
 function style(element:HTMLElement|SVGElement|undefined,key:string,value:string){if(!element)return;let values=writtenStyles.get(element);if(!values){values=new Map();writtenStyles.set(element,values)}if(values.get(key)===value)return;element.style.setProperty(key,value);values.set(key,value)}
 function data(key:string,value:string){if(!host.value||writtenData.get(key)===value)return;host.value.dataset[key]=value;writtenData.set(key,value)}
-let disposed=false,activated=0,lastContact=-1000,contactsTotal=0,reported=false
+let disposed=false,activated=0,lastContact=-1000,contactsTotal=0,reported=false,acceptedClicks=0,rejectedClicks=0
 const frameDriver=new MascotFrameDriver(render,{now:()=>performance.now(),requestAnimationFrame:callback=>requestAnimationFrame(callback),cancelAnimationFrame:id=>cancelAnimationFrame(id),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:id=>clearTimeout(id)})
 let cancelImage:undefined|(()=>void)
 let gpuContext:WebGL2RenderingContext|undefined,gpuFence:WebGLSync|undefined,gpuFrame=0,gpuStarted=0,gpuDeadline:ReturnType<typeof setTimeout>|undefined
@@ -92,7 +92,7 @@ async function flush(){const wasClosing=closing.value;closing.value=true;try{awa
 async function closeStage(){if(closing.value)return;closing.value=true;try{await flush();emit('close')}catch(error){toast('互动次数尚未保存：'+errText(error),'error')}finally{closing.value=false}}
 async function closeWindow(quit=false){if(closing.value)return;closing.value=true;try{await flush();window.kamucl.send(quit?'window:mascotQuit':'window:close')}catch(error){toast('互动次数尚未保存，关闭已暂停：'+errText(error),'error')}finally{closing.value=false}}
 const unsubscribe=window.kamucl.on('window:mascotClose',payload=>void closeWindow((payload as {quit?:boolean}|undefined)?.quit===true))
-function slap(){if(!ready.value||hidden.value||closing.value||confirmReset.value)return;void audio.unlock();if(!interaction.accept(performance.now())){toast('拍打队列已满，请稍候');return}busy.value=true;reportPending();wake()}
+function slap(){if(!ready.value||hidden.value||closing.value||confirmReset.value)return;void audio.unlock();if(!interaction.accept(performance.now())){rejectedClicks++;data('rejectedClicks',String(rejectedClicks));data('queue',String(interaction.queued));toast('拍打队列已满，请稍候');return}acceptedClicks++;data('acceptedClicks',String(acceptedClicks));data('queue',String(interaction.queued));busy.value=true;reportPending();wake()}
 function keyDown(event:KeyboardEvent){if(event.key===' '||event.key==='Enter'){event.preventDefault();if(!event.repeat)slap()}}
 function soundChanged(value:Partial<{muted:boolean;volume:number}>){state.value.sound=normalizeMascotSound({...sound.value,...value});soundRevision++;audio.update();void audio.unlock();queueSave()}
 async function resetCounts(){try{await flush();state.value=await window.kamucl.invoke('mascots:reset',true,'kamu') as MascotState;confirmReset.value=false;menu.value=false;await nextTick(()=>menuButton.value?.focus())}catch(error){toast(errText(error),'error')}}

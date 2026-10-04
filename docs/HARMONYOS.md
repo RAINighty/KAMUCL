@@ -49,12 +49,14 @@ node scripts/build-harmonyos.cjs --check
 - 清除维护方个人签名资料和路径，生成未签名 build-profile。
 - 设置 `com.kamucl.launcher`、当前版本、KAMUCL 图标和标签，仅面向 `2in1`。
 - 保留 ArkTS 原生窗口与重复启动的实际路由，移除模板的多应用实例声明。不会调用维护方明确不支持的 Electron 单实例锁接口。
-- 将相同生产 main、preload、renderer 原样复制，包含现有许可证文件；不复制 Windows/macOS 辅助执行文件或 Windows 专用 koffi 本机库。
+- 将相同生产 main、preload、renderer 原样复制，包含现有许可证文件；不复制 Windows/macOS/Linux 辅助执行文件或 Windows 专用 koffi 本机库。
 - 固定维护方 ArkTS adapter 的 inversify 6.0.1、reflect-metadata 0.1.13，实际 ohpm 安装后仍须保存并核查其完整依赖锁文件。
 - 以白名单复制应用构建和锁定依赖，不读取账号、收藏、图片、游戏目录、存档或用户设置。
 - 缩减模板中当前产品不使用的定位、相机、蓝牙等权限；保留网络、文件授权、剪贴板、麦克风和运行时所需权限。自定义 JIT 权限仍需签名 profile 与设备确认，声明权限并不等于获得授权。
 
 `frontend-parity.json` 保存每个生产文件的来源、大小与摘要。共享产品代码修改并重建后，必须重新准备与检查；旧工程检查不能为新产物背书。
+
+继续实施新增固定模板适配：`scripts/harmony-native-adaptations.cjs` 校验十个原 ArkTS 文件的 SHA256，再接入关闭确认、真实 Browser 就绪、多目录授权及失败重试。标准 Electron 对话走 `DialogAdapter`，Chromium 的目录选择走 `FilePickerAdapter`，两者都等待真正授权和记录落盘。`native-adaptation-evidence.json` 保存修改前后摘要；该源码适配尚未经官方 SDK 编译或真机执行，不构成设备通过证据。授权激活失败会明确提示，默认不启动；可重试，或者明确继续后重新选择目录，后者不会被记录成授权已恢复。
 
 本次检查曾因并行的公共生产构建更新而拒绝旧工程的 `out/main/index.js` 摘要；该失败保留，重新准备后才通过。单独的负向检查实际篡改一个预加载文件、临时放入空的 `settings.json`，以及在 Windows 执行鸿蒙入口，三项均在预期原因被拒绝并恢复工程。负向检查只证明相应保护有效，不证明鸿蒙实机功能。
 

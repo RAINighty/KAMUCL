@@ -1,5 +1,15 @@
 # CURRENT STATUS — KAMUCL 1.1.11 接续候选
 
+2026-10-04 13:36（Asia/Hong_Kong）接续验证：新增公共产品与原生适配已冻结，版本保持尚未正式发布的 1.1.11。当前工作树完整公开检查 `npm test` 为 949 项：948 通过、0 失败、1 项 Linux 专属 shell 在 Windows 跳过，原耗时 162260.3472 ms；`npx tsc --noEmit`、`npm run license:check` 与差异格式检查均通过。固定 280 接口、63 功能、481 子断言的协议专项 83 项通过；独立复核确认布尔宣告包装与矛盾 SCK 帧状态被拒绝，真实布尔返回类型保留。协议夹具不能证明原生功能或平滑动作。
+
+本轮修复 Linux 陶瓦服务的独立临时目录与所属进程退出、账号页真实凭据安全提示、卡慕接受／拒绝点击的同步观察值，以及固定鸿蒙十个模板的关闭交接与持久目录授权。鸿蒙旧授权恢复失败可见重试，损坏记录保留原值后重新授权；普通文件不扩大授权。Mac 新验证覆盖四主题、240 个真实坐标页面场景、队列、离线账号与设置重启、真实公开 Modrinth 下载。Linux 新验证覆盖当前官方联机二进制、架构、私有服务、后端状态、三类更新包交易与所属 X11 窗口。相关实现与实际覆盖边界见 `docs/validation-1.1.11/CONTINUATION.md`。
+
+Windows 生产构建、ASAR／运行时检查及三份包已生成；本机全局构建缓存问题的失败和中止日志保留，使用本批独立 Electron 下载缓存后完成，未改运行时版本或关闭哈希检查。EXE 为 97184460 字节、SHA256 `4bcb9a3d8a218963d091f8bd116419a229442e4a7de4009419a6618ce70eb604`；紧凑 ZIP 为 97216031 字节、SHA256 `a2a4c432cdd2b9c0f22a430f5def62258531272e623604493bd9195c907ee849`；直接解压 ZIP 为 142973034 字节、SHA256 `d538a4708d60e9d256fa310017997c470df4c0b438c6d1ec6d4c92e6abb8157c`。真实 GUI、便携包干净启动及新的 Mac／Linux 原生结果以提交后的外部回执为准，未预填通过。原 99e0ef4 的 14 份成品已逐摘要备份至 `release/history-99e0ef4/`；其原始证据、失败及交接包保持不变。
+
+本轮首次全量为 932 项：930 通过、1 失败、1 跳过；非法步长已正确拒绝，失败原因是测试对隐式错误文字的匹配，条件不变并补明确错误提示后重跑上述 949 项。两张静态图交替或任意自造 manifest 仍不能凭协议摘要证明真实采集或动作顺滑；可信实际采集器和独立观看是必要条件，不能把合成正例称为原生通过。
+
+所有平台完整资格仍为 false，视觉／交互／动效评分均未完成，没有 v1.1.11 正式标签或 Release。用户已明确没有真实 Intel Mac；Ubuntu 两架构 GNOME／KDE／XWayland 全部桌面证据尚缺。鸿蒙缺官方 SDK、合法签名、电脑及尚未完成的原生 JVM／JNI／GLFW／音频游戏链。新公共产品修改要求重新构建各桌面平台，旧包不能绑定新提交。当前源码提交、远端同步、最终成品与交接包身份将在本轮外部回执准确绑定，以下各轮记录为历史快照。
+
 2026-10-04 09:02（Asia/Hong_Kong）当前快照：第六轮精确绑定已推送 master `69c1e89ba23a007535c77bae65052f19b6d87f58`；main `bb41072b907d8ade365e9beadc4a71ee7e69a6ca` 经 cherry-pick 保留独立历史。Mac run [37163779043](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779043) 和 Linux run [37163779037](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779037) 已结束，均不构成完整平台合格或正式发行。版本仍为 1.1.11，本批不再修改 03:59 的内置更新日志或递增版本。
 
 Mac 两架构各 864 项为 860 通过、0 失败、4 项既有平台 skip；15 个任务中 12 成功、3 个正式 UI 失败。成功任务为 2 个打包、2 个实际 Demo 游戏、6 个限定集成、ARM DMG 的限定四主题 GUI 和 1 个独立 Intel GPU 诊断。ARM DMG 的实际可见皮肤步行、焦点和受管壁纸均通过；ARM APP 的原始 CDP 90 帧在第 55→56 帧倒退 1.618 ms，原算术 FPS 60.53927763443197、formalTimingUsable=false，保持失败。Intel APP／DMG 实际 WebGL 初始化仍失败；独立诊断收集成功也仍无画布，不能把它当产品修复。第六四个 Mac 成品实际内嵌文件为 Contents/Resources/kamucl-mac.json，sourceCommit、Electron 44.3.0、架构、最低 macOS 13 和签名均有实际核对；旧摘要的 kamucl-build.json 计划名在 summary.json 的 historicalSnapshotErrors 保留。

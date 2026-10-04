@@ -1,5 +1,15 @@
 # START HERE — KAMUCL 1.1.11 接续候选
 
+本轮继续 1.1.11 的多平台实现与验收，正式公开基线仍为 1.1.10。新增 Linux 陶瓦独立服务隔离、账号页真实凭据状态、鸿蒙原生关闭与持久目录授权，以及 Mac 四主题全页面、队列、重启、公开资源下载的真实成品验证入口。新产品代码要求 Windows、Mac ARM64／Intel、Linux x64／ARM64 全部重新构建；旧成品与历史证据保留，但不能为新提交背书。
+
+最终成品身份、原始测试结果和 SHA256 以本轮外部交付回执为准。完整验收范围为 15 页面、280 个固定接口、63 个固定功能及其全部子断言。证据协议只能检查可信采集输入的完整性和一致性，不能自证任意清单确实来自真实操作；必须结合实际原生运行、截图、原始录屏与独立评审。任何必测未覆盖、评分不足或关键缺陷都阻止正式发布。
+
+源码构建及验证命令仍为 `npm ci`、`node scripts/build-bridge.cjs`、`npx tsc --noEmit`、`npm test`、`npm run license:check`、`npm run build`。Windows 打包 `npm run dist:win`；Mac 和 Linux 在相应原生架构分别使用 `node scripts/pack-mac.mjs <arm64|x64> --package-only` 与 `node scripts/pack-linux.cjs <arm64|x64>`。交接包记录的轻量验证命令为 ["node", "scripts/check-licenses.cjs"]，它不替代完整平台验收。
+
+鸿蒙使用 `npm run prepare:harmonyos`、`npm run verify:harmonyos`、`npm run dist:harmonyos`。缺少合法官方 SDK、签名和设备时构建失败保持失败；固定模板故障测试与共享资源字节核对不能替代 ArkTS 编译、HAP 签名安装或 JVM／LWJGL 游戏链。用户已确认没有真实 Intel Mac，当前也没有 Ubuntu 两架构完整桌面及鸿蒙电脑的验收证据。当前差距见 `docs/validation-1.1.11/CONTINUATION.md`。
+
+下方各轮时间戳是历史记录，不能替代本轮最终回执。
+
 2026-10-04 09:02（Asia/Hong_Kong）当前快照：第六轮精确绑定已推送 master `69c1e89ba23a007535c77bae65052f19b6d87f58`；main `bb41072b907d8ade365e9beadc4a71ee7e69a6ca` 经 cherry-pick 保留独立历史。Mac run [37163779043](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779043) 和 Linux run [37163779037](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779037) 已结束，均不构成完整平台合格或正式发行。版本仍为 1.1.11，本批不再修改 03:59 的内置更新日志或递增版本。
 
 Mac 两架构各 864 项为 860 通过、0 失败、4 项既有平台 skip；15 个任务中 12 成功、3 个正式 UI 失败。成功任务为 2 个打包、2 个实际 Demo 游戏、6 个限定集成、ARM DMG 的限定四主题 GUI 和 1 个独立 Intel GPU 诊断。ARM DMG 的实际可见皮肤步行、焦点和受管壁纸均通过；ARM APP 的原始 CDP 90 帧在第 55→56 帧倒退 1.618 ms，原算术 FPS 60.53927763443197、formalTimingUsable=false，保持失败。Intel APP／DMG 实际 WebGL 初始化仍失败；独立诊断收集成功也仍无画布，不能把它当产品修复。第六四个 Mac 成品实际内嵌文件为 Contents/Resources/kamucl-mac.json，sourceCommit、Electron 44.3.0、架构、最低 macOS 13 和签名均有实际核对；旧摘要的 kamucl-build.json 计划名在 summary.json 的 historicalSnapshotErrors 保留。

@@ -7,6 +7,7 @@ const { spawnSync } = require('node:child_process')
 const AdmZip = require('adm-zip')
 const JSON5 = require('json5')
 const tar = require('tar')
+const { applyNativeAdaptations } = require('./harmony-native-adaptations.cjs')
 
 const root = path.resolve(__dirname, '..')
 const integration = path.join(root, 'platforms/harmonyos')
@@ -101,7 +102,7 @@ async function copyProduction(appDir, pkg) {
     for (const source of await files(sourceDir)) {
       const relative = path.relative(root, source).replaceAll('\\', '/')
       // Windows/macOS-only helpers have no executable ABI on HarmonyOS.
-      if (/\.(?:exe|pdb|map)$/i.test(relative) || relative.endsWith('/MacGameWindow')) continue
+      if (/\.(?:exe|dll|dylib|so|pdb|map)$/i.test(relative) || /\/(?:MacGameWindow|LinuxGameWindow)$/.test(relative)) continue
       const destination = path.join(appDir, relative)
       await fs.mkdir(path.dirname(destination), { recursive: true })
       await fs.copyFile(source, destination)
@@ -146,6 +147,8 @@ async function prepare() {
   await fs.mkdir(output, { recursive: true })
   await resetGenerated(project, true)
   await fs.cp(template, project, { recursive: true })
+  const nativeAdaptations = await applyNativeAdaptations(project)
+  await saveJson(path.join(output, 'native-adaptation-evidence.json'), nativeAdaptations)
   await fs.copyFile(path.join(integration, 'build-profile.json5'), path.join(project, 'build-profile.json5'))
   const app = await json5(path.join(integration, 'app.json5'))
   const version = pkg.version.split('.').map(Number)
@@ -193,6 +196,7 @@ async function prepare() {
     runtime: lock.release, libraries: libs, template: lock.template,
     productionFileCount: production.hashes.length, productionFilesByteIdentical: true,
     nativeWindowSurface: 'ArkTS WebWindow XComponent + libadapter.so (maintainer implementation)',
+    nativeAdaptations,
     upstreamSigningRemoved: true, userDataIncluded: false,
     gates: lock.releaseGates,
     warning: 'Preparation and binary inspection do not establish device startup, animation parity or Minecraft support.'
