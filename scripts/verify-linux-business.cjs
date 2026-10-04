@@ -2,6 +2,7 @@
 // This is a disposable source integration harness, not desktop qualification.
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict'), crypto = require('node:crypto')
 const { execFileSync, spawn } = require('node:child_process')
+const { observeTamperedRejection, openOwnedInspector } = require('./linux-update-observer.cjs')
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
 const physicalFs = process.versions.electron ? require('original-fs') : fs
 const sha = file => crypto.createHash('sha256').update(physicalFs.readFileSync(file)).digest('hex')
@@ -63,19 +64,6 @@ async function freePort() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const port = server.address().port
   await new Promise(resolve => server.close(resolve)); return port
 }
-async function inspector(url, port) {
-  const parsed = new URL(url); assert.equal(parsed.protocol, 'ws:'); assert.equal(parsed.hostname, '127.0.0.1'); assert.equal(Number(parsed.port), port)
-  const socket = new WebSocket(url); let count = 0; const pending = new Map()
-  let openingTimer
-  try { await new Promise((resolve, reject) => { openingTimer = setTimeout(() => reject(Error('Owned inspector socket did not open')), 6000); socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }) }) }
-  catch (error) { socket.close(); throw error } finally { clearTimeout(openingTimer) }
-  socket.addEventListener('message', event => { const data = JSON.parse(event.data); pending.get(data.id)?.(data); pending.delete(data.id) })
-  return { socket, evaluate: expression => new Promise((resolve, reject) => {
-    const id = ++count, timer = setTimeout(() => { pending.delete(id); reject(Error('Owned update IPC timed out')) }, 30000)
-    pending.set(id, data => { clearTimeout(timer); if (data.error || data.result?.exceptionDetails) reject(Error(JSON.stringify(data.error ?? data.result.exceptionDetails))); else resolve(data.result.result.value) })
-    socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }))
-  }) }
-}
 async function verifyPackagedUpdate(root, report, tracks, proof) {
   const transactionRoot = fs.mkdtempSync(path.join(root, "update 中文 § O'Neil-")), rootIdentity = fs.lstatSync(transactionRoot)
   const target = path.join(transactionRoot, 'KAMUCL'), exe = path.join(target, 'kamucl')
@@ -90,6 +78,8 @@ async function verifyPackagedUpdate(root, report, tracks, proof) {
   const env = { ...process.env, HOME: transactionRoot, XDG_CONFIG_HOME: config, XDG_DATA_HOME: path.join(transactionRoot, 'data'), XDG_CACHE_HOME: path.join(transactionRoot, 'cache') }
   delete env.ELECTRON_RUN_AS_NODE; delete env.APPIMAGE; delete env.APPDIR; delete env.APPIMAGE_EXTRACT_AND_RUN
   const sockets = [], launched = []; let relaunched, actualProfile
+  const observerEvents = []
+  const observe = event => { observerEvents.push(event); fs.writeFileSync(path.join(proof, 'packaged-update-observations.json'), JSON.stringify({ nativeDesktop: false, events: observerEvents }, null, 2)) }
   const privateIdentity = () => { const current = fs.lstatSync(transactionRoot); assert(current.isDirectory() && !current.isSymbolicLink()); assert.equal(current.dev, rootIdentity.dev); assert.equal(current.ino, rootIdentity.ino) }
   const ownedRestart = () => {
     privateIdentity()
@@ -116,19 +106,21 @@ async function verifyPackagedUpdate(root, report, tracks, proof) {
     const descriptor = fs.openSync(path.join(proof, 'packaged-update-' + launched.length + '.log'), 'wx')
     const child = spawn(exe, ['--inspect=127.0.0.1:' + mainPort, '--remote-debugging-port=' + rendererPort], { env, stdio: ['ignore', descriptor, descriptor] }); fs.closeSync(descriptor)
     const track = ownChild(child, 'packaged Linux update launcher ' + launched.length); tracks.push(track); launched.push(track)
+    const deadline = Date.now() + 30000
     let mainTarget, rendererTarget
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 120 && Date.now() < deadline; i++) {
       assert.equal(child.exitCode, null, 'Update test launcher exited before IPC was ready')
       try { mainTarget = (await (await fetch('http://127.0.0.1:' + mainPort + '/json', { signal: AbortSignal.timeout(1000) })).json())[0]; rendererTarget = (await (await fetch('http://127.0.0.1:' + rendererPort + '/json', { signal: AbortSignal.timeout(1000) })).json()).find(page => page.url.includes('/renderer/index.html')); if (mainTarget && rendererTarget) break } catch {}
       await wait(250)
     }
     assert(mainTarget && rendererTarget, 'Actual packaged update IPC unavailable')
-    const main = await inspector(mainTarget.webSocketDebuggerUrl, mainPort); sockets.push(main.socket)
-    const identity = await main.evaluate("({pid:process.pid,platform:process.platform,arch:process.arch,exe:process.execPath,name:process.mainModule.require('electron').app.getName(),userData:process.mainModule.require('electron').app.getPath('userData')})")
+    const owned = { ownedPid: child.pid, ownedChild: child, deadline, observe }
+    const main = await openOwnedInspector({ url: mainTarget.webSocketDebuggerUrl, port: mainPort, role: 'main', ...owned }); sockets.push(main.socket)
+    const identity = await main.evaluate("({pid:process.pid,platform:process.platform,arch:process.arch,exe:process.execPath,name:process.mainModule.require('electron').app.getName(),userData:process.mainModule.require('electron').app.getPath('userData')})", { startupDeadline: true })
     assert.equal(identity.pid, child.pid); assert.equal(identity.exe, exe); assert.equal(identity.platform, 'linux'); assert.equal(identity.arch, process.arch)
     assert.equal(identity.name, applicationName); assert.equal(identity.userData, profile); actualProfile = identity.userData
-    const renderer = await inspector(rendererTarget.webSocketDebuggerUrl, rendererPort); sockets.push(renderer.socket)
-    for (let i = 0; i < 80; i++) { if (await renderer.evaluate("!!window.kamucl?.invoke && document.body?.innerText.includes('" + report.version + "')")) return { track, renderer, main }; await wait(250) }
+    const renderer = await openOwnedInspector({ url: rendererTarget.webSocketDebuggerUrl, port: rendererPort, rendererURL: rendererTarget.url, role: 'renderer', ...owned }); sockets.push(renderer.socket)
+    for (let i = 0; i < 80 && Date.now() < deadline; i++) { if (await renderer.evaluate("!!window.kamucl?.invoke && document.body?.innerText.includes('" + report.version + "')" , { startupDeadline: true })) return { track, renderer, main }; await wait(250) }
     throw Error('Actual renderer did not expose its production IPC')
   }
   const marker = path.join(profile, 'linux-update.json'), claim = marker + '.applying'
@@ -140,7 +132,7 @@ async function verifyPackagedUpdate(root, report, tracks, proof) {
     assert.equal((await awaitOwnedClose(track, 15000)).code, 0, 'The startup handoff must exit once')
     for (let i = 0; i < 400; i++) {
       if (fs.existsSync(claim + '.completed') && json(path.join(profile, 'update-state.json')).result === 'ok') { relaunched = ownedRestart(); assert(relaunched, 'Confirmed update did not leave its own application running'); return { transaction: json(claim + '.completed'), state: json(path.join(profile, 'update-state.json')), ownedProcess: relaunched } }
-      if (fs.existsSync(claim + '.failed')) throw Error('Actual updater rejected its transaction: ' + fs.readFileSync(path.join(profile, 'update-failed.flag'), 'utf8'))
+      if (fs.existsSync(claim + '.failed')) throw Error('Actual updater rejected its transaction: ' + fs.readFileSync(path.join(profile, 'linux-updater.log'), 'utf8'))
       await wait(250)
     }
     relaunched = ownedRestart(); throw Error('Actual packaged update acknowledgement timed out; original helper timeout remains unchanged')
@@ -150,10 +142,13 @@ async function verifyPackagedUpdate(root, report, tracks, proof) {
     let current = await start()
     await current.renderer.evaluate("window.kamucl.invoke('update:applyLocal'," + JSON.stringify({ filePath: archive }) + ')')
     const staged = json(marker), file = staged.file; assert(file.startsWith(profile + path.sep))
+    const logFile = path.join(profile, 'linux-updater.log'), previousLog = fs.existsSync(logFile) ? fs.readFileSync(logFile) : Buffer.alloc(0)
     fs.appendFileSync(file, 'tampered-after-approval'); current.renderer.socket.close(); current.main.socket.close(); await stopOwnedChild(current.track)
     current = await start(); assert(fs.existsSync(claim + '.failed'), 'Tampered local package was not rejected'); assert.equal(json(claim + '.failed').id, staged.id)
     assert.equal(sha(path.join(target, 'resources/app.asar')), baselineHash, 'Rejecting a tampered payload must preserve the original application bytes')
-    result.tamperedTransaction = { id: staged.id, sha256: staged.sha256, actualSize: fs.statSync(file).size, error: fs.readFileSync(path.join(profile, 'update-failed.flag'), 'utf8') }
+    const flagFile = path.join(profile, 'update-failed.flag'), flag = { observedAt: new Date().toISOString(), state: 'absent' }
+    try { flag.text = fs.readFileSync(flagFile, 'utf8'); flag.state = 'present' } catch (error) { if (error.code !== 'ENOENT') throw error }
+    result.tamperedTransaction = observeTamperedRejection({ staged, failed: json(claim + '.failed'), actualSize: fs.statSync(file).size, actualSHA256: sha(file), targetSHA256: sha(path.join(target, 'resources/app.asar')), baselineSHA256: baselineHash, previousLog, currentLog: fs.readFileSync(logFile), flag })
     fs.renameSync(claim + '.failed', claim + '.tamper-proof')
     await current.renderer.evaluate("window.kamucl.invoke('update:applyLocal'," + JSON.stringify({ filePath: archive }) + ')')
     const approved = json(marker); current.renderer.socket.close(); current.main.socket.close(); await stopOwnedChild(current.track)

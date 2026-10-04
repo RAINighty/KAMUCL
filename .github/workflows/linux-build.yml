@@ -158,9 +158,9 @@ jobs:
       - name: Actual native Electron custom-main entry and import contract
         timeout-minutes: 1
         run: xvfb-run -a dbus-run-session -- node_modules/.bin/electron scripts/verify-electron-qa-entry.cjs ${{ matrix.arch }}
-      - name: Actual Electron physical ASAR validation and backup copy contract
+      - name: Actual Electron physical ASAR and owned execution-context contracts
         timeout-minutes: 2
-        run: xvfb-run -a dbus-run-session -- node --test tests/linux-asar-filesystem-111.test.cjs
+        run: xvfb-run -a dbus-run-session -- node --test tests/linux-asar-filesystem-111.test.cjs tests/linux-update-observer-111.test.cjs
       - name: Actual official FRP/Terracotta download and private owned service lifecycle
         timeout-minutes: 14
         run: xvfb-run -a dbus-run-session -- node_modules/.bin/electron scripts/verify-linux-tools.cjs ${{ matrix.arch }}
@@ -175,6 +175,8 @@ jobs:
             out/qa-entry-proof-linux-*/*.json
             out/linux-asar-proof-*/*.json
             out/linux-asar-proof-*/*.log
+            out/linux-context-proof-*/*.json
+            out/linux-context-proof-*/*.log
             release/linux-tools-proof-*/*.json
             release/linux-tools-proof-*/*.log
             release/linux-business-proof-*/*.json

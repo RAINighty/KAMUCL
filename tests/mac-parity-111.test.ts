@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import vm from 'node:vm'
+import { spawn } from 'node:child_process'
 
 const requireFixture = createRequire(path.resolve('package.json'))
 const { ROUTES, THEMES, LAYOUTS, ROUTE_COMPONENTS, assertNavigationCoverage, assertQueueLedger, publicAccount, stableHash, createQueueClickObserver, createInstallHandlerObserver, restoreInstallHandlerObserver, preserveInstallObservation, collectAndRestoreInstallObserver, preservePrimaryFailure, assertMatchingDownloadResponse, assertDownloadTargetSelection } = requireFixture('./scripts/verify-mac-parity-ui.cjs')
@@ -296,4 +297,63 @@ test('Mac selection observation reads production VNode keys and public SelectMen
   assert.equal(assertMatchingDownloadResponse(context.observed, fixture.call).fileId, fixture.file.fileId)
   assert.equal(assertDownloadTargetSelection(context.observed, fixture.target).value, fixture.state.target.value)
   assert.equal(loaderInstance.props.modelValue, 'fabric'); assert.equal(targetInstance.props.modelValue, 'owned-target-key')
+})
+
+test('Mac mounted install props are projected read-only inside the renderer into exact plain file and target fields', () => {
+  const { readMountedInstallInput } = requireFixture('./scripts/verify-mac-parity-ui.cjs'), fixture = publicDownloadFixture()
+  const trap = { set() { throw Error('Readonly product props cannot be changed by QA') }, deleteProperty() { throw Error('Readonly product props cannot be deleted by QA') } }
+  const component = { type: { __name: 'ModInstallDialog' }, props: new Proxy({ input: new Proxy({ file: new Proxy(fixture.file, trap) }, trap), target: new Proxy(fixture.target, trap) }, trap) }
+  const context: any = { window: { __macParityObserver: { instances: () => [component] } } }
+  vm.runInNewContext(`snapshot=(${readMountedInstallInput.toString()})();`, context)
+  const snapshot = JSON.parse(JSON.stringify(context.snapshot))
+  assert.deepEqual(snapshot, { file: fixture.file, target: fixture.target })
+  assert.equal(snapshot.file.fileId, fixture.state.selectedFileId); assert.equal(snapshot.file.sha1, fixture.file.sha1)
+  assert.deepEqual(fixture.file, publicDownloadFixture().file, 'the original public file is unchanged')
+  context.window.__macParityObserver.instances = () => []
+  vm.runInNewContext(`snapshot=(${readMountedInstallInput.toString()})();`, context)
+  assert.deepEqual(JSON.parse(JSON.stringify(context.snapshot)), {}, 'an unmounted installer is not a fabricated ready document')
+  context.window.__macParityObserver.instances = () => [component, component]
+  assert.throws(() => vm.runInNewContext(`snapshot=(${readMountedInstallInput.toString()})();`, context), /Expected one actual ModInstallDialog instance, found 2/, 'two mounted installers cannot silently select the first target')
+})
+
+test('Mac props protocol regression reproduces real owned V8 CDP Proxy loss and preserves all fields with renderer-side projection', { timeout: 12000 }, async t => {
+  const { readMountedInstallInput } = requireFixture('./scripts/verify-mac-parity-ui.cjs'), fixture = publicDownloadFixture()
+  const child = spawn(process.execPath, ['--inspect=127.0.0.1:0', '-e', 'setInterval(()=>{},1000)'], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
+  let socket: WebSocket | undefined, nextId = 0
+  const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+  t.after(async () => {
+    socket?.close()
+    for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error('Owned protocol fixture closing')) }
+    pending.clear()
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+    await new Promise<void>(resolve => {
+      if (child.exitCode !== null || child.signalCode !== null) return resolve()
+      const timer = setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); resolve() }, 2000)
+      child.once('close', () => { clearTimeout(timer); resolve() })
+    })
+  })
+  const url = await new Promise<string>((resolve, reject) => {
+    let stderr = ''
+    const timer = setTimeout(() => reject(Error('Owned inspector startup timeout')), 4000)
+    child.once('error', error => { clearTimeout(timer); reject(error) })
+    child.stderr.on('data', buffer => { stderr += buffer.toString(); const match = /Debugger listening on (ws:\/\/127\.0\.0\.1:\d+\/[-a-f0-9]+)/.exec(stderr); if (match) { clearTimeout(timer); resolve(match[1]) } })
+  })
+  socket = new WebSocket(url)
+  await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(Error('Owned inspector connection timeout')), 4000); socket!.addEventListener('open', () => { clearTimeout(timer); resolve() }, { once: true }); socket!.addEventListener('error', () => { clearTimeout(timer); reject(Error('Owned inspector connection error')) }, { once: true }) })
+  socket.addEventListener('message', event => { const message = JSON.parse(String(event.data)), item = pending.get(message.id); if (!item) return; pending.delete(message.id); clearTimeout(item.timer); item.resolve(message) })
+  const evaluate = async (expression: string) => {
+    const id = ++nextId
+    const response: any = await new Promise((resolve, reject) => { const timer = setTimeout(() => { pending.delete(id); reject(Error('Owned inspector response timeout')) }, 4000); pending.set(id, { resolve, reject, timer }); socket!.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true } })) })
+    assert(!response.error && !response.result.exceptionDetails); return response.result.result.value
+  }
+  const identity = await evaluate('({pid:process.pid,execPath:process.execPath})')
+  assert.equal(identity.pid, child.pid); assert.equal(identity.execPath, process.execPath, 'the protocol endpoint belongs to the child created by this test')
+  const raw = await evaluate(`(()=>{globalThis.ownedProps={file:new Proxy(${JSON.stringify(fixture.file)},{}),target:new Proxy(${JSON.stringify(fixture.target)}, {})};globalThis.window={__macParityObserver:{instances:()=>[{type:{__name:'ModInstallDialog'},props:{input:{file:ownedProps.file},target:ownedProps.target}}]}};return{file:ownedProps.file,target:ownedProps.target}})()`)
+  assert.deepEqual(raw, { file: {}, target: {} }, 'raw Proxy returnByValue must reproduce the observed empty native protocol snapshot')
+  const projected = await evaluate(`(${readMountedInstallInput.toString()})()`)
+  assert.deepEqual(projected, { file: fixture.file, target: fixture.target })
+  assert.equal(projected.file.fileId, fixture.state.selectedFileId); assert.equal(projected.file.sha1, fixture.file.sha1)
+  assert.equal(projected.target.id, fixture.target.id); assert.equal(projected.target.folder, fixture.target.folder)
+  const duplicate = await evaluate(`(()=>{window.__macParityObserver.instances=()=>[{type:{__name:'ModInstallDialog'},props:{input:{file:ownedProps.file},target:ownedProps.target}},{type:{__name:'ModInstallDialog'},props:{input:{file:ownedProps.file},target:ownedProps.target}}];try{(${readMountedInstallInput.toString()})();return{accepted:true}}catch(error){return{rejected:true,name:error.name,message:error.message}}})()`)
+  assert.deepEqual(duplicate, { rejected: true, name: 'Error', message: 'Expected one actual ModInstallDialog instance, found 2' }, 'the actual owned protocol endpoint cannot select the first of two mounted-instance observations')
 })

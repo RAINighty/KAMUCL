@@ -56,6 +56,17 @@ function assertDownloadTargetSelection(state,expected){
  assert(options[0].value);assert.equal(state.target.value,options[0].value,'the actual target SelectMenu props must select the intended instance')
  return options[0]
 }
+function readMountedInstallInput(){
+ const rows=window.__macParityObserver.instances().filter(row=>row.type?.__name==='ModInstallDialog')
+ if(!rows.length)return{}
+ if(rows.length!==1)throw Error('Expected one actual ModInstallDialog instance, found '+rows.length)
+ const row=rows[0]
+ const p=row.props
+ // CDP returnByValue represents V8 Proxy objects as empty objects. Serialize
+ // within the renderer so the protocol receives a plain snapshot of the
+ // actual reactive props, preserving every original field without setters.
+ return JSON.parse(JSON.stringify({file:p.input.file,target:p.target}))
+}
 // Chromium may perform a microtask checkpoint between separate native event
 // listeners. Bind both observations to the original Event and read only after
 // its target handler has run, in the document's real bubbling phase.
@@ -366,11 +377,11 @@ module.exports=async function verifyMacParity(h){
    proof.realService.targetSelection=selectedTarget;proof.realService.targetOption=assertDownloadTargetSelection(selectedTarget,expectedTarget);save()
    await screenshot('mac-parity-first-real-file-target-selection')
    await textCoordinate('.download-modal .modal-actions','确认下载')
-   const observedInput=await until('actual mounted installer input',()=>evaluate(`(()=>{const row=window.__macParityObserver.instances().find(row=>row.type?.__name==='ModInstallDialog');if(!row)return{};const p=row.props;return{file:p.input.file,target:p.target}})()`),r=>!!r.file&&!!r.target)
+   const observedInput=await until('actual mounted installer input',()=>evaluate(`(${readMountedInstallInput.toString()})()`),r=>!!r.file&&!!r.target)
    proof.realService.chosen=observedInput;save()
    assert.equal(observedInput.file.fileId,proof.realService.filteredFile.fileId);assert.equal(observedInput.file.sha1,proof.realService.filteredFile.sha1);assert.equal(observedInput.target.id,expectedTarget.id);assert.equal(observedInput.target.mcVersion,expectedTarget.mcVersion);assert.equal(observedInput.target.loader,expectedTarget.loader);assert.equal(fs.realpathSync.native(observedInput.target.folder),expectedTarget.folder)
    await until('real prepared install UI',()=>evaluate(`(()=>{const e=document.querySelector('.modinstall-modal'),button=e?.querySelector('.btn-gold');return{ready:!!e&&!e.querySelector('.modal-loading')&&!!button&&!button.disabled,rows:e?[...e.querySelectorAll('.dependency-row')].map(r=>r.innerText):[],error:e?.querySelector('.modal-error')?.textContent}})()`),r=>r.ready,60000)
-   const chosen=await evaluate(`(()=>{const p=window.__macParityObserver.one('ModInstallDialog').props;return{file:p.input.file,target:p.target}})()`)
+   const chosen=await evaluate(`(${readMountedInstallInput.toString()})()`)
    proof.realService.chosen=chosen;save()
    assert(chosen.file&&chosen.file.sha1&&chosen.file.projectId==='P7dR8mSH','actual mounted installer receives selected public file with service hash')
    assert(chosen.file.gameVersions.includes('1.20.1')&&chosen.file.loaders.includes('fabric'),'the actual selected file is compatible')
@@ -398,4 +409,4 @@ module.exports=async function verifyMacParity(h){
  }catch(error){preservePrimaryFailure(proof,error,save);try{await screenshot('mac-parity-'+phase+'-failure')}catch{}throw error}
 }
 async function coordinatePosition(evaluate,selector){return evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!e.contains(document.elementFromPoint(x,y)))throw Error('actual queue hit target obscured');return{x,y}})()`)}
-Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,readDownloadSelectionState,assertMatchingDownloadResponse,assertDownloadTargetSelection,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure})
+Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,readDownloadSelectionState,assertMatchingDownloadResponse,assertDownloadTargetSelection,readMountedInstallInput,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure})
