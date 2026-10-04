@@ -12,6 +12,9 @@ import { installationKind } from '../platform'
 import { assertLinuxElf, assertLinuxManifest, validateLinuxArchive } from './linuxUpdateIdentity'
 export { assertLinuxElf, validateLinuxArchive } from './linuxUpdateIdentity'
 const run = promisify(execFile)
+// Updater directories contain the physical ASAR archive. Electron's normal fs
+// presents it as a virtual directory; only these payload operations use raw fs.
+const physicalFs: typeof fs = process.versions.electron ? require('original-fs') : fs
 const data = () => app.getPath('userData')
 const marker = () => path.join(data(), 'linux-update.json')
 const claim = () => marker() + '.applying'
@@ -62,7 +65,7 @@ async function verifyDirectory(dir: string, version: string): Promise<void> {
   const fd = await fs.promises.open(path.join(dir, 'kamucl'), 'r')
   try { const bytes = Buffer.alloc(64); await fd.read(bytes, 0, 64, 0); assertLinuxElf(bytes) } finally { await fd.close() }
   await fs.promises.access(path.join(dir, 'kamucl'), fs.constants.X_OK)
-  if (!(await fs.promises.stat(path.join(dir, 'resources/app.asar'))).isFile()) throw Error('Linux 更新包缺少应用归档')
+  if (!(await physicalFs.promises.stat(path.join(dir, 'resources/app.asar'))).isFile()) throw Error('Linux 更新包缺少应用归档')
 }
 export async function verifyLinuxAppImage(file: string, version: string): Promise<void> {
   const fd = await fs.promises.open(file, 'r')
@@ -213,7 +216,7 @@ export async function stageLinuxBackup(backup: string, version: string): Promise
   if (kind === 'appimage') { await verifyLinuxAppImage(backup, version); await fs.promises.copyFile(backup, file) }
   else {
     await verifyDirectory(backup, version)
-    const copy = path.join(dir, 'KAMUCL'); await fs.promises.cp(backup, copy, { recursive: true, dereference: true })
+    const copy = path.join(dir, 'KAMUCL'); await physicalFs.promises.cp(backup, copy, { recursive: true, dereference: true })
     await run('/usr/bin/tar', ['--format=ustar', '--dereference', '-czf', file, '-C', dir, 'KAMUCL'], { timeout: 120000 })
   }
   await stageLinuxUpdate({ version, assetName, assetSize: fs.statSync(file).size, assetUrl: '', body: '', publishedAt: '' }, file, await hash(file), 'rollback')

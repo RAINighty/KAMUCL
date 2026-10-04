@@ -4,9 +4,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import vm from 'node:vm'
 
 const requireFixture = createRequire(path.resolve('package.json'))
-const { ROUTES, THEMES, LAYOUTS, ROUTE_COMPONENTS, assertNavigationCoverage, assertQueueLedger, publicAccount, stableHash, createQueueClickObserver, createInstallHandlerObserver, restoreInstallHandlerObserver, preserveInstallObservation, collectAndRestoreInstallObserver, preservePrimaryFailure } = requireFixture('./scripts/verify-mac-parity-ui.cjs')
+const { ROUTES, THEMES, LAYOUTS, ROUTE_COMPONENTS, assertNavigationCoverage, assertQueueLedger, publicAccount, stableHash, createQueueClickObserver, createInstallHandlerObserver, restoreInstallHandlerObserver, preserveInstallObservation, collectAndRestoreInstallObserver, preservePrimaryFailure, assertMatchingDownloadResponse, assertDownloadTargetSelection } = requireFixture('./scripts/verify-mac-parity-ui.cjs')
 const { parityRoot, assertRestartIdentity, assertNaturalOwnedClose, safeEvidence } = requireFixture('./scripts/verify-mac-parity.cjs')
 function temporary(t: TestContext) {
   const base = fs.realpathSync.native(os.tmpdir()), root = fs.realpathSync.native(fs.mkdtempSync(path.join(base, 'KAMUCL synthetic Mac parity contract ')))
@@ -220,4 +221,79 @@ test('Mac registered install observation enters finally protection before its fi
   assert.equal(receipt.primaryError.message, writer.message)
   const source = fs.readFileSync(path.resolve('scripts/verify-mac-parity-ui.cjs'), 'utf8')
   assert.match(source, /handlerRegistration=await main\([^\n]+\)\n\s+await preserveInstallObservation\(async\(\)=>\{\n\s+save\(\)/, 'first registered checkpoint belongs to the protected actual operation')
+})
+
+function publicDownloadFixture() {
+  const file = { source: 'modrinth', projectId: 'P7dR8mSH', fileId: 'public-1201', fileName: 'fabric-api+1.20.1.jar', gameVersions: ['1.20.1'], loaders: ['fabric'], sha1: 'a'.repeat(40) }
+  const target = { id: '联机验证实例', mcVersion: '1.20.1', loader: 'fabric', folder: '/private/owned/games' }
+  const state = { present: true, mcVersion: '1.20.1', loader: 'fabric', loading: false, error: null, selectedFileId: file.fileId, selectedFileName: file.fileName, selectedFileDescription: '版本 public · MC 1.20.1 · fabric', target: { value: 'owned-target-key', options: [{ value: 'owned-target-key', label: '联机验证实例 · 1.20.1 / fabric · /private/owned/games' }] } }
+  const call = { channel: 'community:files', index: 2, startedAt: 100, completedAt: 200, arguments: ['modrinth', 'P7dR8mSH', { kind: 'mod', mcVersion: '1.20.1', loader: 'fabric' }], result: [file] }
+  return { file, state, call, target }
+}
+
+test('Mac public download readiness rejects stale rows until the exact completed public filter and selected file hash agree', () => {
+  const value = publicDownloadFixture()
+  assert.deepEqual(assertMatchingDownloadResponse(value.state, value.call), value.file)
+  for (const mutate of [
+    (v: any) => { v.state.mcVersion = '26.3' },
+    (v: any) => { v.state.loader = 'forge' },
+    (v: any) => { v.state.loading = true },
+    (v: any) => { v.state.error = 'public request failed' },
+    (v: any) => { v.call.arguments[2].mcVersion = '26.3' },
+    (v: any) => { v.call.arguments[2].loader = '' },
+    (v: any) => { v.call.arguments[1] = 'foreign-project' },
+    (v: any) => { delete v.call.completedAt },
+    (v: any) => { v.call.completedAt = 99 },
+    (v: any) => { v.call.error = { message: 'download rejected' } },
+    (v: any) => { v.state.selectedFileId = 'old-26.3-row' },
+    (v: any) => { v.call.result[0].gameVersions = ['26.3'] },
+    (v: any) => { v.call.result[0].loaders = ['forge'] },
+    (v: any) => { v.call.result[0].sha1 = 'unknown' },
+    (v: any) => { v.state.selectedFileName = 'another-file.jar' }
+  ]) { const fixture = structuredClone(value); mutate(fixture); assert.throws(() => assertMatchingDownloadResponse(fixture.state, fixture.call)) }
+})
+
+test('Mac actual target selection requires the same complete instance label, owned folder and selected option value', () => {
+  const value = publicDownloadFixture()
+  assert.equal(assertDownloadTargetSelection(value.state, value.target).value, 'owned-target-key')
+  for (const mutate of [
+    (v: any) => { v.state.target.value = 'seeded-26.3-key' },
+    (v: any) => { v.state.target.options[0].label = '联机验证实例 · 26.3 / fabric · /private/owned/games' },
+    (v: any) => { v.state.target.options[0].label = '联机验证实例 · 1.20.1 / fabric · /private/foreign/games' },
+    (v: any) => { v.state.target.options.push({ ...v.state.target.options[0] }) },
+    (v: any) => { v.state.target.options[0].value = '' }
+  ]) { const fixture = structuredClone(value); mutate(fixture); assert.throws(() => assertDownloadTargetSelection(fixture.state, fixture.target)) }
+})
+
+test('Mac public file and install observations remain exact-once with all three entries restored after a stale-row failure', async () => {
+  const fixture = publicDownloadFixture(), entries = new Map<string, (...args: any[]) => any>(), invocations: any[] = []
+  for (const channel of ['community:files', 'mods:prepare', 'mods:commit']) entries.set(channel, async (_event, ...args) => { invocations.push({ channel, args }); return channel === 'community:files' ? fixture.call.result : 'original result' })
+  const originals = new Map(entries)
+  const ipc = { _invokeHandlers: entries, removeHandler: (channel: string) => entries.delete(channel), handle(channel: string, callback: (...args: any[]) => any) { entries.set(channel, async (...args: any[]) => callback(...args)) } }
+  const observation = createInstallHandlerObserver(ipc, [...entries.keys()]), receipt: any = {}
+  await assert.rejects(preserveInstallObservation(async () => {
+    await entries.get('community:files')!({ sender: 'owned' }, ...fixture.call.arguments)
+    assertMatchingDownloadResponse({ ...fixture.state, selectedFileId: 'stale-26.3' }, observation.calls[0])
+  }, async () => restoreInstallHandlerObserver(ipc, observation), receipt, () => {}))
+  assert.deepEqual(invocations, [{ channel: 'community:files', args: fixture.call.arguments }], 'rejected stale rows cannot reach the actual prepare or commit')
+  assert.equal(receipt.handlerRestoration.complete, true)
+  for (const [channel, original] of originals) assert.equal(entries.get(channel), original)
+  const source = fs.readFileSync(path.resolve('scripts/verify-mac-parity-ui.cjs'), 'utf8')
+  assert.match(source, /\['community:files','mods:prepare','mods:commit'\]/)
+  assert(source.indexOf('await preserveInstallObservation(async()=>{') < source.indexOf("await type('.download-modal input[list="), 'all filtering and selection starts within finally protection')
+})
+
+test('Mac selection observation reads production VNode keys and public SelectMenu props without setup setters or DOM dev state', () => {
+  const { installMacParityObserver, readDownloadSelectionState } = requireFixture('./scripts/verify-mac-parity-ui.cjs'), fixture = publicDownloadFixture()
+  const loader = {}, target = {}, file = { querySelector: (selector: string) => ({ textContent: selector === '.file-name' ? fixture.file.fileName : fixture.state.selectedFileDescription }) }
+  const dialog = { querySelector: (selector: string) => selector === '.filter-row .select-menu-btn' ? loader : selector === ':scope > .select-menu-btn' ? target : selector === '.file-row.active' ? file : selector.startsWith('input[') ? { value: '1.20.1' } : null }
+  const loaderInstance = { type: { __name: 'SelectMenu' }, props: { modelValue: 'fabric' }, subTree: { children: [{ el: loader }] } }
+  const targetInstance = { type: { __name: 'SelectMenu' }, props: { modelValue: fixture.state.target.value, options: fixture.state.target.options }, subTree: { children: [{ el: target }] } }
+  const page = { type: { __name: 'CommunityView' }, subTree: { children: [{ component: loaderInstance }, { component: targetInstance }, { children: [{ el: file, key: fixture.file.fileId }] }] } }
+  const context: any = { window: {}, document: { querySelector: (selector: string) => selector === '#app' ? { __vue_app__: { _container: { _vnode: { component: page } } } } : selector === '.download-modal' ? dialog : null } }
+  vm.runInNewContext(`(${installMacParityObserver.toString()})(); observed=(${readDownloadSelectionState.toString()})();`, context)
+  assert.deepEqual(JSON.parse(JSON.stringify(context.observed)), fixture.state)
+  assert.equal(assertMatchingDownloadResponse(context.observed, fixture.call).fileId, fixture.file.fileId)
+  assert.equal(assertDownloadTargetSelection(context.observed, fixture.target).value, fixture.state.target.value)
+  assert.equal(loaderInstance.props.modelValue, 'fabric'); assert.equal(targetInstance.props.modelValue, 'owned-target-key')
 })

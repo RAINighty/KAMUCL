@@ -15,6 +15,14 @@ function installMacParityObserver(){
  }
  const named=name=>instances().filter(row=>row.type?.__name===name)
  const one=name=>{const rows=named(name);if(rows.length!==1)throw Error('Expected one actual '+name+' instance, found '+rows.length);return rows[0]}
+ const nodeForElement=(name,element)=>{
+  const matches=[]
+  const visit=node=>{if(!node||typeof node!=='object')return;if(Array.isArray(node)){for(const child of node)visit(child);return}if(node.el===element)matches.push(node);if(Array.isArray(node.children))visit(node.children);visit(node.ssContent);visit(node.ssFallback)}
+  for(const row of named(name))visit(row.subTree)
+  if(matches.length!==1)throw Error('Expected one actual '+name+' VNode for visible element, found '+matches.length)
+  return matches[0]
+ }
+ const forElement=(name,element)=>{const node=nodeForElement(name,element);const rows=named(name).filter(row=>{let found=false;const visit=n=>{if(!n||typeof n!=='object')return;if(n===node)found=true;if(Array.isArray(n)){for(const c of n)visit(c);return}if(Array.isArray(n.children))visit(n.children);visit(n.ssContent);visit(n.ssFallback)};visit(row.subTree);return found});if(rows.length!==1)throw Error('Actual visible '+name+' props unavailable');return rows[0]}
  const route=name=>{
   const row=named(name).find(row=>{const el=row.subTree?.el,scope=el?.closest?.('.route-view')||el?.parentElement?.closest('.route-view');return scope?.isConnected&&!scope.classList.contains('fade-leave-active')})
   if(!row)return{component:null,componentChain:[],transition:null}
@@ -22,7 +30,31 @@ function installMacParityObserver(){
   const el=row.subTree.el,scope=el.closest?.('.route-view')||el.parentElement.closest('.route-view')
   return{component:row.type.__name,componentChain:names,transition:scope.className}
  }
- window.__macParityObserver={instances,one,route,classification:'Read-only actual mounted production VNode tree and props; no DOM dev expandos, setupState or handler replacement'}
+ window.__macParityObserver={instances,one,route,nodeForElement,forElement,classification:'Read-only actual mounted production VNode tree and props; no DOM dev expandos, setupState or handler replacement'}
+}
+function readDownloadSelectionState(){
+ const dialog=document.querySelector('.download-modal'),o=window.__macParityObserver
+ if(!dialog)return{present:false}
+ const loader=dialog.querySelector('.filter-row .select-menu-btn'),target=dialog.querySelector(':scope > .select-menu-btn'),file=dialog.querySelector('.file-row.active')
+ const loaderProps=loader?o.forElement('SelectMenu',loader).props:null,targetProps=target?o.forElement('SelectMenu',target).props:null
+ return{present:true,mcVersion:dialog.querySelector('input[list="mod-minecraft-versions"]')?.value,loader:loaderProps?.modelValue,loading:!!dialog.querySelector('.files-loading'),error:dialog.querySelector('.files-error')?.textContent||null,selectedFileId:file?o.nodeForElement('CommunityView',file).key:null,selectedFileName:file?.querySelector('.file-name')?.textContent,selectedFileDescription:file?.querySelector('.file-sub')?.textContent,target:{value:targetProps?.modelValue,options:targetProps?.options?.map(row=>({value:row.value,label:row.label}))||[]}}
+}
+function assertMatchingDownloadResponse(state,call){
+ assert.equal(state.present,true);assert.equal(state.mcVersion,'1.20.1');assert.equal(state.loader,'fabric');assert.equal(state.loading,false);assert.equal(state.error,null)
+ assert.equal(call?.channel,'community:files');assert(Number.isFinite(call.startedAt)&&Number.isFinite(call.completedAt)&&call.completedAt>=call.startedAt);assert(!call.error)
+ assert.deepEqual(call.arguments,['modrinth','P7dR8mSH',{kind:'mod',mcVersion:'1.20.1',loader:'fabric'}])
+ const selected=call.result?.find(row=>row.fileId===state.selectedFileId)
+ assert(selected,'the actual selected VNode file belongs to the completed matching public response')
+ assert.equal(selected.source,'modrinth');assert.equal(selected.projectId,'P7dR8mSH');assert(selected.gameVersions.includes('1.20.1')&&selected.loaders.includes('fabric'))
+ assert.match(selected.sha1,/^[a-f0-9]{40}$/);assert.equal(state.selectedFileName,selected.fileName);assert(state.selectedFileDescription.includes('1.20.1'))
+ return selected
+}
+function assertDownloadTargetSelection(state,expected){
+ const label=expected.id+' · '+expected.mcVersion+' / '+expected.loader+' · '+expected.folder
+ const options=state.target.options.filter(row=>row.label===label)
+ assert.equal(options.length,1,'one actual compatible target option must identify the full instance and folder')
+ assert(options[0].value);assert.equal(state.target.value,options[0].value,'the actual target SelectMenu props must select the intended instance')
+ return options[0]
 }
 // Chromium may perform a microtask checkpoint between separate native event
 // listeners. Bind both observations to the original Event and read only after
@@ -306,21 +338,44 @@ module.exports=async function verifyMacParity(h){
    proof.realService.project=project;proof.realService.icon=icon;await screenshot('mac-parity-first-real-favorite-icon')
    await coordinate('[data-favorite-key="modrinth:P7dR8mSH"] .favorite-download')
    await until('real file dialog appears',()=>evaluate(`!!document.querySelector('.download-modal')`),v=>v)
-   await type('.download-modal input[list="mod-minecraft-versions"]','1.20.1')
-   await until('real compatible file response',()=>evaluate(`({ready:document.querySelectorAll('.download-modal .file-row').length>0&&!document.querySelector('.download-modal .files-loading'),error:document.querySelector('.download-modal .files-error')?.textContent})`),r=>r.ready,30000)
    // Forward each original install handler exactly once. This observes real
    // prepared plans/commits without depending on production setup closures or
    // substituting network, dependency, compatibility or download responses.
-   proof.realService.handlerRegistration=await main(`(()=>{globalThis.macParityInstallTrace=(${createInstallHandlerObserver.toString()})(testElectron.ipcMain,['mods:prepare','mods:commit']);return macParityInstallTrace.registration})()`)
+   proof.realService.handlerRegistration=await main(`(()=>{globalThis.macParityInstallTrace=(${createInstallHandlerObserver.toString()})(testElectron.ipcMain,['community:files','mods:prepare','mods:commit']);return macParityInstallTrace.registration})()`)
    await preserveInstallObservation(async()=>{
    save()
+   await type('.download-modal input[list="mod-minecraft-versions"]','1.20.1')
+   await until('actual entered Minecraft filter',()=>evaluate(`document.querySelector('.download-modal input[list="mod-minecraft-versions"]')?.value`),value=>value==='1.20.1')
+   // A real pointer focus change commits the input change. A Tab event alone
+   // must not imply a new filter request or make pre-existing rows current.
+   await coordinate('.download-modal .filter-row .select-menu-btn')
+   await textCoordinate('.select-menu-float','Fabric')
+   let matchingCall
+   const filtered=await until('real compatible file response',async()=>{
+    const selection=await evaluate(`(${readDownloadSelectionState.toString()})()`)
+    const calls=await main(`macParityInstallTrace.calls`)
+    matchingCall=calls.filter(row=>row.channel==='community:files'&&row.arguments?.[0]==='modrinth'&&row.arguments?.[1]==='P7dR8mSH'&&row.arguments?.[2]?.mcVersion==='1.20.1'&&row.arguments?.[2]?.loader==='fabric').at(-1)
+    return{selection,response:matchingCall?{index:matchingCall.index,startedAt:matchingCall.startedAt,completedAt:matchingCall.completedAt,error:matchingCall.error,fileIds:matchingCall.result?.map(row=>row.fileId)}:null}
+   },row=>{try{assertMatchingDownloadResponse(row.selection,matchingCall);return true}catch{return false}},30000)
+   proof.realService.filterSelection=filtered;proof.realService.filteredFile=assertMatchingDownloadResponse(filtered.selection,matchingCall);proof.realService.completedFileResponse=matchingCall;save()
+   const expectedTarget={id:'联机验证实例',mcVersion:'1.20.1',loader:'fabric',folder:fs.realpathSync.native(games)}
+   const targetLabel=expectedTarget.id+' · '+expectedTarget.mcVersion+' / '+expectedTarget.loader+' · '+expectedTarget.folder
+   await coordinate('.download-modal > .select-menu-btn')
+   await textCoordinate('.select-menu-float',targetLabel)
+   const selectedTarget=await until('real intended download target',()=>evaluate(`(${readDownloadSelectionState.toString()})()`),row=>{try{assertMatchingDownloadResponse(row,matchingCall);assertDownloadTargetSelection(row,expectedTarget);return true}catch{return false}})
+   proof.realService.targetSelection=selectedTarget;proof.realService.targetOption=assertDownloadTargetSelection(selectedTarget,expectedTarget);save()
+   await screenshot('mac-parity-first-real-file-target-selection')
    await textCoordinate('.download-modal .modal-actions','确认下载')
+   const observedInput=await until('actual mounted installer input',()=>evaluate(`(()=>{const row=window.__macParityObserver.instances().find(row=>row.type?.__name==='ModInstallDialog');if(!row)return{};const p=row.props;return{file:p.input.file,target:p.target}})()`),r=>!!r.file&&!!r.target)
+   proof.realService.chosen=observedInput;save()
+   assert.equal(observedInput.file.fileId,proof.realService.filteredFile.fileId);assert.equal(observedInput.file.sha1,proof.realService.filteredFile.sha1);assert.equal(observedInput.target.id,expectedTarget.id);assert.equal(observedInput.target.mcVersion,expectedTarget.mcVersion);assert.equal(observedInput.target.loader,expectedTarget.loader);assert.equal(fs.realpathSync.native(observedInput.target.folder),expectedTarget.folder)
    await until('real prepared install UI',()=>evaluate(`(()=>{const e=document.querySelector('.modinstall-modal'),button=e?.querySelector('.btn-gold');return{ready:!!e&&!e.querySelector('.modal-loading')&&!!button&&!button.disabled,rows:e?[...e.querySelectorAll('.dependency-row')].map(r=>r.innerText):[],error:e?.querySelector('.modal-error')?.textContent}})()`),r=>r.ready,60000)
    const chosen=await evaluate(`(()=>{const p=window.__macParityObserver.one('ModInstallDialog').props;return{file:p.input.file,target:p.target}})()`)
    proof.realService.chosen=chosen;save()
    assert(chosen.file&&chosen.file.sha1&&chosen.file.projectId==='P7dR8mSH','actual mounted installer receives selected public file with service hash')
    assert(chosen.file.gameVersions.includes('1.20.1')&&chosen.file.loaders.includes('fabric'),'the actual selected file is compatible')
-   const observedPlan=await main(`macParityInstallTrace.calls.filter(c=>c.channel==='mods:prepare'&&c.completedAt)`);proof.realService.originalHandlerTrace=await main(`macParityInstallTrace.calls`);save();assert.equal(observedPlan.length,1);assert(!observedPlan[0].error)
+   const observedPlans=await main(`macParityInstallTrace.calls.filter(c=>c.channel==='mods:prepare'&&c.completedAt)`);proof.realService.originalHandlerTrace=await main(`macParityInstallTrace.calls`);save()
+   const observedPlan=observedPlans.filter(row=>row.arguments[0].id===expectedTarget.id&&row.arguments[0].folder===chosen.target.folder&&row.arguments[1]?.file?.fileId===chosen.file.fileId);assert.equal(observedPlan.length,1,'exactly one completed original prepare for the actual selected target and public file');assert(!observedPlan[0].error)
    const plan=observedPlan[0].result
    proof.realService.plan=plan;save()
    assert(!plan.warnings.length,'real dependency plan has no compatibility warnings')
@@ -343,4 +398,4 @@ module.exports=async function verifyMacParity(h){
  }catch(error){preservePrimaryFailure(proof,error,save);try{await screenshot('mac-parity-'+phase+'-failure')}catch{}throw error}
 }
 async function coordinatePosition(evaluate,selector){return evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!e.contains(document.elementFromPoint(x,y)))throw Error('actual queue hit target obscured');return{x,y}})()`)}
-Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure})
+Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,readDownloadSelectionState,assertMatchingDownloadResponse,assertDownloadTargetSelection,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure})

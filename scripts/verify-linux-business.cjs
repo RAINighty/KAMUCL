@@ -3,7 +3,8 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict'), crypto = require('node:crypto')
 const { execFileSync, spawn } = require('node:child_process')
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
-const sha = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+const physicalFs = process.versions.electron ? require('original-fs') : fs
+const sha = file => crypto.createHash('sha256').update(physicalFs.readFileSync(file)).digest('hex')
 const errorRecord = error => ({ name: error.name, message: error.message, code: error.code, stack: error.stack })
 
 async function preserveBusinessFailure(report, action, cleanup, save) {
