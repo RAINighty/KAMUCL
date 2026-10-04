@@ -220,7 +220,7 @@ async function main() {
   fs.mkdirSync(path.resolve('out'), { recursive: true })
   const root = fs.mkdtempSync(path.resolve('out/linux-business-')), proof = path.resolve('release/linux-business-proof-' + process.arch + '-' + Date.now())
   fs.mkdirSync(proof, { recursive: true }); fs.mkdirSync(path.join(root, 'config')); app.setPath('appData', path.join(root, 'config')); app.setPath('userData', root)
-  const report = { version: require('../package.json').version, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), platform: process.platform, arch: process.arch, electron: process.versions.electron, nativeExecution: true, sourceHarness: true, nativeDesktop: false, complete: false, steps: [], uncovered: ['real authorized account login', 'GNOME Keyring/KWallet lock-unlock and restart on actual desktop', 'system DEB installer confirmation, cancellation and upgrade', 'normal FUSE AppImage update', 'public online cross-version update', 'actual Minecraft window/world', 'hardware GPU and visual/motion parity'] }
+  const report = { version: require('../package.json').version, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), platform: process.platform, arch: process.arch, electron: process.versions.electron, qaEntry: { argv: [...process.argv], moduleFile: module.filename, requireMainFile: require.main?.filename ?? null, requireMainEqualsModule: require.main === module, matchedRequestedEntry: require('./qa-entry.cjs').isQaMain(module, require.main), type: process.type, runAsNode: !!process.env.ELECTRON_RUN_AS_NODE }, nativeExecution: true, sourceHarness: true, nativeDesktop: false, complete: false, steps: [], uncovered: ['real authorized account login', 'GNOME Keyring/KWallet lock-unlock and restart on actual desktop', 'system DEB installer confirmation, cancellation and upgrade', 'normal FUSE AppImage update', 'public online cross-version update', 'actual Minecraft window/world', 'hardware GPU and visual/motion parity'] }
   const save = () => fs.writeFileSync(path.join(proof, 'verification.json'), JSON.stringify(report, null, 2))
   const tracks = []
   await app.whenReady()
@@ -291,4 +291,4 @@ async function main() {
   app.exit(0)
 }
 module.exports = { preserveBusinessFailure, loadCore, ownChild, awaitOwnedClose, stopOwnedChild, selectOwnedExecutable }
-if (require.main === module) main().catch(error => { console.error(error); require('electron').app.exit(1) })
+if (require('./qa-entry.cjs').isQaMain(module, require.main)) main().catch(error => { console.error(error); require('electron').app.exit(1) })

@@ -24,6 +24,24 @@ function installMacParityObserver(){
  }
  window.__macParityObserver={instances,one,route,classification:'Read-only actual mounted production VNode tree and props; no DOM dev expandos, setupState or handler replacement'}
 }
+// Chromium may perform a microtask checkpoint between separate native event
+// listeners. Bind both observations to the original Event and read only after
+// its target handler has run, in the document's real bubbling phase.
+function createQueueClickObserver(queue,readDataset,now){
+ const events=new WeakMap()
+ const before=event=>{
+  if(!event.target.closest('[data-hit=kamu]'))return
+  if(events.has(event))throw Error('Duplicate capture observation for original click')
+  const d=readDataset(),row={actionId:queue.clicks.length+1,at:now(),trusted:event.isTrusted,beforePhase:event.eventPhase,before:Number(d.queue),expectedLimit:32,acceptedBefore:Number(d.acceptedClicks||0),rejectedBefore:Number(d.rejectedClicks||0),contacts:Number(d.contacts)}
+  events.set(event,row);queue.clicks.push(row)
+ }
+ const after=event=>{
+  const row=events.get(event);if(!row)return
+  if(row.afterAt!==undefined)throw Error('Duplicate bubble observation for original click')
+  const d=readDataset();row.after=Number(d.queue);row.acceptedAfter=Number(d.acceptedClicks||0);row.rejectedAfter=Number(d.rejectedClicks||0);row.afterAt=now();row.afterPhase=event.eventPhase;row.accepted=row.acceptedAfter===row.acceptedBefore+1
+ }
+ return{before,after}
+}
 function assertNavigationCoverage(rows){
  assert.equal(rows.length,THEMES.length*LAYOUTS.length*ROUTES.length)
  const keys=rows.map(row=>`${row.theme}/${row.width}/${row.height}/${row.zoom}/${row.route}`)
@@ -45,6 +63,9 @@ function assertQueueLedger(ledger,before,after){
  assert.equal(ledger.clicks.length,40,'forty original trusted click events required')
  assert(ledger.clicks.every(row=>row.trusted===true&&Number.isFinite(row.at)&&Number.isFinite(row.afterAt)))
  for(const row of ledger.clicks){
+  assert.equal(row.beforePhase,1,'observe the original click before its target handler in capture phase')
+  assert.equal(row.afterPhase,3,'observe the same original click after its target handler in bubble phase')
+  assert(row.afterAt>=row.at,'original event observations cannot run backwards')
   assert.equal(row.expectedLimit,32);assert(Number.isInteger(row.before)&&row.before>=0&&row.before<=32)
   assert(Number.isInteger(row.after)&&row.after>=0&&row.after<=32)
   assert.equal(row.after-row.before,row.accepted?1:0,'each real synchronous input either accepts once or preserves the full queue')
@@ -197,7 +218,7 @@ module.exports=async function verifyMacParity(h){
    const legacySeed={batchId:'mac-parity-history-'+crypto.randomUUID(),hits:['q3','qiqi','biyuehu','hongshu','milo','muchuanbei']};await evaluate(`window.kamucl.invoke('mascots:batch',${JSON.stringify(legacySeed)})`);proof.legacySeed={classification:'Disposable historical-data fixture via real product increment IPC, not retired characters rendered or clicked',batch:legacySeed}
    const baseline=await state();proof.mascotBaseline=baseline
    // Original sources and DOM contacts are observed, never delayed or changed.
-   await evaluate(`(()=>{const p=window.__macParityQueue={clicks:[],contacts:[],audio:[],contexts:[],busyVisible:false};p.originalContext=window.AudioContext;p.originalStart=AudioBufferSourceNode.prototype.start;window.AudioContext=new Proxy(p.originalContext,{construct(t,a){const c=new t(...a);p.contexts.push(c);return c}});AudioBufferSourceNode.prototype.start=function(...args){const role=this.kamuclInitialization?.role==='silent-slap-buffer'?'initialization':'palm',values=this.buffer?.getChannelData(0);let peak=0;if(values)for(const value of values)peak=Math.max(peak,Math.abs(value));p.audio.push({at:performance.now(),audioTime:this.context.currentTime,scheduledAt:args[0]??0,role,duration:this.buffer?.duration,peak});return p.originalStart.apply(this,args)};p.listener=event=>{if(!event.target.closest('[data-hit=kamu]'))return;const d=document.querySelector('.mascot-stage').dataset,row={actionId:p.clicks.length+1,at:performance.now(),trusted:event.isTrusted,before:Number(d.queue),expectedLimit:32,acceptedBefore:Number(d.acceptedClicks||0),rejectedBefore:Number(d.rejectedClicks||0),contacts:Number(d.contacts)};p.clicks.push(row);queueMicrotask(()=>{row.after=Number(d.queue);row.acceptedAfter=Number(d.acceptedClicks||0);row.rejectedAfter=Number(d.rejectedClicks||0);row.afterAt=performance.now();row.accepted=row.acceptedAfter===row.acceptedBefore+1})};document.addEventListener('click',p.listener,true);p.observer=new MutationObserver(()=>{const e=document.querySelector('.mascot-stage');if(e){const contacts=Number(e.dataset.contacts);if(contacts>0&&contacts!==p.contacts.at(-1)?.contacts)p.contacts.push({at:performance.now(),contacts,contactAt:Number(e.dataset.contactAt),cycleId:Number(e.dataset.cycleId)})}if(document.body.innerText.includes('拍打队列已满，请稍候'))p.busyVisible=true});p.observer.observe(document.body,{subtree:true,attributes:true,attributeFilter:['data-contacts','data-contact-at'],childList:true})})()`)
+   await evaluate(`(()=>{const p=window.__macParityQueue={clicks:[],contacts:[],audio:[],contexts:[],busyVisible:false};p.originalContext=window.AudioContext;p.originalStart=AudioBufferSourceNode.prototype.start;window.AudioContext=new Proxy(p.originalContext,{construct(t,a){const c=new t(...a);p.contexts.push(c);return c}});AudioBufferSourceNode.prototype.start=function(...args){const role=this.kamuclInitialization?.role==='silent-slap-buffer'?'initialization':'palm',values=this.buffer?.getChannelData(0);let peak=0;if(values)for(const value of values)peak=Math.max(peak,Math.abs(value));p.audio.push({at:performance.now(),audioTime:this.context.currentTime,scheduledAt:args[0]??0,role,duration:this.buffer?.duration,peak});return p.originalStart.apply(this,args)};p.clickObserver=(${createQueueClickObserver.toString()})(p,()=>document.querySelector('.mascot-stage').dataset,()=>performance.now());document.addEventListener('click',p.clickObserver.before,true);document.addEventListener('click',p.clickObserver.after,false);p.observer=new MutationObserver(()=>{const e=document.querySelector('.mascot-stage');if(e){const contacts=Number(e.dataset.contacts);if(contacts>0&&contacts!==p.contacts.at(-1)?.contacts)p.contacts.push({at:performance.now(),contacts,contactAt:Number(e.dataset.contactAt),cycleId:Number(e.dataset.cycleId)})}if(document.body.innerText.includes('拍打队列已满，请稍候'))p.busyVisible=true});p.observer.observe(document.body,{subtree:true,attributes:true,attributeFilter:['data-contacts','data-contact-at'],childList:true})})()`)
    try{
     await coordinate('.brand-avatar')
     const before=await until('model and feedback really ready',()=>evaluate(`(()=>{const e=document.querySelector('.mascot-stage'),b=document.querySelector('[data-hit=kamu]');return{ready:!!e&&!b.disabled&&Number(e.dataset.readyAt)>0&&e.dataset.feedbackPreparation==='decoded',phase:e?.dataset.phase,queue:Number(e?.dataset.queue),contacts:Number(e?.dataset.contacts),count:Number(b?.getAttribute('aria-label')?.match(/累计 (\\d+) 次/)?.[1]),accepted:Number(e?.dataset.acceptedClicks||0),rejected:Number(e?.dataset.rejectedClicks||0)}})()`),r=>r.ready&&r.phase==='front')
@@ -218,7 +239,7 @@ module.exports=async function verifyMacParity(h){
     proof.queue.result=assertQueueLedger(ledger,before,after)
     await coordinate('.menu-tool');await textCoordinate('.sound-panel','恢复 LOGO')
     await until('queue close actually releases contexts and renderer',()=>evaluate(`({stage:!!document.querySelector('.mascot-stage'),audio:window.__macParityQueue.contexts.map(c=>c.state),avatarFocused:document.activeElement===document.querySelector('.brand-avatar')})`),r=>!r.stage&&r.audio.length>0&&r.audio.every(x=>x==='closed')&&r.avatarFocused)
-   }finally{await evaluate(`(()=>{const p=window.__macParityQueue;p.observer.disconnect();document.removeEventListener('click',p.listener,true);AudioBufferSourceNode.prototype.start=p.originalStart;window.AudioContext=p.originalContext})()`);save()}
+   }finally{await evaluate(`(()=>{const p=window.__macParityQueue;p.observer.disconnect();document.removeEventListener('click',p.clickObserver.before,true);document.removeEventListener('click',p.clickObserver.after,false);AudioBufferSourceNode.prototype.start=p.originalStart;window.AudioContext=p.originalContext})()`);save()}
    // A real project is fetched from the public service; no search/files/plan
    // handler is substituted. Only the target instance metadata is synthetic.
    proof.realService={source:'modrinth',projectId:'P7dR8mSH',classification:'Actual native UI / real public API and CDN / real prepared dependency plan and commit; synthetic MC1.20.1 Fabric target, not a game-launch claim',complete:false};save()
@@ -265,4 +286,4 @@ module.exports=async function verifyMacParity(h){
  }catch(error){proof.error={name:error.name,message:error.message};save();try{await screenshot('mac-parity-'+phase+'-failure')}catch{}throw error}
 }
 async function coordinatePosition(evaluate,selector){return evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!e.contains(document.elementFromPoint(x,y)))throw Error('actual queue hit target obscured');return{x,y}})()`)}
-Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver})
+Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,createQueueClickObserver})

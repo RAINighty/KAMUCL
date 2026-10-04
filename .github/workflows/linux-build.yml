@@ -155,7 +155,11 @@ jobs:
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
+      - name: Actual native Electron custom-main entry and import contract
+        timeout-minutes: 1
+        run: xvfb-run -a dbus-run-session -- node_modules/.bin/electron scripts/verify-electron-qa-entry.cjs ${{ matrix.arch }}
       - name: Actual official FRP/Terracotta download and private owned service lifecycle
+        timeout-minutes: 14
         run: xvfb-run -a dbus-run-session -- node_modules/.bin/electron scripts/verify-linux-tools.cjs ${{ matrix.arch }}
       - name: Native credentials, business filesystem, update payloads and actual X11 backend fixtures
         if: always()
@@ -165,6 +169,7 @@ jobs:
         with:
           name: linux-native-integration-${{ matrix.os }}-${{ matrix.arch }}
           path: |
+            out/qa-entry-proof-linux-*/*.json
             release/linux-tools-proof-*/*.json
             release/linux-tools-proof-*/*.log
             release/linux-business-proof-*/*.json
