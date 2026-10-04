@@ -21,7 +21,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
  const server=net.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));
  const mainServer=net.createServer();await new Promise(r=>mainServer.listen(0,'127.0.0.1',r));const mainPort=mainServer.address().port;await new Promise(r=>mainServer.close(r));
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const log=fs.openSync(path.join(root,'process.log'),'w');
- const child=spawn(process.env.KAMUCL_GUI_DEV ? path.resolve('node_modules/electron/dist/electron.exe') : exe,[...(process.env.KAMUCL_GUI_DEV ? ['.'] : []),...(process.env.KAMUCL_GUI_SOFTWARE==='1'?['--use-gl=angle','--use-angle=swiftshader']:[]),`--inspect=127.0.0.1:${mainPort}`,'--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding','--disable-background-timer-throttling',`--user-data-dir=${profile}`,`--remote-debugging-port=${port}`],{env,stdio:['ignore',log,log]});let ws,mainWs,operationError;
+ const child=spawn(process.env.KAMUCL_GUI_DEV ? path.resolve('node_modules/electron/dist/electron.exe') : exe,[...(process.env.KAMUCL_GUI_DEV ? ['.'] : []),...(process.env.KAMUCL_GUI_SOFTWARE==='1'?['--use-gl=angle','--use-angle=swiftshader']:[]),`--inspect=127.0.0.1:${mainPort}`,'--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding','--disable-background-timer-throttling',`--user-data-dir=${profile}`,`--remote-debugging-port=${port}`],{env,stdio:['ignore',log,log]});let ws,mainWs,operationError,diagnosticRendererURL;const originalConsoleErrors=[];
  const ownedTrack=ownedQA.trackOwnedChild(child,'refinement-app'),ownedProcessProof={classification:'Read-only disposable QA child lifecycle; never command lines or external signals',child:ownedTrack.ledger,before:await ownedQA.ownedInventory([ownedTrack])};
  let restoreOwnedCancellation
  if(process.env.KAMUCL_OBSERVER_TRACE_CONTROL119==='1')restoreOwnedCancellation=ownedQA.installOwnedCancellation(process,async()=>{
@@ -31,7 +31,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
  })
  try {
   let page;for(let i=0;i<90;i++){assert(child.exitCode===null,'portable exited before UI');try{page=(await(await fetch(`http://127.0.0.1:${port}/json`)).json()).find(p=>p.url.includes('/renderer/index.html'));if(page)break}catch{}await wait(1000)}assert(page,'renderer unavailable');
-  ws=new WebSocket(page.webSocketDebuggerUrl);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true})});let id=0;const pending=new Map();ws.addEventListener('message',e=>{const m=JSON.parse(e.data);pending.get(m.id)?.(m);if(m.method==='Runtime.exceptionThrown'||m.method==='Runtime.consoleAPICalled'&&m.params.type==='error')console.error(JSON.stringify(m.params))});
+  diagnosticRendererURL=page.webSocketDebuggerUrl;ws=new WebSocket(page.webSocketDebuggerUrl);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true})});let id=0;const pending=new Map();ws.addEventListener('message',e=>{const m=JSON.parse(e.data);pending.get(m.id)?.(m);if(m.method==='Runtime.exceptionThrown'||m.method==='Runtime.consoleAPICalled'&&m.params.type==='error'){if(originalConsoleErrors.length<128)originalConsoleErrors.push({method:m.method,...m.params});console.error(JSON.stringify(m.params))}});
   const call=(method,params={})=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>{pending.delete(n);reject(Error(method+' timed out: '+(params.expression||'').slice(0,180)))},12000);pending.set(n,m=>{clearTimeout(t);pending.delete(n);m.error?reject(Error(JSON.stringify(m.error))):resolve(m.result)});ws.send(JSON.stringify({id:n,method,params}))});
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value};
   await call('Runtime.enable');await call('Emulation.setFocusEmulationEnabled',{enabled:true});await call('Page.bringToFront');
@@ -231,7 +231,16 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   const result={version,complete:true,exeSHA256:process.env.KAMUCL_GUI_DEV?null:require('crypto').createHash('sha256').update(fs.readFileSync(exe)).digest('hex'),catalogReentry:true,disclosureBothDirections:true,dropdownMotion:true,methodEntryMotion:true,settingsScopes:true,compactRuntime:true,settingsScrollRestored:true,asyncLatestWins:true,errorRetry:true,emptySearch:true,modalKeyboard:true,runningState:true,confinedAnimation:true,root,shotDir,issues,settingsTargets:settingIds.length,reducedMotion:true,legacyConfig:true,rapidNavigation:true,themes:process.env.KAMUCL_TEST_THEME||'black-orange',windows:[[960,620,1],[1280,900,1.25],[1440,960,1.5],[980,720,1.5],'maximized']};fs.writeFileSync('out/ui-refinement-'+result.themes+'.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   if(process.env.KAMUCL_UI_HOLD){fs.writeFileSync('out/ui-hold.ready','ready');while(!fs.existsSync('out/ui-hold.done'))await wait(500)}
   await closeApp();
- }catch(error){operationError=error;throw error}
+ }catch(error){operationError=error;
+  if(process.platform==='linux')await require('./qa-linux-graphics-failure.cjs').preserveLinuxFailure(error,{
+    outputFile:path.join('out','linux-gpu-failure-'+randomUUID()+'.json'),
+    mainInspectorUrl:`http://127.0.0.1:${mainPort}/json`,browserDebugPort:port,rendererDebuggerURL:diagnosticRendererURL,
+    ownedChild:ownedTrack.child,expectedPid:ownedTrack.pid,expectedArch:process.arch,expectedExecutable:exe,
+    display:{DISPLAY:env.DISPLAY,XDG_SESSION_TYPE:env.XDG_SESSION_TYPE,WAYLAND_DISPLAY:env.WAYLAND_DISPLAY},
+    originalConsoleErrors:originalConsoleErrors.slice(),
+    onEvidence:evidence=>{console.error('LINUX READ-ONLY GPU DIAGNOSTIC:',JSON.stringify({complete:evidence.complete,ownedIdentityVerified:evidence.ownedIdentityVerified,diagnosticErrors:evidence.diagnosticErrors,saveError:evidence.saveError,unexpectedDiagnosticError:evidence.unexpectedDiagnosticError}))}
+  });
+  throw error}
  finally{await ownedQA.preservingCleanup(async()=>{if(operationError)throw operationError},async()=>{
   let closeError
   try{if(mainWs?.readyState===WebSocket.OPEN)mainWs.close();if(ws?.readyState===WebSocket.OPEN){ws.send(JSON.stringify({id:999999,method:'Browser.close'}));await wait(1000);ws.close()}await ownedQA.finishOwnedChild(ownedTrack,{terminate:true,timeoutMs:5000})}

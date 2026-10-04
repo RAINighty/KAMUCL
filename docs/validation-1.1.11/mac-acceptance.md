@@ -1,6 +1,18 @@
 # macOS 1.1.11 验收边界与待补证据
 
-2026-10-04 08:02（Asia/Hong_Kong）当前快照：第五轮 [37160588297](https://github.com/kamubaba-i/KAMUCL/actions/runs/37160588297) 绑定 `5167500b6c27b9bbdd1e80f22d91d3f5904007eb`。两架构各 857 项为 853 通过、0 失败、4 项既有平台 skip；14 个作业中 2 个打包、2 个实际游戏、6 个限定集成成功，4 个 APP／DMG UI 失败。运行主机 macOS 15.7.9，包仍是 ad-hoc 签名；不是 macOS 13 实机或 Developer ID／公证验证。
+2026-10-04 09:02（Asia/Hong_Kong）当前快照：第六 [37163779043](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779043) 绑定 `69c1e89ba23a007535c77bae65052f19b6d87f58`，两架构各 864 项为 860 通过、0 失败、4 项既有平台 skip。15 作业为 12 成功／3 UI 失败：2 打包、2 官方 Demo 游戏、6 限定集成、ARM DMG 四主题限定 GUI 和独立 Intel GPU 诊断成功。原生四个包实际读取 Contents/Resources/kamucl-mac.json 内嵌 source69／runtime44.3／ABI／最低 macOS13；strict ad-hoc 签名不是 Developer ID／公证。旧摘要的 kamucl-build.json 计划名作为 historicalSnapshotErrors 保留。
+
+ARM DMG 四主题实际 GUI、可见皮肤步行、焦点和受管壁纸通过。ARM APP 90 个原 CDP 帧中，frame-0055.jpg 的 timestamp=1791072915.597551，frame-0056.jpg=1791072915.595933，倒退 1.618 ms；原算术 FPS=60.53927763443197，但 formalTimingUsable=false，原失败不改写，不用 DMG 补 APP。精确 [Chromium152 PageHandler源码](https://chromium.googlesource.com/chromium/src/+/152.0.7977.78/content/browser/devtools/protocol/page_handler.cc) 的 wall-clock 元数据与异步编码顺序可解释为何需要更可靠原生观测，但尚不能证明本样本的因果；第七强制 SCK 用途明确的原始 BGRA／PTS／status 采集尚未原生验证，不排序旧帧、不放宽时间或 FPS。
+
+Intel APP／DMG 默认运行时真实 WebGL 失败。单独诊断作业成功只表示采集完成；默认与 explicit Metal 两个独立变体仍没有画布、WebGL1／2 均失败，gl=disabled／angle=none 不证明最初失败后端。实际 Metal 探针与 driver／设备信息单列，不通过切换旧 Electron、软件渲染或调整门槛治愈原正式失败。
+
+两个新实际游戏任务覆盖 26.2／Fabric0.19.5 官方 Demo 初始化、窗口／焦点／Dock恢复、正常退出0后读取 level.dat 与 region 原字节 SHA，世界文件不入公开包。试玩覆盖层、授权账号、无遮挡地形输入、旧版及其他 loader 未覆盖；Intel CI-only MoltenVK 条件保留。第五轮世界未采集 SHA 的旧缺口没有回填。启动是裸44.3 runtime的 coordinator harness，tools 为真实平台下载和仅本次daemon/session，update 是本地同版本签名事务／篡改／回滚夹具；它们不是完整签名启动画面、外部玩家联机或公开在线升级。第七源 SHA=null、新原生验收待运行，全部平台完整资格 false、三项评分 null、无 Release。以下旧快照保留。
+
+本批第七完整本机公开测试为 874 项：873 通过、0 失败、1 项 Linux 原生 shell skip，duration=117970.8989 ms，TypeScript 通过。这覆盖原冻结的 QA／合同测试；全套之后追加的 Mac 原生 BGRA 证据收集修订另经针对性校验，不能笼统称全部最终 QA 都在 874 项之前冻结。它们不能替代 Mac／Linux 原生执行。本批黑橙 general refinement 实际 GUI 已通过，包含最小窗口、1.25／1.5 缩放、最大化与原报告中的有限交互；当前黑橙 ux110 可见步行／外观另在执行，尚不预填通过。四主题 final3 可见模型／步行／壁纸仍为上一 source69 已验证结果。新 Mac SCK 与 Linux 同进程 GPU 观察器尚未原生运行，源7提交 SHA=null、nativeRunsStarted=false；Windows 产品输入未改，不因 QA／文档重包装。所有平台完整资格 false、三项评分 null、无正式 Release。
+
+第六旧源码／交接漏收 build/icon.png 和 build/icon-512.png，原审计 out/handoff111-history-source-closure-defect.json 保留；下一源码／交接必须重新核对完整构建输入闭包，尚无未来批次成功声明。
+
+2026-10-04 08:02（Asia/Hong_Kong）第五轮历史快照：第五轮 [37160588297](https://github.com/kamubaba-i/KAMUCL/actions/runs/37160588297) 绑定 `5167500b6c27b9bbdd1e80f22d91d3f5904007eb`。两架构各 857 项为 853 通过、0 失败、4 项既有平台 skip；14 个作业中 2 个打包、2 个实际游戏、6 个限定集成成功，4 个 APP／DMG UI 失败。运行主机 macOS 15.7.9，包仍是 ad-hoc 签名；不是 macOS 13 实机或 Developer ID／公证验证。
 
 ARM 的 APP／DMG 已实际显示窗口、WebGL 和编辑器，LOGO 原始 CDP 为 59.975／60.167 FPS，原生传送为 59.613／58.882 FPS，均达到该项 30 FPS 门槛；后续透明主题在受管壁纸实际存在断言失败，原记录 background={}，缺少原设置／读取／规范路径身份观察，原因尚未证实。原皮肤步行录像只有 1 帧、FPS 0，模型不在画面内；它仍不合格，姿态状态不能代替可见运动。Intel APP／DMG 在 30 次就绪观察中均无画布，正式原进程 gl=disabled／angle=none、WebGL1／2 创建失败；实际 EGL 初始化失败仍未解决。主机 Apple Paravirtualized 64MB／Metal2／30Hz 不证明初始 ANGLE 后端或因果根因；新增独立 GPU 诊断尚未执行，不绕过正式 GPU／帧率门槛。
 
@@ -26,12 +38,12 @@ ARM 的 APP／DMG 已实际显示窗口、WebGL 和编辑器，LOGO 原始 CDP �
 
 | 验收组 | ARM64 | Intel | 成功证据 |
 | --- | --- | --- | --- |
-| 原生打包 | 5167500 第五轮已完成；新内嵌身份待重建 | 5167500 第五轮已完成；新内嵌身份待重建 | 本轮提交 SHA、Electron 44.3.0、macOS 13 最低版本、Mach-O 架构、临时签名、ZIP／DMG／ASAR 原字节 SHA256 |
-| APP 与 DMG | 第五轮后续壁纸实际存在断言失败；未完成 | 第五轮实际 EGL／WebGL 初始化失败；未解决 | 相同包清单、干净解压或只读挂载启动、四主题、最小窗口与缩放、当前编辑器／收藏／随机图片／导入／勾选操作 |
-| 彩蛋与皮肤 | 第五轮 LOGO 达标；原皮肤单帧不可见仍不合格 | 无画布，后续未完成 | 实际就绪／焦点、连续点击与计数、声源／手掌接触、暂停恢复、闲置 LOGO 不阻塞走路、导出 PNG 原字节、关闭保存／失败恢复 |
-| 原生动画 | 第五轮 LOGO 原帧达标；不覆盖皮肤与完整 UI | 当前 WebGL 失败及历史低帧率保持失败 | 原始 CDP 帧与时间、SCK BGRA／PNG／PTS、各自原始门槛和结论；功能完成不覆盖低帧率或可见停顿 |
-| 游戏 | 第五轮 26.2／Fabric 官方 Demo 限定任务通过；旧世界 SHA 缺失 | 第五轮 Demo 限定任务通过，保留 CI-only MoltenVK 条件；旧世界 SHA 缺失 | 真正下载／安装／启动、游戏窗口和世界截图、磁盘存档、正常关闭、关闭启动器后游戏继续、Dock 状态恢复 |
-| 启动／工具／更新 | 第五轮三个限定任务成功；新身份待重建 | 第五轮三个限定任务成功；新身份待重建 | 正常碎片与减少动态效果、实际下载工具及本地接口、篡改拒绝、真实更新和回滚收据 |
+| 原生打包 | 第六 source69 四包与实际内嵌身份通过 | 第六 source69 四包与实际内嵌身份通过 | 完整 source SHA、runtime44.3、最低mac13、Mach-O ABI、实际 ad-hoc 签名及 ZIP／DMG／ASAR 原摘要 |
+| APP 与 DMG | DMG 四主题限定 GUI 通过；APP 原时序逆序失败 | APP／DMG 当前 WebGL 失败；单独诊断不放行 | 不同包／任务不拼接，通过全部页面、真实坐标、主题与当前功能矩阵 |
+| 彩蛋与皮肤 | DMG 可见皮肤步行通过；APP 后续主题未完成 | 无画布，后续未完成 | 原始可见模型、焦点、计数／接触／音源、隐藏和关闭重试 |
+| 原生动画 | APP 90帧原时间不可用；DMG各主题原观察单列 | 当前 WebGL 与历史低帧率保持失败 | 第七强制 SCK 尚未原生验证，原BGRA／PTS／status／既有帧门槛完整保留 |
+| 游戏 | 第六 Demo 限定任务及正常退出后新世界 SHA 通过 | 同左，保留 CI-only MoltenVK 条件 | 第五旧SHA缺失不回填；授权账号、无遮挡玩法及其他版本／loader另验 |
+| 启动／工具／更新 | 第六三个限定任务成功 | 第六三个限定任务成功 | coordinator runtime harness、真实工具下载ownsession、本地同版本事务不得冒充完整启动／玩家服务／线上升级 |
 | 独立评审 | 待评审 | 待评审 | 本轮最终截图／录屏与证据，视觉／交互／动效各自达到 9 分且无关键缺陷 |
 
 每个任务验证成品清单提交与检出提交完全一致；不同候选、架构、APP／DMG 或重试之间不拼接通过。失败仍上传当前截图、原始帧和诊断。原始 CDP 或 SCK 低于其既有显示器目标会失败，不降低门槛、不替换为旧 Electron、不补造帧或改变时间。

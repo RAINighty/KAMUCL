@@ -91,7 +91,7 @@ async function runHarness(theme, module, executable) {
     const evidenceDirectory = path.join(root, directory)
     if (!fs.existsSync(evidenceDirectory)) continue
     for (const name of fs.readdirSync(evidenceDirectory)) {
-      if (!/^(appearance-motion-|skin-walk-110-|skin-editor-|skin-118-|gallery-118-|favorites-118-|selection-119-|import-119-|mascot-|kamu-|ui-refinement-|main-inspector-ready-live|qa-owned-process-119-)/.test(name)) continue
+      if (!/^(appearance-motion-|skin-walk-110-|skin-editor-|skin-118-|gallery-118-|favorites-118-|selection-119-|import-119-|mascot-|kamu-|ui-refinement-|main-inspector-ready-live|qa-owned-process-119-|linux-gpu-failure-)/.test(name)) continue
       const file = path.join(root, directory, name)
       if (fs.statSync(file).mtimeMs >= fs.statSync(path.join(proof, 'summary.json')).birthtimeMs) fs.cpSync(file, path.join(proof, directory + '-' + name), { recursive: true })
     }

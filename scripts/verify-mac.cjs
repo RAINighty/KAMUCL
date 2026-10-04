@@ -253,6 +253,18 @@ ownedQA.preservingCleanup(async()=>{
     for(const name of fs.readdirSync(dir))if(/^(?:110-.*\.png|recording\.json|frame-\d+\.jpg)$/.test(name)&&fresh(path.join(dir,name))){fs.copyFileSync(path.join(dir,name),path.join(target,name));copied.push('current-themes/'+theme+'/'+path.basename(dir)+'/'+name)}
    }
    const file=path.join('out','appearance-motion-'+theme+'-110.json');if(fresh(file)){const target=path.join(extensionProof,'current-themes',theme);fs.mkdirSync(target,{recursive:true});fs.copyFileSync(file,path.join(target,path.basename(file)))}
+   // Preserve every original SCK callback/pixel sidecar plus the explicitly
+   // derived lossless PNG projection. Never recurse into a profile or include
+   // the compiled capture helper or request/stop text markers.
+   const nativeName='skin-walk-native-111-'+theme,nativeDir=path.join('out',nativeName),nativeTarget=path.join(extensionProof,'current-themes',theme,nativeName)
+   if(fs.existsSync(nativeDir)){
+    assert(fs.lstatSync(nativeDir).isDirectory(),'native walking evidence directory cannot be a link')
+    for(const name of fs.readdirSync(nativeDir))if(/^(?:frame-\d{6}\.(?:bgra|png|json)|(?:capture|ready|failure|identity|request|png-projection)\.json|(?:helper|compile)\.log)$/.test(name)&&fresh(path.join(nativeDir,name))){
+     const source=path.join(nativeDir,name);assert(fs.lstatSync(source).isFile(),'native walking evidence must be a regular original file')
+     fs.mkdirSync(nativeTarget,{recursive:true});fs.copyFileSync(source,path.join(nativeTarget,name),fs.constants.COPYFILE_EXCL);copied.push('current-themes/'+theme+'/'+nativeName+'/'+name)
+    }
+   }
+   const nativeReceipt=path.join('out',nativeName+'.json');if(fresh(nativeReceipt)){assert(fs.lstatSync(nativeReceipt).isFile(),'native walking receipt must be a regular file');const target=path.join(extensionProof,'current-themes',theme);fs.mkdirSync(target,{recursive:true});fs.copyFileSync(nativeReceipt,path.join(target,path.basename(nativeReceipt)),fs.constants.COPYFILE_EXCL);copied.push('current-themes/'+theme+'/'+path.basename(nativeReceipt))}
   }
   const nativeAccepted=complete&&performanceBenchmark?.passed===true&&nativeVideoEvidence?.complete===true&&nativeVideoEvidence.nativeDeliveryBenchmark?.passed===true
   fs.writeFileSync(path.join(extensionProof,'attempt.json'),JSON.stringify({version,arch,stage,complete,functionalComplete:complete,nativeAccepted,performanceBenchmark,performancePassed:performanceBenchmark?.passed??null,nativeVideoEvidence,observerABA119,acceptance:'functional and both original capture benchmarks required; independent visual, interaction and motion review is separate',error:extensionError||null,startedAt:new Date(attemptStarted).toISOString(),executable:exe,copied},null,2))

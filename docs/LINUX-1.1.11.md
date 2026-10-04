@@ -1,6 +1,14 @@
 # KAMUCL 1.1.11 Linux 接续构建、安装与验收边界
 
-2026-10-04 08:02（Asia/Hong_Kong）当前快照：第五轮 run [37160588146](https://github.com/kamubaba-i/KAMUCL/actions/runs/37160588146) 精确绑定 `5167500b6c27b9bbdd1e80f22d91d3f5904007eb`。Ubuntu 24.04 的 x64／ARM64 原生全套各 857 项：854 通过、0 失败、3 项既有平台 skip。两个打包作业成功，AppImage／DEB／tar.gz 共六包的原生干净解压、ELF／执行位／逐文件摘要和原包清单检查通过；两架构各 portable 26、DEB 25、AppImage 25 个提取文件。
+2026-10-04 09:02（Asia/Hong_Kong）当前快照：第六 [37163779037](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779037) 绑定 `69c1e89ba23a007535c77bae65052f19b6d87f58`。Ubuntu 24.04 x64／ARM64 两个原生打包作业通过，各 864 项为 861 通过、0 失败、3 skip。三格式共六包的实际原生干净解压、26／25／25 个成员闭包、ELF／执行位／摘要及每格式 resources/kamucl-linux.json 内嵌来源与目标 ELF 的 Electron 44.3.0 观察均通过，独立解包复核保持 nativeDesktop=false。
+
+Ubuntu 24.04 两架构与 26.04 x64 的 Xvfb 已真正启动应用，三次均在 ANGLE／OpenGL／Mesa llvmpipe 创建 WebGL 失败后出现 skin canvas missing；不是第五轮未启动应用的 xdpyinfo 前置失败。原先首错遮蔽已经修正，第六原错误／时间和失败完整保留。三主机均 Accelerated:no；24.04 为 Mesa 25.2.8／LLVM20，26.04 为 Mesa 26.0.8／LLVM21。EGL／GL 库有实际安装记录，mesa-vulkan-drivers 是否存在和同进程 GPU feature status 尚无原观察，不能断言缺失。精确 [Chromium152 软件驱动规则](https://github.com/chromium/chromium/blob/152.0.7977.78/gpu/config/software_rendering_list.json) 是强线索，不是已证明的最终根因。
+
+第七只读 QA 在同一个原失败 GUI 进程先核对 PID／ABI／可执行路径／仍存活状态，再有限时观察 Electron GPU API、CDP SystemInfo 和原始 scratch context 错误，二次诊断／保存错误不会覆盖原 ERR_ASSERTION；不换后端、不绕过 sandbox、不重试为通过。该观察器的本机负例通过，实际 Linux 执行尚未完成；第七源码 SHA=null。Ubuntu24／26 四种组合均没有当前完整真实 GNOME／KDE／XWayland 桌面、游戏及一致性合格证据，所有评分 null、完整资格 false、无 Release。本批第七 Windows 全套为 874／873／0／1 skip、TypeScript 通过，覆盖 Mac 原生 BGRA 收集追加之前的冻结 QA；后补收集另经针对性校验。当前黑橙 general refinement 实际 GUI 已通过，当前 ux110 可见步行／外观另在执行，不能扩大有限 scope。上一四主题 final3 可见模型／步行／壁纸仍为 source69 已验证画面；这些不替代 Linux。以下为原历史快照。
+
+第六旧源码／交接漏收 build/icon.png 和 build/icon-512.png，原审计 out/handoff111-history-source-closure-defect.json 保留；下一源码／交接必须重新核对完整构建输入闭包，尚无未来批次成功声明。
+
+2026-10-04 08:02（Asia/Hong_Kong）第五轮历史快照：第五轮 run [37160588146](https://github.com/kamubaba-i/KAMUCL/actions/runs/37160588146) 精确绑定 `5167500b6c27b9bbdd1e80f22d91d3f5904007eb`。Ubuntu 24.04 的 x64／ARM64 原生全套各 857 项：854 通过、0 失败、3 项既有平台 skip。两个打包作业成功，AppImage／DEB／tar.gz 共六包的原生干净解压、ELF／执行位／逐文件摘要和原包清单检查通过；两架构各 portable 26、DEB 25、AppImage 25 个提取文件。
 
 Ubuntu 24.04 两架构及 26.04 x64 的三次 Xvfb compatibility 预检均在 `xdpyinfo` 缺失处失败（`spawnSync xdpyinfo ENOENT`），应用未启动，GUI 模块执行数为 0。后续 `scandir out ENOENT` 又遮蔽首错；原始日志及原不完整 summary 保留，不回填为通过。已冻结补充 `x11-utils`、独立输出目录及保留首错的收尾流程，必须新原生重跑。真实桌面 runner 仍未配置，四种正式 OS／架构均未通过桌面、游戏或完整资格；26.04 ARM64 也无 hosted compatibility 预检。
 
@@ -12,7 +20,7 @@ Ubuntu 24.04 两架构及 26.04 x64 的三次 Xvfb compatibility 预检均在 `x
 
 记录时间：2026-10-04 04:44（本地时间，Asia/Hong_Kong）。
 
-本轮目标为 Ubuntu 24.04 LTS、26.04 LTS 的 x64 与 ARM64，复用当前共享功能、界面与动作实现。**第五轮已完成 Ubuntu 24.04 两架构原生构建及六包限定完整性检查，但四种组合均没有当前完整真实桌面、游戏及功能／外观／动效一致性合格记录。新包装身份修订尚需重新原生构建。**
+本轮目标为 Ubuntu 24.04 LTS、26.04 LTS 的 x64／ARM64，共享当前功能、界面与动作。**第六两架构原生三格式及内嵌身份检查已通过，但三次实际 Xvfb WebGL 失败保留；四种组合完整真实桌面、游戏和功能／外观／动效均未合格。第七失败诊断必须随新提交重新原生执行。**
 
 2026-10-04 05:33（Asia/Hong_Kong）更新：workflow 标准授权已完成，候选 `ab54c5f` 已推送 master，main 以 cherry-pick 同步为 `db13257`。Linux run `37154520531` 在两个原生架构完成依赖安装后，均停在 FRP 测试夹具的初始下载等待；已取消并保留原始日志，修复夹具后重新运行完整测试，不跳过原生校验。此前 OAuth 拒绝推送和网络失败仍是历史记录；尚无本轮 Linux 成品或完整桌面验收，尚未发布。
 
@@ -22,9 +30,9 @@ Ubuntu 24.04 两架构及 26.04 x64 的三次 Xvfb compatibility 预检均在 `x
 
 | 环境 | 当前原生构建 | 当前真实桌面、游戏与完整验收 |
 | --- | --- | --- |
-| Ubuntu 24.04 x64 | 第五轮原生三格式与干净解压检查通过；新内嵌身份待重建 | Xvfb 预检缺 xdpyinfo，未启动应用；真实桌面／游戏未验 |
-| Ubuntu 24.04 ARM64 | 第五轮原生三格式与干净解压检查通过；新内嵌身份待重建 | Xvfb 预检缺 xdpyinfo，未启动应用；真实桌面／游戏未验 |
-| Ubuntu 26.04 x64 | 无在该 OS 的独立构建；使用 24.04 包预检 | Xvfb 预检缺 xdpyinfo，未启动应用；真实桌面／游戏未验 |
+| Ubuntu 24.04 x64 | 第六三格式、内嵌 source69／runtime44.3 和原生解压检查通过 | Xvfb 实际应用在 llvmpipe 上 WebGL 失败；真实桌面／游戏未验 |
+| Ubuntu 24.04 ARM64 | 第六三格式、内嵌 source69／runtime44.3 和原生解压检查通过 | Xvfb 实际应用在 llvmpipe 上 WebGL 失败；真实桌面／游戏未验 |
+| Ubuntu 26.04 x64 | 使用第六 24.04 x64 原生包；无该 OS 独立构建 | Xvfb 实际应用在 llvmpipe 上 WebGL 失败；真实桌面／游戏未验 |
 | Ubuntu 26.04 ARM64 | 未执行 | 无 hosted 预检；真实桌面／游戏未验 |
 
 Linux 专项测试在当前 Windows 开发机上为 7 项通过、1 项跳过，类型检查通过。通过项覆盖凭据保护、ELF 架构、TAR 路径与完整性、包身份和 AppImage 安全拒绝；跳过项是在 Linux 真正运行更新 shell、交换文件与失败恢复的回归。它们不证明 Linux GUI、密钥服务、系统安装器、游戏或帧率已通过。
@@ -33,7 +41,7 @@ Linux 专项测试在当前 Windows 开发机上为 7 项通过、1 项跳过，
 
 - [原生打包](../scripts/pack-linux.cjs)：当前架构编译与打包，不用另一架构的运行库拼包。
 - [运行库检查](../scripts/verify-linux-runtime.cjs)：ELF、执行权限、游戏窗口助手、Java 桥、ASAR 与隐私文件边界；新修订直接运行目标 ELF 的 Node 模式观察 platform／arch／Electron 版本，不添加图形或 sandbox 绕过。
-- [包检查](../scripts/verify-linux-package.cjs)：三种包干净解压、逐文件 SHA256 和执行位核对；新修订核对各提取包的内嵌 Git 提交、schemaVersion=1 和实际目标 ELF 运行时身份，实际通过仍待新 CI。
+- [包检查](../scripts/verify-linux-package.cjs)：三种包干净解压、逐文件 SHA256 和执行位核对；新修订核对各提取包的内嵌 Git 提交、schemaVersion=1 和实际目标 ELF 运行时身份，第六实际逐格式通过；第七新 QA 仍待原生运行。
 - [桌面验证](../scripts/verify-linux-desktop.cjs)：真实桌面与夹具 smoke 分开记录，保留原始视频和时间；报告仍列出未覆盖项。
 - [Linux 工作流](../.github/workflows/linux-build.yml)：Ubuntu 24.04 两架构原生打包；24.04 两架构及 26.04 x64 的 Xvfb smoke；四种真实桌面组合须另有对应自托管机器。
 
@@ -41,7 +49,7 @@ Linux 专项测试在当前 Windows 开发机上为 7 项通过、1 项跳过，
 
 在对应架构的 Ubuntu 上使用 Node.js 24、npm 与 JDK 17。JDK 用于编译随包 Java 桥；实际游戏所需 Java 版本由启动器另行选择或下载，并须核对真实架构。以 Node `process.arch` 为准：x64 对应 Debian 包的 `amd64`，ARM64 对应 `arm64`。x64 包和 ARM64 包必须分别原生构建。
 
-以下命令用于新提交在独立工作目录的重跑；第五轮已有构建结果不包含新内嵌身份，历史路径及失败见上方记录。先检出最终候选并记录完整提交 SHA，安装构建依赖：
+以下命令用于新提交在独立工作目录的重跑；第六 source69 的构建结果包含已实际验证的内嵌身份，第七新 QA 尚需运行，历史原包不重写。先检出最终候选并记录完整提交 SHA，安装构建依赖：
 
 ```sh
 sudo apt-get update

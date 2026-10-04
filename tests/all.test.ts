@@ -166,3 +166,5 @@ import './kamu-observer-motion-mode-119.test.cjs'
 import './platform-release-gate.test.cjs'
 
 import './mac-package-identity-111.test'
+import './mac-skin-walk-capture-111.test'
+import './linux-graphics-failure-111.test.cjs'

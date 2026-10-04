@@ -1,6 +1,16 @@
 # START HERE — KAMUCL 1.1.11 接续候选
 
-2026-10-04 08:02（Asia/Hong_Kong）当前快照：第五轮绑定已推送提交 `5167500`，Mac run `37160588297` 和 Linux run `37160588146` 均已结束。Mac 两架构各 857 项为 853 通过、0 失败、4 项既有平台 skip；2 个打包、2 个实际 Demo 游戏和 6 个限定集成任务成功，4 个 APP／DMG UI 任务失败。Linux 两架构各 857 项为 854 通过、0 失败、3 skip，六个三格式包的原生干净解压与包检查通过；三次 Xvfb 预检因缺少 `xdpyinfo` 失败，随后 finalizer 的 `scandir out ENOENT` 遮蔽首错，应用未启动。这是 QA 前置失败，不能算应用失败或桌面通过。
+2026-10-04 09:02（Asia/Hong_Kong）当前快照：第六轮精确绑定已推送 master `69c1e89ba23a007535c77bae65052f19b6d87f58`；main `bb41072b907d8ade365e9beadc4a71ee7e69a6ca` 经 cherry-pick 保留独立历史。Mac run [37163779043](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779043) 和 Linux run [37163779037](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779037) 已结束，均不构成完整平台合格或正式发行。版本仍为 1.1.11，本批不再修改 03:59 的内置更新日志或递增版本。
+
+Mac 两架构各 864 项为 860 通过、0 失败、4 项既有平台 skip；15 个任务中 12 成功、3 个正式 UI 失败。成功任务为 2 个打包、2 个实际 Demo 游戏、6 个限定集成、ARM DMG 的限定四主题 GUI 和 1 个独立 Intel GPU 诊断。ARM DMG 的实际可见皮肤步行、焦点和受管壁纸均通过；ARM APP 的原始 CDP 90 帧在第 55→56 帧倒退 1.618 ms，原算术 FPS 60.53927763443197、formalTimingUsable=false，保持失败。Intel APP／DMG 实际 WebGL 初始化仍失败；独立诊断收集成功也仍无画布，不能把它当产品修复。第六四个 Mac 成品实际内嵌文件为 Contents/Resources/kamucl-mac.json，sourceCommit、Electron 44.3.0、架构、最低 macOS 13 和签名均有实际核对；旧摘要的 kamucl-build.json 计划名在 summary.json 的 historicalSnapshotErrors 保留。
+
+Linux 两架构各 864 项为 861 通过、0 失败、3 skip；六个 AppImage／DEB／tar.gz 原生包的干净解压、ELF、执行位、摘要及内嵌 source69／实际 Electron 44.3.0 身份通过。三次 Xvfb 已启动实际应用，均在 ANGLE／Mesa llvmpipe 的 WebGL 创建失败后触发 skin canvas missing，原失败和时间保留，finalizer 没有再遮蔽首错。软件驱动 blocklist 是强线索，最终根因仍待同一进程 GPU 状态诊断；不能宣称 Vulkan 驱动缺失。没有 Ubuntu 24／26 两架构的真实 GNOME／KDE／XWayland 硬件桌面主机或完整验收。
+
+本批第七完整本机公开测试为 874 项：873 通过、0 失败、1 项 Linux 原生 shell skip，duration=117970.8989 ms，TypeScript 通过。这覆盖原冻结的 QA／合同测试；全套之后追加的 Mac 原生 BGRA 证据收集修订另经针对性校验，不能笼统称全部最终 QA 都在 874 项之前冻结。它们不能替代 Mac／Linux 原生执行。本批黑橙 general refinement 实际 GUI 已通过，包含最小窗口、1.25／1.5 缩放、最大化与原报告中的有限交互；当前黑橙 ux110 可见步行／外观另在执行，尚不预填通过。四主题 final3 可见模型／步行／壁纸仍为上一 source69 已验证结果。新 Mac SCK 与 Linux 同进程 GPU 观察器尚未原生运行，源7提交 SHA=null、nativeRunsStarted=false；Windows 产品输入未改，不因 QA／文档重包装。所有平台完整资格 false、三项评分 null、无正式 Release。
+
+全部平台 completeQualification=false，视觉／交互／动效分别为 null；没有 v1.1.11 正式标签或公开 Release。第六源码／旧交接的build/icon.png 与 build/icon-512.png 两个构建图标漏收已由独立审计记录，下一交接按根文档与完整 source prefix 闭包核对，不能以旧包运输验证冒充源码闭包完成。第五轮旧世界 SHA 缺失继续保留；第六真实正常退出后的新 Demo 世界 SHA 单独记录，不补造旧世界。用户图片、设置、收藏、历史计数、私有账号／世界／整合包和未提交文件保留，不纳入公开包。以下旧快照只描述各自记录时点。
+
+2026-10-04 08:02（Asia/Hong_Kong）第五轮历史快照：第五轮绑定已推送提交 `5167500`，Mac run `37160588297` 和 Linux run `37160588146` 均已结束。Mac 两架构各 857 项为 853 通过、0 失败、4 项既有平台 skip；2 个打包、2 个实际 Demo 游戏和 6 个限定集成任务成功，4 个 APP／DMG UI 任务失败。Linux 两架构各 857 项为 854 通过、0 失败、3 skip，六个三格式包的原生干净解压与包检查通过；三次 Xvfb 预检因缺少 `xdpyinfo` 失败，随后 finalizer 的 `scandir out ENOENT` 遮蔽首错，应用未启动。这是 QA 前置失败，不能算应用失败或桌面通过。
 
 本批已冻结 QA 和包装身份修订，Windows 产品构建输入无变化。Windows 最新全套为 864 项：863 通过、0 失败、1 项 Linux 原生 shell skip，TypeScript 通过；四主题最新 final3 实际 GUI 的可见模型、原帧时间、真实像素变化、焦点及受管壁纸解码断言通过，仍属限定本机回归。Mac／Linux 新内嵌 sourceCommit／runtimeVersion 身份必须在本次提交后的新原生构建中验证，目前尚未重建。本批源码 SHA 和 Delivery 外部回执须在提交后更新，不能给第五轮旧包绑定未来提交。全部平台完整资格仍为 false，视觉／交互／动效评分均为 null；没有 v1.1.11 正式标签或 Release。
 
@@ -8,7 +18,7 @@
 
 2026-10-04 06:30（Asia/Hong_Kong）更新：第三轮 `2b1e6f1` 的 Mac run `37157548139` 与 Linux run `37157548122` 均完整结束为 failure，没有取消或死锁。Mac 两架构各 853 项为 846 通过、3 失败、4 项既有系统限定 skip；失败为测试临时目录别名 `/var` 与产品正确返回的 `/private/var` 规范路径不同。Linux x64 为 850 通过、0 失败、3 skip 后进入生产构建，但旧打包检查要求官方 Electron 44.3.0 已不含的 `libEGL.so`；ARM64 为 849 通过、1 失败、3 skip，合成 Windows classifier 被正确的 ARM 安全规则拒绝。已修正测试根目录和原生库夹具，按两份官方 ZIP／SHA 建立准确的运行时清单，保留 ELF、执行位、ICD、资源和许可检查。Windows 最新全套 855 项为 854 通过、0 失败、1 项原有 Linux skip。此次新增 Linux 打包校验变化，Windows 产品输入和成品未改变；完整原生重跑仍必需，尚无 Mac／Linux 成品、桌面／游戏或独立三项合格结论。原始失败日志及时间保留，不能改称通过。
 
-本包是多平台移植的接续候选，不是 Mac／Linux／鸿蒙完整验收完成或正式发行的声明。Windows 最新 EXE 与两个 ZIP 已完成干净解压及启动验证；第五轮已取得 Mac 双架构 ZIP／DMG 和 Linux 双架构三格式候选，原生包完整性结果及十个成品 SHA 已留存；四个 Mac UI 和三个 Linux QA 预检失败，尚无当前完整运行验收。新包装身份修订待重新构建。鸿蒙已生成原生 HAP 接续工程，但缺少官方 SDK、合法签名条件和实机，尚未生成 HAP 或验证游戏。以 CURRENT_STATUS.md、docs/RELEASE-1.1.11.md 和 docs/validation-1.1.11/independent-review.md 为当前权威状态；下方旧版本说明只用于追溯。
+本包是多平台移植的接续候选，不是 Mac／Linux／鸿蒙完整验收或正式发行。source69 的 Mac 四个与 Linux 六个新候选已实际生成、内嵌身份核对并保留 SHA；ARM DMG 限定 GUI 成功不覆盖 ARM APP 原时间逆序、Intel 两种包的 WebGL 失败或 Linux 三次 Xvfb 失败。当前第七 QA 尚无原生结果。鸿蒙缺官方 SDK、合法签名条件和实机，尚无 HAP 或游戏证明。以 CURRENT_STATUS.md、docs/RELEASE-1.1.11.md 和独立评审为当前状态，下方旧版本说明只用于追溯。
 
 Windows x64 使用 _handoff/artifacts/KAMUCL-1.1.11.exe，或解压紧凑 ZIP；无法使用自解压包装器时解压 windows-x64-unpacked ZIP。各附件 SHA256 在 CURRENT_STATUS.md；交接包逐文件清单在 _handoff/manifest.json 与 _handoff/SHA256SUMS.txt。账户、游戏、用户图片、私钥和未提交的 pelican-bicycle.html 不包含在内，接收者自行选择自己的游戏目录和登录。
 

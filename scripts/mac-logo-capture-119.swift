@@ -18,6 +18,7 @@ struct Request: Decodable {
     let windowBounds: Rect
     let crop: Rect
     let expectedScale: Double
+    let capturePurpose: String?
 }
 
 func timeFields(_ t: CMTime) -> [String: Any] {
@@ -110,13 +111,18 @@ final class Collector: NSObject, SCStreamOutput, SCStreamDelegate {
 @available(macOS 12.3, *)
 func runCapture(_ requestURL: URL, _ directory: URL) async throws {
     let request = try JSONDecoder().decode(Request.self, from: Data(contentsOf: requestURL))
+    let purpose = request.capturePurpose ?? "logo"
+    guard purpose == "logo" || purpose == "skin-walk" else { throw NSError(domain: "NativeLogoCapture", code: 22, userInfo: [NSLocalizedDescriptionKey: "Unsupported controlled capture purpose"]) }
     // Never use CGRequestScreenCaptureAccess: permission failure is explicit and
     // cannot pop an interactive request on a CI machine.
     guard CGPreflightScreenCaptureAccess() else { throw NSError(domain: "NativeLogoCapture", code: 10, userInfo: [NSLocalizedDescriptionKey: "Screen recording permission not pre-authorized; no prompt requested"]) }
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
     guard let display = content.displays.first(where: { $0.displayID == request.displayID }) else { throw NSError(domain: "NativeLogoCapture", code: 11, userInfo: [NSLocalizedDescriptionKey: "Requested visible display missing"]) }
     let crop = request.crop.cg
-    guard crop.width > 0, crop.height > 0, crop.width <= 256, crop.height <= 256, display.frame.contains(crop) else { throw NSError(domain: "NativeLogoCapture", code: 12, userInfo: [NSLocalizedDescriptionKey: "LOGO region must fit the actual visible display and bounded 256pt region"]) }
+    // The existing LOGO contract remains 256pt. Walking captures must include
+    // the complete measured canvas, with an independent bounded 512pt contract.
+    let maximum: CGFloat = purpose == "skin-walk" ? 512.0 : 256.0
+    guard crop.width > 0, crop.height > 0, crop.width <= maximum, crop.height <= maximum, display.frame.contains(crop) else { throw NSError(domain: "NativeLogoCapture", code: 12, userInfo: [NSLocalizedDescriptionKey: "Complete \(purpose) region must fit the actual display and its explicit \(maximum)pt bound"]) }
     let matches = content.windows.filter { w in
         w.owningApplication?.processID == request.ownerPID && w.isOnScreen && w.windowLayer == 0 &&
         abs(w.frame.minX - request.windowBounds.x) <= 1 && abs(w.frame.minY - request.windowBounds.y) <= 1 &&
@@ -127,6 +133,9 @@ func runCapture(_ requestURL: URL, _ directory: URL) async throws {
     guard let screen = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == request.displayID }) else { throw NSError(domain: "NativeLogoCapture", code: 15) }
     let scale = Double(screen.backingScaleFactor)
     guard scale == request.expectedScale else { throw NSError(domain: "NativeLogoCapture", code: 16, userInfo: [NSLocalizedDescriptionKey: "Actual native display scale differs from supplied geometry"]) }
+    if purpose == "skin-walk" {
+        guard crop.width * scale <= 1024 && crop.height * scale <= 1024 else { throw NSError(domain: "NativeLogoCapture", code: 23, userInfo: [NSLocalizedDescriptionKey: "Whole walking canvas exceeds bounded original pixel dimensions; partial crop is forbidden"]) }
+    }
     let configuration = SCStreamConfiguration()
     configuration.sourceRect = crop.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
     configuration.width = Int((crop.width * scale).rounded(.up)); configuration.height = Int((crop.height * scale).rounded(.up))
@@ -139,7 +148,8 @@ func runCapture(_ requestURL: URL, _ directory: URL) async throws {
     collector.identity = ["displayID": display.displayID, "displayBounds": rectFields(display.frame), "displayPixels": ["width": display.width, "height": display.height], "backingScaleFactor": scale,
                           "windowID": window.windowID, "ownerPID": request.ownerPID, "windowBounds": rectFields(window.frame), "globalCrop": rectFields(crop), "sourceRect": rectFields(configuration.sourceRect),
                           "outputWidth": configuration.width, "outputHeight": configuration.height, "pixelFormat": "BGRA8", "minimumFrameInterval": timeFields(.zero), "queueDepth": 5,
-                          "source": "visible full-display filter cropped to actual on-screen LOGO; no window replacement/exclusion; cursor omitted"]
+                          "capturePurpose": purpose,
+                          "source": "visible full-display filter cropped to actual on-screen \(purpose) ROI; no window replacement/exclusion; cursor omitted"]
     try writeJSON(collector.identity, directory.appendingPathComponent("identity.json"))
     let stream = SCStream(filter: filter, configuration: configuration, delegate: collector)
     try stream.addStreamOutput(collector, type: .screen, sampleHandlerQueue: collector.queue)

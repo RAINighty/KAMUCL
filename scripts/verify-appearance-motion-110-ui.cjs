@@ -1,6 +1,6 @@
 // Exact built product in a disposable profile. Service fixtures are labeled below.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict')
-module.exports=async({call,evaluate,main,nav,wait,screenshot,recordScreencast,version,profile,ws})=>{
+module.exports=async({call,evaluate,main,nav,wait,screenshot,recordScreencast,version,profile,ws,ownedTrack})=>{
  const proof={version,theme:process.env.KAMUCL_TEST_THEME,service:'Favorite artwork metadata fixtures; UI, settings storage, image rendering and WebGL are the actual product',checks:[],samples:[]}
  const save=()=>fs.writeFileSync(`out/appearance-motion-${proof.theme}-110.json`,JSON.stringify(proof,null,2))
  const ready=async(expr,label)=>{let result;for(let i=0;i<100;i++){result=await evaluate(expr);if(result)return result;await wait(100)}throw Error(label+' timed out')}
@@ -62,16 +62,26 @@ module.exports=async({call,evaluate,main,nav,wait,screenshot,recordScreencast,ve
   const bounds=proof.walkCapture.bounds
   assert(bounds.contextWebGL&&!bounds.contextWebGL.lost,'walking capture must use the actual live WebGL context')
   assert(bounds.hitVisible&&bounds.width>0&&bounds.height>0&&bounds.x>=0&&bounds.y>=0&&bounds.x+bounds.width<=bounds.viewportWidth&&bounds.y+bounds.height<=bounds.viewportHeight,'actual walking canvas must be fully visible, not below the home-page fold')
-  const recording=await recordScreencast('skin-walk-110',async()=>{},1400);proof.recording=recording;save()
-  assert(recording.frames.every((frame,index)=>Number.isFinite(frame.timestamp)&&(index===0||frame.timestamp>recording.frames[index-1].timestamp)),'original compositor timestamps must be finite and strictly increasing')
+  let recording
+  if(proof.walkCapture.nativeWindow.platform==='darwin'){
+    const nativeWalk=await require('./verify-mac-skin-walk-capture.cjs')({main,evaluate,wait,version,ownedTrack},bounds,()=>recordScreencast('skin-walk-110',async()=>{},1400))
+    proof.walkCapture.nativeCapture=nativeWalk;recording=nativeWalk.recording
+    proof.walkCapture.cdpTiming=require('./verify-mac-skin-walk-capture.cjs').cdpTiming(recording)
+  }else recording=await recordScreencast('skin-walk-110',async()=>{},1400)
+  proof.recording=recording;save()
+  const monotonic=recording.frames.every((frame,index)=>Number.isFinite(frame.timestamp)&&(index===0||frame.timestamp>recording.frames[index-1].timestamp))
+  // The macOS cadence gate above uses actual native presentation PTS. Preserve
+  // CDP arrival order and failed wall-clock diagnostics without relabelling
+  // their FPS; Chromium does not promise monotonic arrival-order metadata.
+  if(proof.walkCapture.nativeWindow.platform!=='darwin')assert(monotonic,'original compositor timestamps must be finite and strictly increasing')
   const originalElapsed=recording.frames.length>1?recording.frames.at(-1).timestamp-recording.frames[0].timestamp:0
   const originalIntervals=recording.frames.slice(1).map((frame,index)=>frame.timestamp-recording.frames[index].timestamp)
   const originalFps=originalElapsed?(recording.frames.length-1)/originalElapsed:0
   assert.equal(recording.elapsed,originalElapsed);assert.equal(recording.fps,originalFps);assert.deepEqual(recording.intervals,originalIntervals)
-  proof.walkCapture.originalTiming={elapsed:originalElapsed,fps:originalFps,frameCount:recording.frames.length,strictlyIncreasing:true};save()
-  assert(recording.frames.length>=10&&recording.fps>=30,'original visible skin-walk capture must meet the existing 30 FPS release minimum')
+  proof.walkCapture.originalTiming={elapsed:originalElapsed,fps:originalFps,frameCount:recording.frames.length,strictlyIncreasing:monotonic,timingUsable:proof.walkCapture.cdpTiming?.timingUsable??monotonic,formalCadenceSource:proof.walkCapture.nativeWindow.platform!=='darwin'};save()
+  if(proof.walkCapture.nativeWindow.platform!=='darwin')assert(recording.frames.length>=10&&recording.fps>=30,'original visible skin-walk capture must meet the existing 30 FPS release minimum')
   const sharp=require('sharp'),pixelSamples=[]
-  for(const index of [...new Set([0,Math.floor(recording.frames.length/3),Math.floor(recording.frames.length*2/3),recording.frames.length-1])]){
+  for(const index of recording.frames.length?[...new Set([0,Math.floor(recording.frames.length/3),Math.floor(recording.frames.length*2/3),recording.frames.length-1])]:[]){
     const image=sharp(path.join(recording.directory,recording.frames[index].file)),size=await image.metadata(),sx=size.width/bounds.viewportWidth,sy=size.height/bounds.viewportHeight
     const left=Math.max(0,Math.floor(bounds.x*sx)),top=Math.max(0,Math.floor(bounds.y*sy)),width=Math.min(size.width-left,Math.floor(bounds.width*sx)),height=Math.min(size.height-top,Math.floor(bounds.height*sy))
     assert(width>0&&height>0)
@@ -79,7 +89,7 @@ module.exports=async({call,evaluate,main,nav,wait,screenshot,recordScreencast,ve
   }
   const reference=pixelSamples[0],changes=pixelSamples.slice(1).map(sample=>{assert.equal(sample.pixels.length,reference.pixels.length);let changed=0;for(let i=0;i<sample.pixels.length;i+=3)if(Math.max(Math.abs(sample.pixels[i]-reference.pixels[i]),Math.abs(sample.pixels[i+1]-reference.pixels[i+1]),Math.abs(sample.pixels[i+2]-reference.pixels[i+2]))>12)changed++;return{index:sample.index,changedPixels:changed,fraction:changed/(sample.width*sample.height)}})
   proof.walkCapture.pixelChanges={classification:'decoded original visible-canvas ROI; JPEG compression noise under12 ignored; frames and times unchanged',samples:pixelSamples.map(({pixels,...sample})=>sample),changes};save()
-  assert(changes.some(sample=>sample.fraction>.005),'natural walking must change pixels in the actual visible canvas')
+  if(proof.walkCapture.nativeWindow.platform!=='darwin')assert(changes.some(sample=>sample.fraction>.005),'natural walking must change pixels in the actual visible canvas')
   // The true OS/native splash preference is checked separately without changing system settings.
   const shell=await evaluate("({surface:getComputedStyle(document.documentElement).getPropertyValue('--shell-surface'),sidebar:getComputedStyle(document.documentElement).getPropertyValue('--bg-2')})")
   if(proof.theme==='transparent'){assert(shell.surface.includes('30%'));assert(shell.sidebar.includes('26%'))}

@@ -1,6 +1,16 @@
 # CURRENT STATUS — KAMUCL 1.1.11 接续候选
 
-2026-10-04 08:02（Asia/Hong_Kong）当前快照：第五轮绑定已推送提交 `5167500`，Mac run `37160588297` 和 Linux run `37160588146` 均已结束。Mac 两架构各 857 项为 853 通过、0 失败、4 项既有平台 skip；2 个打包、2 个实际 Demo 游戏和 6 个限定集成任务成功，4 个 APP／DMG UI 任务失败。Linux 两架构各 857 项为 854 通过、0 失败、3 skip，六个三格式包的原生干净解压与包检查通过；三次 Xvfb 预检因缺少 `xdpyinfo` 失败，随后 finalizer 的 `scandir out ENOENT` 遮蔽首错，应用未启动。这是 QA 前置失败，不能算应用失败或桌面通过。
+2026-10-04 09:02（Asia/Hong_Kong）当前快照：第六轮精确绑定已推送 master `69c1e89ba23a007535c77bae65052f19b6d87f58`；main `bb41072b907d8ade365e9beadc4a71ee7e69a6ca` 经 cherry-pick 保留独立历史。Mac run [37163779043](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779043) 和 Linux run [37163779037](https://github.com/kamubaba-i/KAMUCL/actions/runs/37163779037) 已结束，均不构成完整平台合格或正式发行。版本仍为 1.1.11，本批不再修改 03:59 的内置更新日志或递增版本。
+
+Mac 两架构各 864 项为 860 通过、0 失败、4 项既有平台 skip；15 个任务中 12 成功、3 个正式 UI 失败。成功任务为 2 个打包、2 个实际 Demo 游戏、6 个限定集成、ARM DMG 的限定四主题 GUI 和 1 个独立 Intel GPU 诊断。ARM DMG 的实际可见皮肤步行、焦点和受管壁纸均通过；ARM APP 的原始 CDP 90 帧在第 55→56 帧倒退 1.618 ms，原算术 FPS 60.53927763443197、formalTimingUsable=false，保持失败。Intel APP／DMG 实际 WebGL 初始化仍失败；独立诊断收集成功也仍无画布，不能把它当产品修复。第六四个 Mac 成品实际内嵌文件为 Contents/Resources/kamucl-mac.json，sourceCommit、Electron 44.3.0、架构、最低 macOS 13 和签名均有实际核对；旧摘要的 kamucl-build.json 计划名在 summary.json 的 historicalSnapshotErrors 保留。
+
+Linux 两架构各 864 项为 861 通过、0 失败、3 skip；六个 AppImage／DEB／tar.gz 原生包的干净解压、ELF、执行位、摘要及内嵌 source69／实际 Electron 44.3.0 身份通过。三次 Xvfb 已启动实际应用，均在 ANGLE／Mesa llvmpipe 的 WebGL 创建失败后触发 skin canvas missing，原失败和时间保留，finalizer 没有再遮蔽首错。软件驱动 blocklist 是强线索，最终根因仍待同一进程 GPU 状态诊断；不能宣称 Vulkan 驱动缺失。没有 Ubuntu 24／26 两架构的真实 GNOME／KDE／XWayland 硬件桌面主机或完整验收。
+
+本批第七完整本机公开测试为 874 项：873 通过、0 失败、1 项 Linux 原生 shell skip，duration=117970.8989 ms，TypeScript 通过。这覆盖原冻结的 QA／合同测试；全套之后追加的 Mac 原生 BGRA 证据收集修订另经针对性校验，不能笼统称全部最终 QA 都在 874 项之前冻结。它们不能替代 Mac／Linux 原生执行。本批黑橙 general refinement 实际 GUI 已通过，包含最小窗口、1.25／1.5 缩放、最大化与原报告中的有限交互；当前黑橙 ux110 可见步行／外观另在执行，尚不预填通过。四主题 final3 可见模型／步行／壁纸仍为上一 source69 已验证结果。新 Mac SCK 与 Linux 同进程 GPU 观察器尚未原生运行，源7提交 SHA=null、nativeRunsStarted=false；Windows 产品输入未改，不因 QA／文档重包装。所有平台完整资格 false、三项评分 null、无正式 Release。
+
+全部平台 completeQualification=false，视觉／交互／动效分别为 null；没有 v1.1.11 正式标签或公开 Release。第六源码／旧交接的build/icon.png 与 build/icon-512.png 两个构建图标漏收已由独立审计记录，下一交接按根文档与完整 source prefix 闭包核对，不能以旧包运输验证冒充源码闭包完成。第五轮旧世界 SHA 缺失继续保留；第六真实正常退出后的新 Demo 世界 SHA 单独记录，不补造旧世界。用户图片、设置、收藏、历史计数、私有账号／世界／整合包和未提交文件保留，不纳入公开包。以下旧快照只描述各自记录时点。
+
+2026-10-04 08:02（Asia/Hong_Kong）第五轮历史快照：第五轮绑定已推送提交 `5167500`，Mac run `37160588297` 和 Linux run `37160588146` 均已结束。Mac 两架构各 857 项为 853 通过、0 失败、4 项既有平台 skip；2 个打包、2 个实际 Demo 游戏和 6 个限定集成任务成功，4 个 APP／DMG UI 任务失败。Linux 两架构各 857 项为 854 通过、0 失败、3 skip，六个三格式包的原生干净解压与包检查通过；三次 Xvfb 预检因缺少 `xdpyinfo` 失败，随后 finalizer 的 `scandir out ENOENT` 遮蔽首错，应用未启动。这是 QA 前置失败，不能算应用失败或桌面通过。
 
 本批已冻结 QA 和包装身份修订，Windows 产品构建输入无变化。Windows 最新全套为 864 项：863 通过、0 失败、1 项 Linux 原生 shell skip，TypeScript 通过；四主题最新 final3 实际 GUI 的可见模型、原帧时间、真实像素变化、焦点及受管壁纸解码断言通过，仍属限定本机回归。Mac／Linux 新内嵌 sourceCommit／runtimeVersion 身份必须在本次提交后的新原生构建中验证，目前尚未重建。本批源码 SHA 和 Delivery 外部回执须在提交后更新，不能给第五轮旧包绑定未来提交。全部平台完整资格仍为 false，视觉／交互／动效评分均为 null；没有 v1.1.11 正式标签或 Release。
 
@@ -18,19 +28,19 @@
 
 ## Remaining
 
-第五轮 Mac 双架构 ZIP／DMG 与 Linux 双架构三格式已完成原生生成及限定包检查；它们精确绑定 5167500。本批新内嵌提交／运行时身份尚无原生新包，须重新构建并重新验收。Mac 原 ARM 皮肤步行不可见、壁纸断言失败和 Intel WebGL 缺失尚未获新原生通过；Linux 预检未启动应用，真实桌面仍缺。全部平台的安装、所有页面及真实联机／更新完整验收尚未完成。独立评审已核对有限 Windows 截图和原始录屏，但各平台视觉、交互、动效仍未评分，完整功能通过项不能由局部 GUI 回归填充。鸿蒙缺少 SDK、合法签名与设备，尚无 HAP 或 JVM／LWJGL／JNI 游戏运行链。
+第六 source69 的 Mac 四包和 Linux 六包已完成原生生成、真实内嵌提交／运行时身份和限定包检查。ARM DMG 四主题可见步行与壁纸通过，ARM APP 原 CDP 时间逆序和 Intel APP／DMG WebGL 缺失仍失败；Linux 三次 Xvfb 的实际应用也在 llvmpipe 上失败。当前第七 QA 的原生采集／GPU 状态观察尚未原生验证。所有页面、真实账号／联机／更新和完整矩阵尚未完成，三项独立评分均未给出。鸿蒙缺 SDK、合法签名、设备和完整 JVM／LWJGL／JNI 游戏链。
 
-GitHub workflow 标准授权已成功完成，第五轮 `5167500b6c27b9bbdd1e80f22d91d3f5904007eb` 已推送 master，main 经 cherry-pick 同步为 `598096a630ac515777ee31efa73f473f6518d8f4`，独立历史保留；本批尚未提交的 QA／包装／文档源码身份须在提交后另记。首次 Mac run `37154520494` 和 Linux run `37154520531` 因 FRP 夹具等待取消回调而取消。第二次 Mac `37155930792`／Linux `37155930845` 实际通过 FRP 后，分别已有 319／320 条通过和 1 条旧 Windows 更新夹具失败，并停在重复等待 POSIX spawn 的测试，亦已取消。两次原始时间戳、失败行和日志 ZIP 保留，不把取消记录或测试修复算作产品验收。后续第三至第五轮完整运行的结果与失败已逐轮保留；第五轮包通过不覆盖 UI／桌面失败。本批新修订须重新运行完整原生构建。此前 OAuth 超时、过期代码及拒绝推送记录继续保留。没有 v1.1.11 标签或公开 Release。本地源码／交接包的最终 SHA、干净解压和验证命令由外部回执记录，不能用本说明推断已经发布。
+GitHub workflow 标准授权已完成，第六 master `69c1e89ba23a007535c77bae65052f19b6d87f58` 与 main `bb41072b907d8ade365e9beadc4a71ee7e69a6ca` 已实际推送，main 为 cherry-pick 独立历史。当前第七 QA／文档批次尚未提交，其 sourceCommit=null，提交后再写外部源码／Delivery 回执。首次和第二次 FRP／POSIX 夹具等待取消、旧 Windows 更新夹具误路由，以及第三至第六轮原日志和失败逐轮保留，不改称通过。此前 OAuth 权限拒绝、超时和过期授权记录仍是历史；没有 v1.1.11 标签或公开 Release，不操作 wuhui。
 
 ## Known issues and risks
 
-历史 Intel 活动停顿与 CDP／SCK 低于门槛仍保持失败；第五轮 Intel 当前 WebGL／EGL 初始化实际失败也未解决。ARM LOGO 达标不能覆盖其单帧不可见皮肤步行或后续壁纸断言失败。Linux 提取运行的 AppImage／缺少 FUSE 不自动替换；DEB 更新需要系统安装器确认；桌面模糊和外部窗口控制受合成器及 X11／XWayland 能力限制。拒绝不安全凭据持久化；缺少系统密钥服务时仅会话登录。仅 x64 游戏或模组原生库不能冒充 ARM64 兼容。
+历史 Intel 活动停顿与 CDP／SCK 未达标继续失败；第六 Intel APP／DMG 当前 WebGL 初始化仍未解决。ARM APP 90 个原帧的 55→56 时间倒退 1.618 ms，算术 FPS 60.53927763443197 不能使其原时序可用；不排序或重写帧时间。ARM DMG 的独立四主题可见步行通过不填补 APP 失败。Linux AppImage 缺少 FUSE／提取运行不自动替换；DEB 交系统安装器确认不等于自动更新完成；系统模糊与外部窗口控制仍受合成器及 X11／XWayland 能力限制。安全凭据、会话回退和 ARM 原生库拒绝规则保持。
 
-物理音效听感、全部真实账号与社区服务、跨架构真实联机及完整功能矩阵未覆盖。第五轮 Mac 包为 ad-hoc 签名，不是 Developer ID 签名或公证；当前鸿蒙运行时完整第三方许可证与签名条件尚未满足。第五轮实际 Demo 游戏的旧世界逐字节 SHA 未采集，不对已缺失的旧世界补造摘要；新正常退出／哈希断言须在新运行中验证。所有历史失败与当前未覆盖项见 docs/RELEASE-1.1.11.md、docs/validation-1.1.11/mac-acceptance.md、Linux 接续说明和独立评审。
+物理听感、全部真实账号与社区服务、跨架构真实联机及完整矩阵未覆盖。Mac 仍为 ad-hoc 签名，不是 Developer ID 或公证；第五轮旧世界逐字节 SHA 缺失不可补造，第六 Demo 正常退出后的新世界 SHA 有独立收据。第六源码／旧交接漏收build/icon.png 与 build/icon-512.png 两个构建图标的历史审计保留，下一源码／交接包必须核对完整构建输入闭包。详见本轮 summary、Mac／Linux 说明和独立评审。
 
 ## Recommended next action
 
-已冻结的 QA 修订通过独立复核和 864 项本机全套；内嵌身份及游戏哈希是新的包装／验收门控，在本次提交后重新执行两架构 Mac／Linux 原生构建与失败项复测，不能沿用第五轮旧包身份。仓库自托管 runner 清单为空；提供 Ubuntu 实际桌面／GPU 与正式系统组合，按矩阵补齐逐项运行和原始画面；取得合法鸿蒙 SDK、签名及实机后继续原生游戏链。只有各平台全部必测通过且三个独立评分各至少 9、无关键缺陷，才发布合格附件。不可把 Xvfb／交叉构建／Windows 回归视为对应平台通过。
+本机第七完整套件与 TypeScript 已通过；确认全套之后追加的原生证据收集针对性校验与当前黑橙 ux110 结果，再提交并重新执行 Mac／Linux 原生验收；以实际 PID 校验后的 Linux GPU 状态和 Mac SCK 原始 BGRA／PTS／完整采集状态分析失败，不更改正式帧率／时序门槛。补充 Ubuntu 24／26 两架构真实桌面／GPU主机，以及 Mac 支持 GPU／最低版本实机。提供合法鸿蒙 SDK、签名与设备后继续游戏链。各平台全部必测通过且视觉、交互、动效分别至少 9 分、无关键缺陷后才能发布，不用 Xvfb／交叉构建／局部 Windows 回归代替。
 
 ## Packaged artifact SHA256
 
