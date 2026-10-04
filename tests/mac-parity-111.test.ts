@@ -6,7 +6,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 
 const requireFixture = createRequire(path.resolve('package.json'))
-const { ROUTES, THEMES, LAYOUTS, ROUTE_COMPONENTS, assertNavigationCoverage, assertQueueLedger, publicAccount, stableHash, createQueueClickObserver } = requireFixture('./scripts/verify-mac-parity-ui.cjs')
+const { ROUTES, THEMES, LAYOUTS, ROUTE_COMPONENTS, assertNavigationCoverage, assertQueueLedger, publicAccount, stableHash, createQueueClickObserver, createInstallHandlerObserver, restoreInstallHandlerObserver, preserveInstallObservation, collectAndRestoreInstallObserver, preservePrimaryFailure } = requireFixture('./scripts/verify-mac-parity-ui.cjs')
 const { parityRoot, assertRestartIdentity, assertNaturalOwnedClose, safeEvidence } = requireFixture('./scripts/verify-mac-parity.cjs')
 function temporary(t: TestContext) {
   const base = fs.realpathSync.native(os.tmpdir()), root = fs.realpathSync.native(fs.mkdtempSync(path.join(base, 'KAMUCL synthetic Mac parity contract ')))
@@ -146,4 +146,78 @@ test('Public-account projection excludes credentials while whole-settings hashes
   assert.deepEqual(publicAccount({ id: 'one', type: 'offline', username: 'PrivateQA', uuid: 'zero', refreshToken: 'fixture-secret', password: 'not-real' }), { id: 'one', type: 'offline', username: 'PrivateQA', uuid: 'zero' })
   assert.equal(stableHash({ a: [1, 2], b: { y: 2, x: 1 } }), stableHash({ b: { x: 1, y: 2 }, a: [1, 2] }))
   assert.notEqual(stableHash({ interval: 1 }), stableHash({ interval: 2 }))
+})
+
+test('Mac real-install observer owns the actual wrapped registration and restores exact original entries without rewrapping', async () => {
+  const entries = new Map<string, (...args: any[]) => any>(), calls: any[][] = [], registrations: string[] = []
+  const original = async function (this: unknown, ...args: any[]) { calls.push([this, ...args]); return { id: 'original-real-plan', warnings: [] } }
+  entries.set('mods:prepare', original)
+  const ipc = { _invokeHandlers: entries, removeHandler: (channel: string) => entries.delete(channel), handle(channel: string, callback: (...args: any[]) => any) { registrations.push(channel); entries.set(channel, function (this: unknown, ...args: any[]) { return callback.apply(this, args) }) } }
+  const observer = createInstallHandlerObserver(ipc, ['mods:prepare'])
+  assert.equal(observer.registration[0].registeredEntryIsSuppliedWrapper, false)
+  const event = { sender: 'private-native-fixture' }, target = { id: 'fixture-instance' }, context = { receiver: true }
+  const result = await entries.get('mods:prepare')!.call(context, event, target, { file: 'fixture-public-file' })
+  assert.equal(calls.length, 1); assert.deepEqual(calls[0], [context, event, target, { file: 'fixture-public-file' }])
+  assert.equal(observer.calls[0].result, result); assert.deepEqual(observer.calls[0].arguments, [target, { file: 'fixture-public-file' }])
+  assert.deepEqual(restoreInstallHandlerObserver(ipc, observer), { complete: true, restored: [{ channel: 'mods:prepare', exactOriginalEntryRestored: true }] })
+  assert.equal(entries.get('mods:prepare'), original); assert.deepEqual(registrations, ['mods:prepare'])
+})
+
+test('Mac install observer retains original rejection and never replaces a foreign handler during cleanup', async () => {
+  const entries = new Map<string, (...args: any[]) => any>(), primary = new Error('original install download rejection')
+  entries.set('mods:prepare', async () => { throw primary })
+  const ipc = { _invokeHandlers: entries, removeHandler: (channel: string) => entries.delete(channel), handle(channel: string, callback: (...args: any[]) => any) { entries.set(channel, async (...args: any[]) => callback(...args)) } }
+  const observer = createInstallHandlerObserver(ipc, ['mods:prepare'])
+  await assert.rejects(entries.get('mods:prepare')!({}, { id: 'fixture' }), error => error === primary)
+  assert.equal(observer.calls.length, 1); assert.equal(observer.calls[0].error.message, primary.message)
+  const foreign = () => 'foreign-registration'; entries.set('mods:prepare', foreign)
+  assert.throws(() => restoreInstallHandlerObserver(ipc, observer), /identity changed/)
+  assert.equal(entries.get('mods:prepare'), foreign)
+})
+
+test('Mac install diagnostics checkpoint the primary before cleanup and keep any cleanup or writer failure nonzero without masking it', async () => {
+  const primary = new Error('original coordinate assertion'), cleanup = new Error('foreign cleanup entry'), writer = new Error('diagnostic EIO'), receipt: any = {}, snapshots: any[] = []
+  let restores = 0
+  await assert.rejects(preserveInstallObservation(async () => { throw primary }, async () => { restores++; assert.equal(receipt.primaryError.message, primary.message); throw cleanup }, receipt, () => { snapshots.push(structuredClone(receipt)) }), error => error === primary)
+  assert.equal(restores, 1); assert.equal(snapshots[0].primaryError.message, primary.message); assert.equal(receipt.cleanupError.message, cleanup.message)
+  await assert.rejects(preserveInstallObservation(async () => 1, async () => { throw cleanup }, {}, () => {}), error => error === cleanup)
+  const ioReceipt: any = {}; let restoredAfterIO = false
+  await assert.rejects(preserveInstallObservation(async () => { throw primary }, async () => { restoredAfterIO = true; return { complete: true } }, ioReceipt, () => { throw writer }), error => error === primary)
+  assert.equal(restoredAfterIO, true); assert.equal(ioReceipt.diagnosticErrors[0].message, writer.message)
+  await assert.rejects(preserveInstallObservation(async () => 1, async () => ({ complete: true }), {}, () => { throw writer }), error => error === writer)
+})
+
+test('Mac actual install cleanup callback attempts exact restoration even when its separate main-process trace read fails', async () => {
+  const primary = new Error('original installer assertion'), trace = new Error('trace read transport rejection'), restore = new Error('foreign actual entry'), receipt: any = {}, calls: string[] = []
+  const main = async (expression: string) => { calls.push(expression); if (expression === 'macParityInstallTrace.calls') throw trace; assert.match(expression, /_invokeHandlers\.set\(channel,original\)/); return { complete: true, restored: ['mods:prepare', 'mods:commit'] } }
+  await assert.rejects(preserveInstallObservation(async () => { throw primary }, () => collectAndRestoreInstallObserver(main, receipt), receipt, () => {}), error => error === primary)
+  assert.equal(calls.length, 2, 'the real restoration main call still follows a rejected trace read')
+  assert.equal(receipt.handlerRestoration.complete, true, 'a rejected trace read still retains the actual successful restoration result')
+  assert.equal(receipt.traceReadError.message, trace.message); assert.equal(receipt.cleanupError.message, trace.message); assert.equal(receipt.primaryError.message, primary.message)
+  const both: any = {}, secondMain = async (expression: string) => { if (expression === 'macParityInstallTrace.calls') throw trace; throw restore }
+  await assert.rejects(collectAndRestoreInstallObserver(secondMain, both), error => error === restore)
+  assert.equal(both.traceReadError.message, trace.message); assert.equal(both.restorationError.message, restore.message)
+})
+
+test('Mac outer failure receipt writer cannot replace the original nonzero assertion after observed cleanup', () => {
+  const primary = new Error('original native coordinate failure'), writer = new Error('outer receipt EIO'), proof: any = {}
+  assert.equal(preservePrimaryFailure(proof, primary, () => { throw writer }), primary)
+  assert.equal(proof.error.message, primary.message)
+  assert.deepEqual(proof.diagnosticErrors, [{ stage: 'primary failure receipt', name: writer.name, message: writer.message }])
+  const source = fs.readFileSync(path.resolve('scripts/verify-mac-parity-ui.cjs'), 'utf8')
+  assert.match(source, /\},\(\)=>collectAndRestoreInstallObserver\(main,proof\.realService\),proof\.realService,save\)/, 'the actual cleanup callback uses the tested trace-read-independent restoration entry')
+  assert.match(source, /catch\(error\)\{preservePrimaryFailure\(proof,error,save\);try\{await screenshot/, 'the actual outer catch uses the tested primary-preserving writer')
+})
+
+test('Mac registered install observation enters finally protection before its first diagnostic checkpoint can fail', async () => {
+  const entries = new Map<string, (...args: any[]) => any>(), original = async () => 'original', writer = new Error('first registered checkpoint EIO')
+  entries.set('mods:prepare', original)
+  const ipc = { _invokeHandlers: entries, removeHandler: (channel: string) => entries.delete(channel), handle(channel: string, callback: (...args: any[]) => any) { entries.set(channel, async (...args: any[]) => callback(...args)) } }
+  const observer = createInstallHandlerObserver(ipc, ['mods:prepare']), receipt: any = { handlerRegistration: observer.registration }, mainCalls: string[] = []
+  const main = async (expression: string) => { mainCalls.push(expression); return expression === 'macParityInstallTrace.calls' ? observer.calls : restoreInstallHandlerObserver(ipc, observer) }
+  await assert.rejects(preserveInstallObservation(async () => { throw writer }, () => collectAndRestoreInstallObserver(main, receipt), receipt, () => { throw writer }), error => error === writer)
+  assert.equal(entries.get('mods:prepare'), original); assert.equal(mainCalls.length, 2); assert.equal(receipt.handlerRestoration.complete, true)
+  assert.equal(receipt.primaryError.message, writer.message)
+  const source = fs.readFileSync(path.resolve('scripts/verify-mac-parity-ui.cjs'), 'utf8')
+  assert.match(source, /handlerRegistration=await main\([^\n]+\)\n\s+await preserveInstallObservation\(async\(\)=>\{\n\s+save\(\)/, 'first registered checkpoint belongs to the protected actual operation')
 })

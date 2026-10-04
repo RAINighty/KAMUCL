@@ -92,6 +92,60 @@ function assertQueueLedger(ledger,before,after){
 }
 function publicAccount(account){return{id:account.id,type:account.type,username:account.username,uuid:account.uuid}}
 function stableHash(value){const canonical=input=>Array.isArray(input)?input.map(canonical):input&&typeof input==='object'?Object.fromEntries(Object.keys(input).sort().map(key=>[key,canonical(input[key])])):input;return crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex')}
+function createInstallHandlerObserver(ipc,channels){
+ const p={calls:[],originals:new Map(),entries:new Map(),registration:[]}
+ for(const channel of channels){
+  const original=ipc._invokeHandlers.get(channel)
+  if(typeof original!=='function')throw Error('Original install handler missing: '+channel)
+  p.originals.set(channel,original)
+  const wrapper=async function(...args){const row={index:p.calls.length,channel,startedAt:Date.now(),arguments:args.slice(1)};p.calls.push(row);try{row.result=await original.apply(this,args);row.completedAt=Date.now();return row.result}catch(error){row.error={name:error.name,message:error.message};row.completedAt=Date.now();throw error}}
+  ipc.removeHandler(channel);ipc.handle(channel,wrapper)
+  // Production handle registration may wrap listeners for IPC error logging.
+  // Ownership belongs to the actual Map entry, not the supplied callback.
+  const entry=ipc._invokeHandlers.get(channel)
+  if(typeof entry!=='function')throw Error('Registered observation handler missing: '+channel)
+  p.entries.set(channel,entry);p.registration.push({channel,actualEntryObserved:true,registeredEntryIsSuppliedWrapper:entry===wrapper})
+ }
+ return p
+}
+function restoreInstallHandlerObserver(ipc,p){
+ const failures=[],restored=[]
+ for(const[channel,original]of p.originals){
+  if(ipc._invokeHandlers.get(channel)!==p.entries.get(channel)){failures.push(channel);continue}
+  // Restore the exact original entry rather than registering it through the
+  // production wrapper a second time. Foreign entries are never overwritten.
+  ipc._invokeHandlers.set(channel,original)
+  if(ipc._invokeHandlers.get(channel)!==original)throw Error('Original install handler restoration failed: '+channel)
+  restored.push({channel,exactOriginalEntryRestored:true})
+ }
+ if(failures.length)throw Error('Install observation identity changed: '+failures.join(', '))
+ return{complete:true,restored}
+}
+async function preserveInstallObservation(operation,restore,receipt,save){
+ let value,primaryError,cleanupError,diagnosticError
+ const checkpoint=()=>{try{save()}catch(error){diagnosticError??=error;(receipt.diagnosticErrors??=[]).push({name:error.name,message:error.message})}}
+ try{value=await operation()}catch(error){primaryError=error;receipt.primaryError={name:error.name,message:error.message};checkpoint()}
+ finally{checkpoint();try{receipt.handlerRestoration=await restore()}catch(error){cleanupError=error;receipt.cleanupError={name:error.name,message:error.message}}checkpoint()}
+ if(primaryError)throw primaryError
+ if(cleanupError)throw cleanupError
+ if(diagnosticError)throw diagnosticError
+ return value
+}
+async function collectAndRestoreInstallObserver(main,receipt){
+ let traceError
+ try{receipt.originalHandlerTrace=await main(`macParityInstallTrace.calls`)}
+ catch(error){traceError=error;receipt.traceReadError={name:error.name,message:error.message}}
+ let restored
+ try{restored=await main(`(${restoreInstallHandlerObserver.toString()})(testElectron.ipcMain,macParityInstallTrace)`);receipt.handlerRestoration=restored}
+ catch(error){receipt.restorationError={name:error.name,message:error.message};throw error}
+ if(traceError)throw traceError
+ return restored
+}
+function preservePrimaryFailure(proof,error,save){
+ proof.error={name:error.name,message:error.message}
+ try{save()}catch(diagnosticError){(proof.diagnosticErrors??=[]).push({stage:'primary failure receipt',name:diagnosticError.name,message:diagnosticError.message})}
+ return error
+}
 module.exports=async function verifyMacParity(h){
  const{call,evaluate,main,wait,root,profile,games,version,phase,recordScreencast}=h
  assert.equal(process.platform,'darwin');assert(['first','restart'].includes(phase))
@@ -257,15 +311,18 @@ module.exports=async function verifyMacParity(h){
    // Forward each original install handler exactly once. This observes real
    // prepared plans/commits without depending on production setup closures or
    // substituting network, dependency, compatibility or download responses.
-   await main(`(()=>{const channels=['mods:prepare','mods:commit'],p=globalThis.macParityInstallTrace={calls:[],originals:new Map(),wrappers:new Map()};for(const channel of channels){const original=testElectron.ipcMain._invokeHandlers.get(channel);if(typeof original!=='function')throw Error('Original install handler missing: '+channel);p.originals.set(channel,original);const wrapper=async function(...args){const row={index:p.calls.length,channel,startedAt:Date.now(),arguments:args.slice(1)};p.calls.push(row);try{row.result=await original.apply(this,args);row.completedAt=Date.now();return row.result}catch(error){row.error={name:error.name,message:error.message};row.completedAt=Date.now();throw error}};p.wrappers.set(channel,wrapper);testElectron.ipcMain.removeHandler(channel);testElectron.ipcMain.handle(channel,wrapper)}})()`)
-   try{
+   proof.realService.handlerRegistration=await main(`(()=>{globalThis.macParityInstallTrace=(${createInstallHandlerObserver.toString()})(testElectron.ipcMain,['mods:prepare','mods:commit']);return macParityInstallTrace.registration})()`)
+   await preserveInstallObservation(async()=>{
+   save()
    await textCoordinate('.download-modal .modal-actions','确认下载')
    await until('real prepared install UI',()=>evaluate(`(()=>{const e=document.querySelector('.modinstall-modal'),button=e?.querySelector('.btn-gold');return{ready:!!e&&!e.querySelector('.modal-loading')&&!!button&&!button.disabled,rows:e?[...e.querySelectorAll('.dependency-row')].map(r=>r.innerText):[],error:e?.querySelector('.modal-error')?.textContent}})()`),r=>r.ready,60000)
    const chosen=await evaluate(`(()=>{const p=window.__macParityObserver.one('ModInstallDialog').props;return{file:p.input.file,target:p.target}})()`)
+   proof.realService.chosen=chosen;save()
    assert(chosen.file&&chosen.file.sha1&&chosen.file.projectId==='P7dR8mSH','actual mounted installer receives selected public file with service hash')
    assert(chosen.file.gameVersions.includes('1.20.1')&&chosen.file.loaders.includes('fabric'),'the actual selected file is compatible')
-   const observedPlan=await main(`macParityInstallTrace.calls.filter(c=>c.channel==='mods:prepare'&&c.completedAt)`);assert.equal(observedPlan.length,1);assert(!observedPlan[0].error)
+   const observedPlan=await main(`macParityInstallTrace.calls.filter(c=>c.channel==='mods:prepare'&&c.completedAt)`);proof.realService.originalHandlerTrace=await main(`macParityInstallTrace.calls`);save();assert.equal(observedPlan.length,1);assert(!observedPlan[0].error)
    const plan=observedPlan[0].result
+   proof.realService.plan=plan;save()
    assert(!plan.warnings.length,'real dependency plan has no compatibility warnings')
    assert.equal(plan.target.id,'联机验证实例');assert.equal(fs.realpathSync.native(plan.target.folder),fs.realpathSync.native(games));assert.deepEqual(observedPlan[0].arguments[0],{id:plan.target.id,folder:plan.target.folder})
    proof.realService.file=chosen.file;proof.realService.plan=plan;await screenshot('mac-parity-first-real-install-plan');save()
@@ -277,13 +334,13 @@ module.exports=async function verifyMacParity(h){
    const observedCommit=await main(`macParityInstallTrace.calls.filter(c=>c.channel==='mods:commit'&&c.completedAt)`);assert.equal(observedCommit.length,1);assert(!observedCommit[0].error);assert.deepEqual(observedCommit[0].arguments,[plan.id,true])
    proof.realService.installed={relative:path.relative(games,installed),bytes:stats.size,sha1:actualSHA1,sha256:crypto.createHash('sha256').update(bytes).digest('hex'),declaredSHA1:chosen.file.sha1,target:plan.target};proof.realService.complete=true
    await screenshot('mac-parity-first-real-install-complete')
-   }finally{proof.realService.originalHandlerTrace=await main(`(()=>{const p=macParityInstallTrace;for(const[channel,original]of p.originals){if(testElectron.ipcMain._invokeHandlers.get(channel)!==p.wrappers.get(channel))throw Error('Install observation identity changed: '+channel);testElectron.ipcMain.removeHandler(channel);testElectron.ipcMain.handle(channel,original)}return p.calls})()`);save()}
+   },()=>collectAndRestoreInstallObserver(main,proof.realService),proof.realService,save)
    const finalSettings=await evaluate("window.kamucl.invoke('settings:get')")
    proof.persisted={accounts:(await accounts()).map(publicAccount),selected:publicAccount(await selected()),mascots:await state(),favorites:await evaluate("window.kamucl.invoke('mods:favorites')"),theme:finalSettings.theme,settingsSHA256:stableHash(finalSettings)}
    assert.equal(proof.persisted.accounts.length,2);assert.equal(proof.persisted.theme,'black-orange')
   }
   proof.complete=true;proof.finishedAt=new Date().toISOString();save()
- }catch(error){proof.error={name:error.name,message:error.message};save();try{await screenshot('mac-parity-'+phase+'-failure')}catch{}throw error}
+ }catch(error){preservePrimaryFailure(proof,error,save);try{await screenshot('mac-parity-'+phase+'-failure')}catch{}throw error}
 }
 async function coordinatePosition(evaluate,selector){return evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!e.contains(document.elementFromPoint(x,y)))throw Error('actual queue hit target obscured');return{x,y}})()`)}
-Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,createQueueClickObserver})
+Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure})

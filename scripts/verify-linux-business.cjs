@@ -174,6 +174,12 @@ async function verifyPackagedUpdate(root, report, tracks, proof) {
   return result
 }
 
+function packagedWindowDirectories(application) {
+  return {
+    logicalDirectory: path.join(application, 'resources', 'app.asar', 'out', 'main'),
+    helperDirectory: path.join(application, 'resources', 'app.asar.unpacked', 'out', 'main')
+  }
+}
 async function verifyOwnedX11(root, report, tracks) {
   assert(process.env.DISPLAY, 'This native window protocol fixture requires X11/XWayland')
   const applicationRoot = fs.mkdtempSync(path.join(root, 'packaged-window-helper-'))
@@ -181,7 +187,8 @@ async function verifyOwnedX11(root, report, tracks) {
   const application = path.join(applicationRoot, 'KAMUCL')
   const metadata = JSON.parse(fs.readFileSync(path.join(application, 'resources/kamucl-linux.json'), 'utf8'))
   assert.equal(metadata.sourceCommit, report.sourceCommit); assert.equal(metadata.arch, report.arch); assert.equal(metadata.runtimeVersion, report.electron)
-  const directory = path.join(application, 'resources/app.asar.unpacked/out/main'), helper = path.join(directory, 'LinuxGameWindow')
+  const { logicalDirectory, helperDirectory } = packagedWindowDirectories(application)
+  const helper = path.join(helperDirectory, 'LinuxGameWindow')
   const source = `#include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <unistd.h>
@@ -189,7 +196,9 @@ async function verifyOwnedX11(root, report, tracks) {
 int main(){Display*d=XOpenDisplay(nullptr);if(!d)return 2;Window w=XCreateSimpleWindow(d,DefaultRootWindow(d),30,30,320,200,0,0,0xffffff);unsigned long pid=getpid();XChangeProperty(d,w,XInternAtom(d,"_NET_WM_PID",False),XA_CARDINAL,32,PropModeReplace,(unsigned char*)&pid,1);Atom del=XInternAtom(d,"WM_DELETE_WINDOW",False);XSetWMProtocols(d,w,&del,1);XStoreName(d,w,"KAMUCL owned Linux protocol fixture");XMapWindow(d,w);XFlush(d);std::cout<<"READY "<<pid<<" "<<w<<std::endl;for(;;){XEvent e;XNextEvent(d,&e);if(e.type==ClientMessage&&e.xclient.message_type==XInternAtom(d,"WM_PROTOCOLS",False)&&Atom(e.xclient.data.l[0])==del){std::cout<<"NORMAL WM_DELETE_WINDOW"<<std::endl;XDestroyWindow(d,w);XCloseDisplay(d);return 0;}}}`
   const sourceFile = path.join(root, 'owned-window.cpp'), executable = path.join(root, 'owned-window')
   fs.writeFileSync(sourceFile, source); execFileSync('g++', ['-std=c++17', sourceFile, '-lX11', '-o', executable], { timeout: 60000 })
-  const windows = await loadCore('src/main/core/gracefulClose.ts', {}, directory)
+  // Production __dirname is inside the ASAR. The product resolves its unpacked
+  // native helper once; supplying an already-unpacked directory would map twice.
+  const windows = await loadCore('src/main/core/gracefulClose.ts', {}, logicalDirectory)
   const rows = []
   for (let n = 0; n < 2; n++) {
     const child = spawn(executable, [], { stdio: ['ignore', 'pipe', 'pipe'] }), track = ownChild(child, 'owned X11 protocol window ' + n)
@@ -290,5 +299,5 @@ async function main() {
   console.log('PASS native Linux business harness; desktop and real account qualification remain uncovered')
   app.exit(0)
 }
-module.exports = { preserveBusinessFailure, loadCore, ownChild, awaitOwnedClose, stopOwnedChild, selectOwnedExecutable }
+module.exports = { preserveBusinessFailure, loadCore, ownChild, awaitOwnedClose, stopOwnedChild, selectOwnedExecutable, packagedWindowDirectories }
 if (require('./qa-entry.cjs').isQaMain(module, require.main)) main().catch(error => { console.error(error); require('electron').app.exit(1) })
