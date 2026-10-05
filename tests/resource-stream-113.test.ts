@@ -9,6 +9,7 @@ import { StreamPackZip, writePackEntry } from '../src/main/core/streamPackZip'
 import { fileHash } from '../src/main/core/fileHash'
 import { trimSelfPowerShellScript } from '../src/main/core/memTrim'
 import { CarouselPlayback } from '../src/shared/carouselPlayback'
+import { fileJobKey, withFileJob } from '../src/main/core/fileJobs'
 
 test('streamed ZIP preserves Chinese, spaces, §, entry bytes, SHA and output CRC', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kamucl-stream113-'))
@@ -128,6 +129,26 @@ test('file streaming hash supports cancellation and missing files', async () => 
   const c = new AbortController(); c.abort()
   await assert.rejects(fileHash('missing', 'sha1', c.signal), /abort/i)
   await assert.rejects(fileHash('missing-file113'), /ENOENT/)
+})
+
+test('platform file locks canonicalize aliases without rewriting filenames or releasing an active writer on cancellation', { timeout: 15000 }, async () => {
+  const firstPath = path.join(os.tmpdir(), 'kamucl-lock113', 'Caf\u00e9'), otherPath = process.platform === 'darwin'
+    ? path.join(os.tmpdir(), 'kamucl-lock113', 'cafe\u0301') : process.platform === 'win32'
+      ? firstPath.toLowerCase() : firstPath
+  assert.equal(fileJobKey(firstPath), fileJobKey(otherPath))
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(), actions: string[] = []
+  const first = withFileJob(firstPath, undefined, async () => { actions.push('first'); started.resolve(); await release.promise })
+  await started.promise
+  const second = withFileJob(otherPath, undefined, async () => { actions.push('second') })
+  const cancellation = new AbortController(), reason = new Error('cancel owned lock waiter')
+  const waiting = withFileJob(otherPath, cancellation.signal, async () => { assert.fail('cancelled waiter must not execute') })
+  cancellation.abort(reason); await assert.rejects(waiting, error => error === reason)
+  const fourth = withFileJob(firstPath, undefined, async () => { actions.push('fourth') })
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.deepEqual(actions, ['first'], 'cancelled waiter does not expose the live writer')
+  } finally { release.resolve(); await Promise.all([first, second, fourth]) }
+  assert.deepEqual(actions, ['first', 'second', 'fourth'])
 })
 
 test('PowerShell fallback opens only supplied launcher PID and reports native failure', () => {

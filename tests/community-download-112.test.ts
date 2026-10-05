@@ -151,7 +151,10 @@ test('fullpack shared-version locks deduplicate Windows case aliases and do not 
   assert(fs.existsSync(path.join(first, 'versions', outcome.versionId, 'options.txt')))
 })
 
-test('override case aliases preserve archive order while independent real file writes still overlap', async t => {
+for (const alias of [
+  { name: 'case', files: ['Case.jar', 'case.jar'] },
+  { name: 'Unicode normalization', files: ['caf\u00e9.cfg', 'cafe\u0301.cfg'] }
+]) test(`override ${alias.name} aliases preserve archive order while independent real file writes still overlap`, async t => {
   const { root, runtime } = await fixture(t), destination = path.join(root, 'overrides-result')
   const active = new Set<string>(), started: string[] = [], completed: string[] = []
   let maximumActive = 0
@@ -160,7 +163,8 @@ test('override case aliases preserve archive order while independent real file w
     return { entryName: 'overrides/' + rel, isDirectory: false, attr: 0,
       header: { size: data.length, compressedSize: data.length }, getData: () => data,
       writeTo: async (target, signal) => {
-        const identity = path.resolve(target).toLowerCase()
+        assert.equal(target, path.join(destination, rel), 'serialization must preserve the original filename spelling')
+        const identity = path.resolve(target).normalize('NFC').toLowerCase()
         assert(!active.has(identity), 'aliased destinations must never be open for writing together')
         active.add(identity); maximumActive = Math.max(maximumActive, active.size); started.push(rel)
         try {
@@ -171,21 +175,23 @@ test('override case aliases preserve archive order while independent real file w
       }
     }
   }
-  const entries = [makeEntry('mods/Case.jar', 'first spelling'), makeEntry('config/independent.txt', 'independent'), makeEntry('mods/case.jar', 'later spelling')]
+  const firstRel = 'mods/' + alias.files[0], laterRel = 'mods/' + alias.files[1]
+  const entries = [makeEntry(firstRel, 'first spelling'), makeEntry('config/independent.txt', 'independent'), makeEntry(laterRel, 'later spelling')]
   const extracted = await runtime.extractOverrides({ getEntries: () => entries, getEntry: () => null }, 'overrides', destination)
-  assert.deepEqual(extracted, ['mods/Case.jar', 'config/independent.txt', 'mods/case.jar'])
-  assert.equal(started.length, 3); assert.equal(started.at(-1), 'mods/case.jar')
-  assert(started.indexOf('mods/Case.jar') < started.indexOf('mods/case.jar'), 'the later alias starts only after the earlier alias completes')
-  assert.equal(completed.at(-1), 'mods/case.jar')
+  assert.deepEqual(extracted, [firstRel, 'config/independent.txt', laterRel])
+  assert.equal(started.length, 3); assert.equal(started.at(-1), laterRel)
+  assert(started.indexOf(firstRel) < started.indexOf(laterRel), 'the later alias starts only after the earlier alias completes')
+  assert.equal(completed.at(-1), laterRel)
   assert(maximumActive >= 2, 'independent paths retain concurrent extraction')
   assert.equal(active.size, 0)
-  const firstPath = path.join(destination, 'mods', 'Case.jar'), secondPath = path.join(destination, 'mods', 'case.jar')
+  const firstPath = path.join(destination, firstRel), secondPath = path.join(destination, laterRel)
   const firstStat = fs.statSync(firstPath), secondStat = fs.statSync(secondPath)
   const samePhysicalFile = firstStat.dev === secondStat.dev && firstStat.ino === secondStat.ino
+  if (alias.name === 'Unicode normalization' && process.platform === 'darwin') assert(samePhysicalFile, 'native Mac filesystem aliases NFC and NFD paths')
   assert.equal(fs.readFileSync(firstPath, 'utf8'), samePhysicalFile ? 'later spelling' : 'first spelling')
   assert.equal(fs.readFileSync(secondPath, 'utf8'), 'later spelling')
   assert.equal(fs.readFileSync(path.join(destination, 'config', 'independent.txt'), 'utf8'), 'independent')
-  t.diagnostic(JSON.stringify({ classification: 'Synthetic archive entries; actual extraction scheduler and filesystem writes', host: process.platform, samePhysicalFile, started, completed, maximumActive }))
+  t.diagnostic(JSON.stringify({ classification: 'Synthetic archive entries; actual extraction scheduler and filesystem writes', host: process.platform, samePhysicalFile, started, completed, maximumActive, files: [firstPath, secondPath].map(target => ({ name: path.basename(target), sha1: sha1(fs.readFileSync(target)) })) }))
 })
 
 test('Windows rejects trailing-dot and trailing-space archive segments before installing or changing existing instances', { timeout: 15000, skip: process.platform !== 'win32' }, async t => {

@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import os from 'node:os'
 import AdmZip from 'adm-zip'
 import { StreamPackZip, writePackEntry, type PackZip, type PackEntry } from './streamPackZip'
-import { withFileJob } from './fileJobs'
+import { fileJobKey, withFileJob } from './fileJobs'
 import type {
   LoaderName,
   ModpackInfo,
@@ -694,7 +694,7 @@ async function installFullpack(
   // half-written JSON/JAR or adopt files which the first task later removes.
   const destinations = [...new Map([...shippedVids].map(vid => {
     const directory = path.resolve(versionDir(vid))
-    return [process.platform === 'win32' ? directory.toLowerCase() : directory, directory] as const
+    return [fileJobKey(directory), directory] as const
   })).entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, directory]) => directory)
   const register = (index: number): Promise<string> => index === destinations.length
     ? extract()
@@ -772,7 +772,7 @@ export async function extractOverrides(
     while (cursor < files.length && batch.length < 4) {
       // macOS commonly uses case-insensitive volumes. Serialize aliases on
       // every host, preserving ZIP order even on case-sensitive filesystems.
-      const item = files[cursor], key = item.dest.toLowerCase()
+      const item = files[cursor], key = item.dest.normalize('NFC').toUpperCase()
       if (batch.length && (bytes + item.entry.header.size > 16 * 1024 * 1024 || destinations.has(key))) break
       batch.push(item); destinations.add(key); bytes += item.entry.header.size; cursor++
     }

@@ -25,6 +25,8 @@
 
 原生工具资格的首次皮肤/录帧文件与启动反馈退出不同步失败全部保留。工具改为实际状态观测：必须真实采到本测试进程树的启动反馈、随后连续两次消失才读取原帧，不修改原始时序、不放宽门槛。每个稳定阶段结束立即进入独立观察/导航阶段，防止过渡峰值混入上一页稳态。
 
+第一次 Mac package 的缓存测试因固定 50 ms 失败门控导致重试请求数不符，1040/1/5 原日志保留；改为实际已校验缓存的发布门控，同时新增未完成传输不可复用的反向检查。独立评审发现 APFS NFC/NFD 别名并发写入风险，修前异步写者检查确实失败；修后队列/共享文件锁按身份串行，原路径不改，Mac 实际 inode 与最终内容检查仍需原生回归。第一次 Windows 打包网络请求超时 600000 ms，保留并重试，不标为构建成功。
+
 ## 原始证据索引
 
 本地原件在 `out/resource113/`：`mod-resource-benchmark.json`、`java-probe-1791200117648/summary.json`、`stream-bench-1791198646976/summary.json`、`stream-bench-1791199035586/summary.json`、`stream-bench-1791200180528/summary.json`、`stream-bench-1791202458400/summary.json`、`production-workers-1791200550947/summary.json`、`production-workers-1791200662576/summary.json`、`lossless-all-resources-trial.json`、`full-tests-first.log`、`full-tests-second.log`、`stream-fd-final.log`、`stream-fd-second.log`。原件包含原始采样、帧时间、CPU、文件摘要及失败状态；最终交接包按隐私核对后纳入本轮必要证据。
