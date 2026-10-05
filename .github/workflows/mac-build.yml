@@ -1,6 +1,11 @@
 name: macOS packages
 on:
   workflow_dispatch:
+    inputs:
+      resource_comparison:
+        description: 'Run the separately authorized native resource comparison'
+        type: boolean
+        default: false
   push:
     branches: [master]
     paths: ['.github/workflows/mac-build.yml', 'src/**', 'tests/**', 'scripts/**', 'native/**', 'bridge/**', 'build/**', 'package.json', 'package-lock.json', 'electron.vite.config.ts', 'tsconfig*.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/**', 'docs/CORRESPONDING_SOURCE.md']
@@ -272,6 +277,7 @@ jobs:
           if-no-files-found: error
 
   resources:
+    if: github.event_name == 'workflow_dispatch' && inputs.resource_comparison == true
     needs: package
     runs-on: macos-26
     timeout-minutes: 120
