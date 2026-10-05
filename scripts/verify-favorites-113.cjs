@@ -19,6 +19,18 @@ function qaDownloadThreads(raw=process.env.KAMUCL_QA_DOWNLOAD_THREADS){
  assert.equal(raw,'4','This isolated single-variable QA comparison accepts only explicit 4 threads')
  return 4
 }
+function qaDownloadMirror(raw=process.env.KAMUCL_QA_DOWNLOAD_MIRROR){
+ if(raw===undefined)return null
+ assert.equal(raw,'bmclapi','The optional isolated QA mirror accepts only the literal bmclapi')
+ return 'bmclapi'
+}
+function verifyQaMirrorSetting({before,after,calls,threads}){
+ assert.equal(threads,4,'Explicit BMCLAPI QA requires the existing native four-thread Settings change first')
+ assert.equal(before.mirror,'official');assert.equal(before.downloadThreads,threads)
+ assert.equal(after.mirror,'bmclapi');assert.equal(after.downloadThreads,threads);assert.equal(after.downloadSpeedKBps,before.downloadSpeedKBps)
+ assert.equal(calls.length,1,'exactly one original mirror Settings call required');assert.equal(calls[0].channel,'settings:set');assert.deepEqual(calls[0].arguments,[{mirror:'bmclapi'}]);assert(calls[0].completedAt>=calls[0].startedAt&&!calls[0].error)
+ return true
+}
 async function replaceNativeNumberInput(click,call,evaluate,selector,value,platform=process.platform){
  await click(selector)
  const before=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});return{focused:document.activeElement===e,value:e?.value,type:e?.type}})()`)
@@ -81,6 +93,7 @@ async function run(){
  const [application,arch=process.arch,stage=process.platform==='darwin'?'app':'portable']=process.argv.slice(2);assert(application);assert.equal(process.arch,arch);assert(['win32','darwin'].includes(process.platform));assert.equal(pkg.version,'1.1.13')
  const transport=qaProxyTransport()
  const threads=qaDownloadThreads()
+ const mirror=qaDownloadMirror();if(mirror!==null)assert.equal(threads,4,'Explicit BMCLAPI QA requires KAMUCL_QA_DOWNLOAD_THREADS=4 and its actual native Settings UI change')
  const app=path.resolve(application),exe=process.platform==='darwin'?path.join(app,'Contents/MacOS/KAMUCL'):app;assert(fs.statSync(exe).isFile())
  const root=fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(),'KAMUCL favorites113 中文 '))),profile=path.join(root,'profile'),games=path.join(root,'games §'),output=path.resolve(process.env.KAMUCL_FAVORITES_PROOF||`release/favorites-proof-${arch}-${stage}`)
  assert(!fs.existsSync(output),'never overwrite a failed or completed attempt');fs.mkdirSync(output,{recursive:true});fs.mkdirSync(profile);fs.mkdirSync(games)
@@ -120,6 +133,7 @@ async function run(){
     const screenshot=async name=>{await until('finite appearance transitions settled',()=>evaluate(`document.getAnimations().filter(a=>a.playState==='running'&&Number.isFinite(a.effect?.getTiming().iterations)).length`),v=>v===0);const bytes=Buffer.from((await renderer.call('Page.captureScreenshot',{format:'png'})).data,'base64'),file=phase+'-'+name+'.png';fs.writeFileSync(path.join(output,file),bytes,{flag:'wx'});const s={file,bytes:bytes.length,sha256:sha(bytes)};proof.screenshots.push(s);save();return s}
     const route=async name=>{const component={community:'CommunityView',game:'GameView',settings:'SettingsView',home:'HomeView'}[name];assert(component);await click('[data-nav='+name+']');await until('actual route '+name,()=>evaluate(`({selected:document.querySelector('[data-nav=${name}]')?.getAttribute('aria-current'),route:window.__macParityObserver.route(${JSON.stringify(component)})})`),v=>v.selected==='page'&&v.route.component&&(v.route.transition||'').indexOf('fade-leave')<0)}
     if(phase==='restart'){
+     if(mirror!==null){const readback=await evaluate(`(async()=>{const s=await window.kamucl.invoke('settings:get');return{mirror:s.mirror,downloadThreads:s.downloadThreads,downloadSpeedKBps:s.downloadSpeedKBps}})()`);assert.equal(readback.mirror,mirror);assert.equal(readback.downloadThreads,threads);proof.networkConditions.restartReadback=readback;save()}
      assert.notEqual(row.identity.pid,proof.phases[0].identity.pid);assert.deepEqual((await evaluate(`window.kamucl.invoke('mods:favorites')`)).map(f=>f.key).sort(),SOURCES.map(s=>s.source+':'+s.id).sort())
      verifyInstalledSummary(installed.summary,installed.selected);await route('community');await click('[data-ui="community:favorites"]');await until('persisted real favorite rows',()=>evaluate(`document.querySelectorAll('.favorite-card[data-favorite-key],.favorite-row[data-favorite-key]').length`),v=>v===SOURCES.length);row.persistedFavorites=true;row.persistedFiles=true;row.screenshot=await screenshot('favorites-persisted')
     }else{
@@ -136,6 +150,13 @@ async function run(){
       const calls=await inspect(`favorite113Trace.calls.filter(row=>row.channel==='settings:set'&&row.completedAt&&row.arguments?.[0]?.downloadThreads===${threads}).map(row=>({index:row.index,channel:row.channel,startedAt:row.startedAt,completedAt:row.completedAt,arguments:row.arguments,error:row.error}))`)
       assert.equal(calls.length,1);assert.deepEqual(calls[0].arguments,[{downloadThreads:threads}]);assert(!calls[0].error)
       proof.networkConditions={classification:'Explicit single-variable native Settings comparison; not same-condition resource performance evidence',source:'official',transport,requestedThreads:threads,before,after,replacement,actualHandlerCalls:calls,screenshot:await screenshot('official-four-threads-setting')};save()
+      if(mirror!==null){
+       const mirrorBefore=await settings(),traceStart=await inspect('favorite113Trace.calls.length'),selector='[data-ui="SettingsView:4948cbbe2972"]',coordinate=await click(selector)
+       const mirrorAfter=await until('real Settings BMCLAPI mirror commit',settings,s=>s.mirror===mirror&&s.downloadThreads===threads)
+       const mirrorCalls=await inspect(`favorite113Trace.calls.slice(${traceStart}).filter(row=>row.channel==='settings:set'&&row.completedAt&&row.arguments?.[0]?.mirror===${JSON.stringify(mirror)}).map(row=>({index:row.index,channel:row.channel,startedAt:row.startedAt,completedAt:row.completedAt,arguments:row.arguments,error:row.error}))`)
+       verifyQaMirrorSetting({before:mirrorBefore,after:mirrorAfter,calls:mirrorCalls,threads})
+       Object.assign(proof.networkConditions,{classification:'Explicit user-available BMCLAPI and four-thread native Settings condition through original product network policy; not same-condition resource performance evidence or proof every byte came only from the mirror',source:mirror,requestedMirror:mirror,threadAfter:after,after:mirrorAfter,threadHandlerCalls:calls,actualHandlerCalls:[...calls,...mirrorCalls],mirrorChange:{before:mirrorBefore,after:mirrorAfter,selector,coordinate,actualHandlerCalls:mirrorCalls,screenshot:await screenshot('bmclapi-four-threads-setting')}});save()
+      }
      }
      await route('community')
      for(const source of SOURCES){
@@ -199,5 +220,5 @@ async function run(){
  }catch(error){primaryError=error;proof.error={name:error.name,message:error.message};throw error}
  finally{proof.finishedAt=new Date().toISOString();proof.files=fs.readdirSync(output,{withFileTypes:true}).filter(entry=>entry.isFile()&&entry.name!=='summary.json').map(entry=>{const file=entry.name,b=fs.readFileSync(path.join(output,file));return{file,bytes:b.length,sha256:sha(b)}});save();if(!primaryError)console.log(JSON.stringify({complete:proof.complete,output,sourceCommit,platform:process.platform,arch}))}
 }
-module.exports={SOURCES,verifyInstalledSummary,protocol,replaceNativeInput,installFavoriteEventObserver,safeQaAccount,archivePrivateGameLogs,qaProxyTransport,qaDownloadThreads,replaceNativeNumberInput}
+module.exports={SOURCES,verifyInstalledSummary,protocol,replaceNativeInput,installFavoriteEventObserver,safeQaAccount,archivePrivateGameLogs,qaProxyTransport,qaDownloadThreads,qaDownloadMirror,verifyQaMirrorSetting,replaceNativeNumberInput}
 if(require.main===module)run().catch(error=>{console.error(error);process.exitCode=1})
