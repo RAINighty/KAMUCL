@@ -37,6 +37,30 @@ function verifyRetainedCarousel(snapshot,expected){
  const active=snapshot.images.filter(item=>item.active);assert.equal(active.length,1);assert.equal(active[0].src,snapshot.banners[snapshot.current].src)
  return{current:snapshot.current,path:expected[snapshot.current],layers:indices.length}
 }
+function verifyCarouselReadiness(snapshot,state,requestStartedAt,observedAt){
+ assert(Number.isFinite(requestStartedAt)&&Number.isFinite(observedAt)&&observedAt>=requestStartedAt)
+ assert(requestStartedAt>=state.previousRequestStartedAt,'Original readiness observations must remain ordered')
+ assert(requestStartedAt>=(state.previousObservedAt??state.previousRequestStartedAt),'Original serial readiness observations cannot precede the previous returned observation')
+ const present=new Set(snapshot.images.map(image=>image.src)),active=snapshot.images.filter(image=>image.active)
+ assert.equal(active.length,1)
+ state.initialSource??=active[0].src
+ for(const source of state.mounted.keys())if(!present.has(source))state.mounted.delete(source)
+ const rows=[]
+ for(const image of snapshot.images){
+  if(!state.mounted.has(image.src))state.mounted.set(image.src,{earliestMountAt:state.previousRequestStartedAt,firstObservedAt:observedAt})
+  const bound=state.mounted.get(image.src),decoded=image.complete&&image.naturalWidth>0
+  // A new next layer has its own original four-second decode window. Its
+  // conservative start is the previous request, when that source was absent.
+  // Once initial presentation is ready, an undecoded active layer is a failure.
+  if(image.active&&!decoded&&(state.initialDecoded||image.src!==state.initialSource))assert.fail('active carousel image must decode before presentation')
+  if(!decoded)assert(observedAt-bound.earliestMountAt<4000,'carousel resource did not decode within its original readiness bound: '+image.src)
+  if(image.active&&decoded)state.initialDecoded=true
+  rows.push({src:image.src,active:image.active,decoded,...bound,deadline:bound.earliestMountAt+4000})
+ }
+ state.previousRequestStartedAt=requestStartedAt
+ state.previousObservedAt=observedAt
+ return{ready:rows.every(row=>row.decoded),rows,classification:'Original four-second bound per actual retained-source mount; previous observation request is the conservative lower time bound, never a later first-seen grace period'}
+}
 module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,version})=>{
  const textClick=async(scope,text)=>evaluate(`(()=>{const b=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)});if(!b)throw Error('Missing '+${JSON.stringify(text)});b.click()})()`);
  const settings=()=>evaluate("window.kamucl.invoke('settings:get')");
@@ -126,10 +150,10 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  const cycleSettings=await settings();assert.equal(cycleSettings.launchThumbnail.randomPlayback,false);assert(expectedKeys.every(key=>cycleSettings.launchThumbnail.durations[key]===1));carouselResourceReadiness.push({cycleSettings:cycleSettings.launchThumbnail,classification:'Real duration editor change handlers and original saved settings; complete timer cycle still required within original bounds'});writeLiveProof()
  await nav('home');await activateGallery('multiple enabled images',1);assert.equal(await evaluate('window.__galleryTimers.size'),1)
  const readCarousel=()=>evaluate(`(${readMountedCarousel.toString()})(${JSON.stringify(actualPlaylist)})`)
- const rotation=[],rotationStarted=Date.now();let cycleComplete=false
+ const rotation=[],rotationStarted=Date.now(),readiness={mounted:new Map(),previousRequestStartedAt:rotationStarted,initialSource:null,initialDecoded:false};let cycleComplete=false
  while(Date.now()-rotationStarted<15000){
-  await wait(80);const snapshot=await readCarousel();const proof={at:Date.now(),snapshot};carouselResourceReadiness.push(proof);writeLiveProof();assert.equal(snapshot.documentHidden,false);assert.equal(snapshot.timers,1)
-  if(snapshot.images.some(image=>!image.complete||image.naturalWidth<=0)){assert(Date.now()-rotationStarted<4000,'carousel resources did not decode within readiness bound');continue}
+  await wait(80);const requestStartedAt=Date.now(),snapshot=await readCarousel();const proof={at:Date.now(),requestStartedAt,snapshot};carouselResourceReadiness.push(proof);writeLiveProof();assert.equal(snapshot.documentHidden,false);assert.equal(snapshot.timers,1)
+  proof.readiness=verifyCarouselReadiness(snapshot,readiness,requestStartedAt,proof.at);writeLiveProof();if(!proof.readiness.ready)continue
   const observed=verifyRetainedCarousel(snapshot,expectedKeys)
   if(rotation.at(-1)?.current!==observed.current){if(rotation.length)assert.equal(observed.current,(rotation.at(-1).current+1)%expectedKeys.length,'real timer follows complete saved cyclic order');rotation.push(observed)}
   cycleComplete=rotation.length>=expectedKeys.length+1&&new Set(rotation.slice(0,expectedKeys.length).map(row=>row.current)).size===expectedKeys.length&&rotation.at(-1).current===rotation[0].current
@@ -167,4 +191,4 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  fs.writeFileSync('out/gallery-favorites-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify({...result,motionPreference,motionReadiness,favoriteReadiness,favoritePickerReadiness,carouselResourceReadiness},null,2));console.log('Gallery and external favorites GUI checks passed');
 };
 module.exports.verifyRetainedCarousel=verifyRetainedCarousel;
-Object.assign(module.exports,{readMountedEnabledPlaylist,readMountedCarousel});
+Object.assign(module.exports,{readMountedEnabledPlaylist,readMountedCarousel,verifyCarouselReadiness});

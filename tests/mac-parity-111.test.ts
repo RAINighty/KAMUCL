@@ -19,7 +19,7 @@ function temporary(t: TestContext) {
 function navigation() {
   return THEMES.flatMap((theme: string) => LAYOUTS.flatMap(([width, height, zoom]: number[]) => ROUTES.map((route: string) => ({
     theme, width, height, zoom, route, selectedRoute: route, actualTheme: theme, component: ROUTE_COMPONENTS[route], componentChain: ['ChildWidget', ROUTE_COMPONENTS[route], 'AsyncComponentWrapper'],
-    native: { platform: 'darwin', visible: true, focused: true, minimized: false, zoom }, coordinate: { hit: true }, renderer: { hasFocus: true, hidden: false }, layout: { horizontalOverflow: false }, screenshot: 'mac-parity-first-scene.png', bytes: 1024, sha256: 'a'.repeat(64)
+    native: { platform: 'darwin', visible: true, focused: true, minimized: false, zoom, bounds: { width, height }, contentBounds: { width, height } }, coordinate: { hit: true }, renderer: { width: Math.round(width / zoom), height: Math.round(height / zoom), hasFocus: true, hidden: false }, layout: { horizontalOverflow: false }, screenshot: 'mac-parity-first-scene.png', bytes: 1024, sha256: 'a'.repeat(64)
   }))))
 }
 function queue() {
@@ -44,6 +44,9 @@ test('Mac scene contract rejects selected-nav-only snapshots, hidden windows, wr
     (row: any) => { row.native.focused = false },
     (row: any) => { row.native.platform = 'linux' },
     (row: any) => { row.native.zoom = 2 },
+    (row: any) => { row.native.bounds.height = 678 },
+    (row: any) => { row.native.bounds.width = 1280 },
+    (row: any) => { row.renderer.width += 1 },
     (row: any) => { row.actualTheme = 'blue-white' },
     (row: any) => { row.coordinate.hit = false },
     (row: any) => { row.renderer.hidden = true },

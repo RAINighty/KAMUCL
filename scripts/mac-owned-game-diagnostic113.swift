@@ -15,7 +15,7 @@ func identity(_ pid: Int32) -> [String: Any]? {
     var info = proc_bsdinfo()
     let size = Int32(MemoryLayout<proc_bsdinfo>.size)
     guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
-    var bytes = [CChar](repeating: 0, count: Int(PROC_PIDPATHINFO_MAXSIZE))
+    var bytes = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
     let byteCount = UInt32(bytes.count)
     guard proc_pidpath(pid, &bytes, byteCount) > 0 else { return nil }
     return ["pid": pid, "ppid": info.pbi_ppid,
