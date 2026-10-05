@@ -5,7 +5,6 @@ import ContentSkeleton from '../components/ContentSkeleton.vue'
 import { catalogSession } from '../catalogCache'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
-  addFolder,
   cleanupPartialInstall,
   errText,
   formatSpeed,
@@ -28,8 +27,8 @@ import {
   saveSettings,
   scanFolder,
   selectDir,
-  setActiveFolder,
   setDefaultFolder,
+  setDownloadFolder,
   setVersionIsolation,
   setVersionJava,
   setVersionResolution
@@ -154,6 +153,8 @@ onUnmounted(() => {
 // ---------------- 游戏文件夹（统一管理入口） ----------------
 const folders = ref<GameFolder[]>([])
 const activeFolder = ref('')
+const installFolder = computed(() => store.settings?.folders.find(folder => folder.isDefault)?.path || activeFolder.value)
+watch(() => store.settings?.folders, value => { if (value) folders.value = value }, { deep: true })
 watch(() => store.settings?.activeFolder, folder => {
   if (folder && folder !== activeFolder.value) { activeFolder.value = folder; void refreshFolderScan(false) }
 })
@@ -212,43 +213,38 @@ async function loadFolderState() {
 }
 
 async function chooseFolderPath(selected: string) {
-  if (!selected || selected === activeFolder.value || folderBusy.value) return
+  if (!selected || selected === installFolder.value || folderBusy.value) return
   folderBusy.value = true
+  let committed = false
   try {
-    activeFolder.value = await setActiveFolder(selected)
+    folders.value = await setDefaultFolder(selected)
+    committed = true
+    const destination = folders.value.find(folder => folder.isDefault)!.path
+    if (store.settings) store.settings = { ...store.settings, folders: folders.value, activeFolder: destination, gameDir: destination }
     store.settings = await getSettings()
+    activeFolder.value = store.settings.activeFolder
     store.resourceVersionId = ''
     await refreshInstalled()
     await refreshFolderScan(false)
-    toast(`已切换到「${currentFolder.value?.name ?? '游戏文件夹'}」`, 'success')
+    toast(`默认下载位置已改为「${currentFolder.value?.name ?? '游戏文件夹'}」`, 'success')
   } catch (error) {
-    // 失效文件夹死锁修复：文件夹已不存在（被删除/重命名）→ 直接移除绑定记录，不再弹切换失败
-    if (errText(error).includes('文件夹已不存在')) {
-      try {
-        await removeFolder(selected)
-        await loadFolderState()
-        store.settings = await getSettings()
-        toast('该文件夹已不存在，已从启动器移除其绑定记录', 'info')
-      } catch (e2) {
-        toast(`移除绑定失败：${errText(e2)}`, 'error')
-      }
-      folderBusy.value = false
-      return
-    }
-    toast(`切换失败：${errText(error)}`, 'error')
-    await loadFolderState()
+    toast(committed ? `下载位置已保存，但列表暂未刷新，请重试：${errText(error)}` : `切换失败：${errText(error)}`, committed ? 'info' : 'error')
+    if (!committed) await loadFolderState()
   } finally {
     folderBusy.value = false
   }
 }
 
 async function addGameFolder() {
+  let committed = false
   try {
     const selected = await selectDir()
     if (!selected) return
     folderBusy.value = true
-    const added = await addFolder(selected)
-    await setActiveFolder(added.folder.path)
+    folders.value = await setDownloadFolder(selected)
+    committed = true
+    const destination = folders.value.find(folder => folder.isDefault)!.path
+    if (store.settings) store.settings = { ...store.settings, folders: folders.value, activeFolder: destination, gameDir: destination }
     const state = await listFolders()
     folders.value = state.folders
     activeFolder.value = state.active
@@ -256,9 +252,9 @@ async function addGameFolder() {
     await refreshInstalled()
     await refreshFolderScan(false)
     const count = folderScan.value?.versions.length ?? 0
-    toast(`已添加并切换游戏文件夹，识别到 ${count} 个版本`, 'success')
+    toast(`默认下载位置已更改，识别到 ${count} 个版本；原位置的游戏已保留`, 'success')
   } catch (error) {
-    toast(`添加失败：${errText(error)}`, 'error')
+    toast(committed ? `下载位置已保存，但列表暂未刷新，请重试：${errText(error)}` : `添加失败：${errText(error)}`, committed ? 'info' : 'error')
   } finally {
     folderBusy.value = false
   }
@@ -267,12 +263,16 @@ async function addGameFolder() {
 async function markCurrentDefault() {
   if (!activeFolder.value || currentFolder.value?.isDefault) return
   folderBusy.value = true
+  let committed = false
   try {
     folders.value = await setDefaultFolder(activeFolder.value)
+    committed = true
+    const destination = folders.value.find(folder => folder.isDefault)!.path
+    if (store.settings) store.settings = { ...store.settings, folders: folders.value, activeFolder: destination, gameDir: destination }
     store.settings = await getSettings()
     toast('已设为默认游戏文件夹', 'success')
   } catch (error) {
-    toast(`设置失败：${errText(error)}`, 'error')
+    toast(committed ? `下载位置已保存，请刷新页面读取：${errText(error)}` : `设置失败：${errText(error)}`, committed ? 'info' : 'error')
   } finally {
     folderBusy.value = false
   }
@@ -408,7 +408,8 @@ const modal = reactive({
   recordingMod: undefined as InstallOptions['recordingMod'],
   favoriteMods: undefined as InstallOptions['favoriteMods'],
   instanceName: '',
-  instanceEdited: false
+  instanceEdited: false,
+  targetFolder: ''
 })
 
 /** 默认实例名（加载器类型+版本自动生成；纯净版固定为 MC 版本号） */
@@ -428,7 +429,7 @@ const instanceError = computed(() => {
   if (n.length > 64) return '实例名过长（最多 64 字符）'
   if (/[\\/:*?"<>|]/.test(n)) return '实例名不能包含 \\ / : * ? " < > | 字符'
   if (/^[.\s]|[.\s]$/.test(n)) return '实例名不能以空格或点开头/结尾'
-  if (store.installed.some((v) => v.id === n)) return `实例「${n}」已存在，请改名后安装`
+  if (allInstalled.value.some((v) => v.id === n && v.folder === modal.targetFolder)) return `实例「${n}」已存在，请改名后安装`
   return ''
 })
 
@@ -454,6 +455,7 @@ function openInstall(v: RemoteVersion) {  modal.open = true
   favoritesReady.value = true
   modal.instanceName = ''
   modal.instanceEdited = false
+  modal.targetFolder = installFolder.value
 }
 
 const apiRetry = ref(0)
@@ -536,7 +538,7 @@ async function confirmInstall() {
   store.installing.add(v.id)
   toast(`开始下载版本 ${v.id}，请稍候…`, 'info')
   try {
-    await installVersion(v.id, opts)
+    await installVersion(v.id, opts, modal.targetFolder)
   } catch (e) {
     store.installing.delete(v.id)
     toast('安装失败：' + errText(e), 'error')
@@ -950,21 +952,22 @@ async function confirmIsolation() {
     <section class="card folder-manager" data-ui="games:folders" @contextmenu.prevent="showFolderContextMenu(activeFolder)">
       <div class="folder-manager-main">
         <div class="folder-select-wrap">
-          <span class="folder-caption">新版本安装位置</span>
+          <span class="folder-caption">默认下载位置</span>
           <SelectMenu
             class="folder-select"
-            :model-value="activeFolder"
+            :model-value="installFolder"
             :options="folders.map(f => ({ value: f.path, label: f.name + (f.isDefault ? '（默认）' : '') }))"
             :disabled="folderBusy || !folders.length"
             @change="chooseFolderPath"
           />
-          <span class="muted folder-current-path" :title="activeFolder">{{ activeFolder }}</span>
+          <span class="muted folder-current-path" data-ui="download-location:game-path" :title="installFolder">{{ installFolder }}</span>
         </div>
         <button class="btn btn-ghost btn-sm folder-tools-trigger" :aria-expanded="folderToolsOpen" @click="folderToolsOpen = !folderToolsOpen">管理文件夹 <span class="muted">{{ folders.length }}</span></button>
       </div>
         <div v-if="folderToolsOpen" class="folder-manager-actions" @keydown.esc="folderToolsOpen = false">
+          <p class="muted folder-managed-path" :title="activeFolder">正在管理：{{ currentFolder?.name || '游戏文件夹' }} · {{ activeFolder }}</p>
           <button class="btn btn-ghost btn-sm" :disabled="folderBusy" @click="addGameFolder">
-            + 添加新的绑定游戏文件夹
+            + 更改到其他下载位置
           </button>
           <button class="btn btn-ghost btn-sm" :disabled="folderBusy" @click="refreshFolderScan()">
             <span v-if="folderBusy" class="spin"></span>
@@ -982,7 +985,7 @@ async function confirmIsolation() {
             :disabled="folderBusy"
             @click="markCurrentDefault"
           >
-            设为默认
+            将当前管理文件夹设为默认下载位置
           </button>
           <button
             class="btn btn-danger btn-sm"
@@ -1003,6 +1006,7 @@ async function confirmIsolation() {
           <button class="btn btn-ghost btn-sm" @click="folderMissingDismissed = true">稍后处理</button>
         </div>
       </div>
+      <p class="muted folder-location-hint">新版本、整合包和共享资源使用默认下载位置；已有游戏保留原目录。<button class="btn btn-ghost btn-sm" @click="store.settingsSection = 'installation'; store.currentView = 'settings'">下载位置设置</button></p>
       <p v-if="folderScan?.errors.length" class="folder-scan-error" role="status">{{ folderScan.errors[0] }}</p>
     </section>
 
@@ -1421,6 +1425,7 @@ async function confirmIsolation() {
       <div v-if="modal.open" class="modal-mask" @pointerdown.self="modal.open = false">
         <div class="modal game-install-modal" role="dialog" aria-modal="true" :aria-label="`安装 ${modal.version?.id}`">
           <header class="install-header"><h3 class="modal-title">安装 {{ modal.version?.id }}</h3><button class="icon-btn" aria-label="关闭安装窗口" data-modal-dismiss @click="modal.open=false"><UiGlyph name="close" /></button></header>
+          <p class="install-location muted" data-ui="download-location:install-target">本次安装到 <span class="mono">{{ modal.targetFolder }}</span></p>
           <div class="install-content">
 
           <p class="modal-label">选择模组加载器</p>
@@ -1498,6 +1503,9 @@ async function confirmIsolation() {
 </template>
 
 <style scoped>
+.install-location { margin: 0; padding: 4px 24px 10px; overflow-wrap: anywhere; flex-shrink: 0; font-size: var(--text-sm); }
+.folder-location-hint { margin: var(--space-2) 0 0; line-height: 1.6; }
+.folder-managed-path { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; font-size: var(--text-sm); }
 .game-install-modal{width:min(620px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;overflow:hidden;display:flex;flex-direction:column;border-radius:20px}.install-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 24px 8px;flex-shrink:0}.install-header .modal-title{font-size:26px;margin:0}.install-content{padding:0 24px 20px;min-height:0;overflow:auto;scrollbar-gutter:stable}.install-footer{padding:16px 24px;margin:0!important;border-top:1px solid var(--border);flex-shrink:0}.install-footer .btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;min-width:116px;border-radius:12px}.game-install-modal .loader-options{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.game-install-modal .loader-option{flex-direction:column;gap:6px;height:72px;border-radius:14px;padding:10px 6px;font-size:13px}.game-install-modal .loader-option.active{box-shadow:0 0 14px color-mix(in srgb,var(--accent) 12%,transparent)}.game-install-modal .modal-label{font-size:14px;margin:20px 0 10px}.game-install-modal .input,.game-install-modal .select{min-height:42px;border-radius:12px;width:100%}.game-install-modal .fapi-head{justify-content:flex-start;align-items:flex-start;margin-top:18px}.game-install-modal .inst-hint{overflow-wrap:anywhere;line-height:1.7}.game-install-modal :deep(.select-menu-btn){min-height:42px;border-radius:12px}.game-install-modal :deep(.recording-picker .modal-label){font-size:14px}.game-install-modal .loaders-error{padding:9px 12px;background:var(--danger-soft);border-radius:9px;line-height:1.5}.game-install-modal .fapi-tip{line-height:1.6}
 @media(max-width:520px){.install-header{padding:16px}.install-header .modal-title{font-size:22px}.install-content{padding:0 16px 16px}.install-footer{padding:12px 16px}.game-install-modal .loader-options{grid-template-columns:repeat(3,minmax(0,1fr))}.game-install-modal .loader-option{height:62px}}
 .folder-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:20px}.folder-summary strong{display:flex;gap:10px;align-items:center}.folder-summary>.muted{font-size:12px}

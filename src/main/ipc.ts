@@ -69,7 +69,7 @@ import * as plugins from './core/plugins'
 import * as keybindings from './core/keybindings'
 import * as modBridge from './core/modBridge'
 import * as gamedir from './core/gamedir'
-import { folderOfVersion, instanceIconsDir, withGameFolder } from './core/paths'
+import { folderOfVersion, instanceIconsDir, withDownloadFolder, withGameFolder } from './core/paths'
 import * as modpacks from './core/modpacks'
 import * as skins from './core/skins'
 import * as community from './core/community'
@@ -363,7 +363,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
     return withGameFolder(target, action)
   }
   // 异步执行，不阻塞返回；进度经 event:progress（带 taskId）推送，结束经 event:installDone 推送
-  ipcMain.handle(IPC.versionsInstall, (_e, versionId: string, opts?: InstallOptions, folder?: string) => scopedVersion(versionId, folder || settings.getSettings().activeFolder, () => {
+  ipcMain.handle(IPC.versionsInstall, (_e, versionId: string, opts?: InstallOptions, folder?: string) => withDownloadFolder(folder, () => {
     const vid = String(versionId ?? '')
     const task = registerTask(`安装版本 ${vid}${opts?.loader ? ` + ${opts.loader}` : ''}`, 'version')
     const progressGuard = new ProgressEventGuard()
@@ -449,6 +449,9 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   )
   ipcMain.handle(IPC.foldersSetDefault, (_e, p: string) =>
     gameFolders.setDefaultGameFolder(String(p ?? ''))
+  )
+  ipcMain.handle(IPC.foldersSetDownload, (_e, p: string) =>
+    gameFolders.setDownloadGameFolder(String(p ?? ''))
   )
   ipcMain.handle(IPC.foldersSetActive, (_e, p: string) =>
     gameFolders.setActiveGameFolder(String(p ?? ''))
@@ -647,7 +650,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   )
   ipcMain.handle(
     IPC.communityDownload,
-    async (_e, file: CommunityFile, target: { versionId: string; kind: CommunityKind }) => {
+    async (_e, file: CommunityFile, target: { versionId: string; kind: CommunityKind; folder?: string }) => {
       const task = registerTask(`下载 ${file.fileName ?? '资源'}`, 'download')
       const progressGuard = new ProgressEventGuard()
       let lastStage = ''

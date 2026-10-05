@@ -624,7 +624,7 @@ async function openModpackImport(filePath: string, knownInfo?: ModpackInfo) {
     info: null,
     nameSource: 'file' as const,
     customName: '',
-    targetFolder: store.settings?.activeFolder || store.settings?.gameDir || '',
+    targetFolder: store.settings?.folders.find(folder => folder.isDefault)?.path || store.settings?.activeFolder || store.settings?.gameDir || '',
     conflictAction: 'rename' as const,
     existingId: '',
     confirmReplace: false

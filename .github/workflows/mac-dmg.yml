@@ -1,9 +1,8 @@
 name: macOS installable DMG
 on:
   workflow_dispatch:
-  push:
-    branches: [master]
-    paths: ['.github/workflows/mac-dmg.yml']
+  # The native package workflow already builds ZIP and DMG from the same commit.
+  # This legacy rewrap requires an existing public ZIP; run only explicitly.
 permissions:
   contents: read
 jobs:
@@ -14,8 +13,6 @@ jobs:
         include:
           - runner: macos-15
             arch: arm64
-          - runner: macos-15-intel
-            arch: x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:

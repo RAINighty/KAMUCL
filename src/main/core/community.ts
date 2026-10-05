@@ -26,6 +26,9 @@ import { MOD_ZH, ZH_TO_SLUGS } from './community-zh'
 import { effectiveCommunityFilter, matchesCommunityFilter, usesCommunityLoader, MODRINTH_RESOURCE_LOADERS, type CommunityFileFilter } from '../../shared/communityPolicy'
 import { communityPageSlots } from './communityPaging'
 import { logScope } from './launcherLog'
+import { downloadFileName } from './downloadFileName'
+import { defaultFolderPath, folderOfVersion, withGameFolder } from './paths'
+import { canonicalPath, samePath } from './folderPaths'
 
 const communityLog = logScope('community')
 
@@ -517,13 +520,33 @@ const KIND_SUBDIR: Partial<Record<CommunityKind, string>> = {
  */
 export async function communityDownload(
   file: CommunityFile,
-  target: { versionId: string; kind: CommunityKind },
+  target: { versionId: string; kind: CommunityKind; folder?: string },
   emit: ProgressEmit,
   onDone?: (r: { versionId: string; ok: boolean; error?: string }) => void,
   signal?: AbortSignal
 ): Promise<string> {
-  const fileName = path.basename(String(file.fileName ?? '')) || 'download.bin'
-  communityLog.info(`开始下载 ${target.kind} 资源 ${fileName} → 实例 ${target.versionId}`)
+  // Freeze both the instance and shared directory before the first network await.
+  const requested = target.folder === undefined
+    ? target.kind === 'modpack' ? defaultFolderPath() : folderOfVersion(target.versionId)
+    : String(target.folder).trim()
+  if (!requested) throw new Error('目标游戏文件夹不能为空')
+  const registered = getSettings().folders.find(folder => samePath(folder.path, requested))
+  if (!registered && (target.kind === 'modpack' || target.folder !== undefined)) throw new Error('目标游戏文件夹未在 KAMUCL 中登记')
+  const folder = canonicalPath(registered?.path ?? requested)
+  return withGameFolder(folder, () => communityDownloadInFolder(file, { ...target, folder }, emit, onDone, signal))
+}
+
+async function communityDownloadInFolder(
+  file: CommunityFile,
+  target: { versionId: string; kind: CommunityKind; folder?: string },
+  emit: ProgressEmit,
+  onDone?: (r: { versionId: string; ok: boolean; error?: string }) => void,
+  signal?: AbortSignal
+): Promise<string> {
+  signal?.throwIfAborted()
+  const fileName = downloadFileName(String(file.fileName ?? ''))
+  const displayName = String(file.fileName ?? '') || fileName
+  communityLog.info(`开始下载 ${target.kind} 资源 ${displayName} → 实例 ${target.versionId}`)
   const dlProgress = (d: number, t: number, speed: number, eta: number | null) =>
     emit({
       stage: 'download',
@@ -534,7 +557,7 @@ export async function communityDownload(
       bytesDone: d,
       bytesTotal: t || undefined,
       indeterminate: !t,
-      text: `下载 ${fileName} ${(d / 1024 / 1024).toFixed(1)}MB${t ? '/' + (t / 1024 / 1024).toFixed(1) + 'MB' : ''}`
+      text: `下载 ${displayName} ${(d / 1024 / 1024).toFixed(1)}MB${t ? '/' + (t / 1024 / 1024).toFixed(1) + 'MB' : ''}`
     })
 
   // CurseForge 受限文件（作者禁止直链，downloadUrl 为 null）：官方 API 现场解析真实下载地址
@@ -555,27 +578,40 @@ export async function communityDownload(
     getSettings().downloadThreads, getSettings().mirror, signal)
 
   if (target.kind === 'modpack') {
-    const tmpPath = path.join(os.tmpdir(), `kamucl-pack-${Date.now()}-${fileName}`)
-    await transfer(tmpPath)
-    // 动态 import 避免与 modpacks.ts 的循环依赖；后台异步安装，进度走 event:progress
-    const { installModpack } = await import('./modpacks')
-    const installProgress: ProgressEmit = (event) => emit({
-      ...event,
-      overall: 0.1 + (event.overall ?? event.progress) * 0.9
-    })
-    void installModpack(tmpPath, installProgress, { signal, nameSource: 'inner' })
-      .then((id) => {
-        fs.rmSync(tmpPath, { force: true })
-        onDone?.({ versionId: id, ok: true })
+    // An owned, atomically allocated directory avoids simultaneous-download collisions
+    // and confines cleanup of .part/range caches to this one accepted task.
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kamucl-pack-'))
+    const tmpPath = path.join(tmpRoot, fileName)
+    const cleanup = (): void => {
+      try { fs.rmSync(tmpRoot, { recursive: true, force: true }) }
+      catch (err) { communityLog.warn(`整合包临时文件清理失败：${tmpRoot}`, err) }
+    }
+    try {
+      await transfer(tmpPath)
+      signal?.throwIfAborted()
+      // 动态 import 避免与 modpacks.ts 的循环依赖；后台异步安装，进度走 event:progress
+      const { installModpack } = await import('./modpacks')
+      const installProgress: ProgressEmit = (event) => emit({
+        ...event,
+        overall: 0.1 + (event.overall ?? event.progress) * 0.9
       })
-      .catch((err) => {
-        fs.rmSync(tmpPath, { force: true })
-        const text = errText(err)
-        communityLog.error(`整合包 ${fileName} 后台安装失败`, err)
-        emit({ stage: 'error', progress: 0, text: `整合包安装失败: ${text}` })
-        onDone?.({ versionId: '', ok: false, error: text })
-      })
-    return '整合包已开始安装'
+      void (async () => {
+        let outcome: { versionId: string; ok: boolean; error?: string }
+        try {
+          const id = await installModpack(tmpPath, installProgress, { signal, nameSource: 'inner', targetFolder: target.folder })
+          outcome = { versionId: id, ok: true }
+        } catch (err) {
+          outcome = { versionId: '', ok: false, error: errText(err) }
+          communityLog.error(`整合包 ${displayName} 后台安装失败`, err)
+        } finally { cleanup() }
+        if (!outcome.ok) emit({ stage: 'error', progress: 0, text: `整合包安装失败: ${outcome.error}` })
+        onDone?.(outcome)
+      })().catch(err => communityLog.error('整合包完成通知失败', err))
+      return '整合包已开始安装'
+    } catch (err) {
+      cleanup()
+      throw err
+    }
   }
 
   // 与最终启动使用同一个目录解析器，避免资源被装进未参与启动的目录。

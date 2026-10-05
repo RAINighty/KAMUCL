@@ -6,7 +6,7 @@ const [group,arch,stage='app']=process.argv.slice(2),pkg=require('../package.jso
 assert.equal(process.platform,'darwin');assert.equal(process.arch,arch)
 assert.equal(process.env.GITHUB_ACTIONS,'true','native job driver requires a disposable runner')
 fs.mkdirSync(path.resolve('out'),{recursive:true})
-assert(['ui','parity','game','startup','tools','update','gpu-diagnostic'].includes(group));assert(['app','dmg'].includes(stage))
+assert(['ui','parity','game','startup','tools','update','gpu-diagnostic','download-location'].includes(group));assert(['app','dmg'].includes(stage))
 const proof=path.resolve(`release/mac-job-${arch}-${stage}-${group}`);fs.mkdirSync(proof,{recursive:true})
 const receipt={version:pkg.version,arch,stage,group,commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),startedAt:new Date().toISOString(),complete:false,steps:[]}
 const save=()=>fs.writeFileSync(path.join(proof,'job.json'),JSON.stringify(receipt,null,2))
@@ -44,6 +44,7 @@ let mount,attached=false
  else if(group==='parity')run(process.execPath,['scripts/verify-mac-parity.cjs',appPath,arch,stage],{timeout:22*60*1000})
  else if(group==='game')run(process.execPath,['scripts/verify-mac-game.cjs',appPath,arch],{timeout:28*60*1000})
  else if(group==='gpu-diagnostic')run(process.execPath,['scripts/verify-mac-gpu-diagnostic.cjs',appPath,arch],{timeout:5*60*1000})
+ else if(group==='download-location')run(process.execPath,['scripts/verify-download-location-112.cjs',appPath,arch,stage],{timeout:15*60*1000})
  else await require('./verify-mac-extra.cjs')(appPath,arch,group)
  receipt.steps.push(group==='gpu-diagnostic'?'isolated GPU diagnostic completed; no formal acceptance result is changed':'current native '+group+' checks completed');receipt.complete=true
  if(group==='gpu-diagnostic')receipt.classification='Diagnostic only; not GUI, motion or frame-rate acceptance'

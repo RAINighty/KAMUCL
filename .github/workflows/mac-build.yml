@@ -14,8 +14,6 @@ jobs:
         include:
           - runner: macos-15
             arch: arm64
-          - runner: macos-15-intel
-            arch: x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     steps:
@@ -60,12 +58,6 @@ jobs:
           - runner: macos-15
             arch: arm64
             stage: dmg
-          - runner: macos-15-intel
-            arch: x64
-            stage: app
-          - runner: macos-15-intel
-            arch: x64
-            stage: dmg
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     steps:
@@ -99,8 +91,6 @@ jobs:
         include:
           - runner: macos-15
             arch: arm64
-          - runner: macos-15-intel
-            arch: x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -134,8 +124,6 @@ jobs:
         include:
           - runner: macos-15
             arch: arm64
-          - runner: macos-15-intel
-            arch: x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -178,15 +166,6 @@ jobs:
           - runner: macos-15
             arch: arm64
             group: update
-          - runner: macos-15-intel
-            arch: x64
-            group: startup
-          - runner: macos-15-intel
-            arch: x64
-            group: tools
-          - runner: macos-15-intel
-            arch: x64
-            group: update
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
@@ -220,13 +199,14 @@ jobs:
             release/mac-job-*
           if-no-files-found: error
 
-  intel-gpu-diagnostic:
-    # Separate, bounded evidence collection only. The failed formal UI job keeps
-    # its original result and parameters; this job cannot satisfy acceptance.
-    needs: [package, ui]
-    if: always() && needs.package.result == 'success' && needs.ui.result == 'failure'
-    runs-on: macos-15-intel
-    timeout-minutes: 10
+  download-location:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [app, dmg]
+    runs-on: macos-15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -236,15 +216,15 @@ jobs:
       - run: npm ci
       - uses: actions/download-artifact@v4
         with:
-          name: mac-packages-x64
+          name: mac-packages-arm64
           path: release
-      - name: Isolated exact-runtime GPU initialization diagnostics; no acceptance override
-        run: node scripts/verify-mac-job.cjs gpu-diagnostic x64 app
+      - name: Native filename and default download location regression
+        run: node scripts/verify-mac-job.cjs download-location arm64 ${{ matrix.stage }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mac-gpu-diagnostic-x64
+          name: mac-download-location-arm64-${{ matrix.stage }}
           path: |
-            release/mac-gpu-diagnostic-*
+            release/download-location-proof-*
             release/mac-job-*
           if-no-files-found: error

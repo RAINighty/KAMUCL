@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import type { FolderScanResult, GameFolder } from '../../shared/types'
 import { getSettings, saveSettings } from './settings'
 import { canonicalPath, pathIdentity, resolveMinecraftRoot } from './folderPaths'
@@ -134,16 +135,43 @@ export function removeGameFolder(input: string): GameFolder[] {
 export function setDefaultGameFolder(input: string): GameFolder[] {
   const identity = pathIdentity(input)
   const current = listGameFolders()
-  if (!current.folders.some((folder) => pathIdentity(folder.path) === identity)) {
+  const selected = current.folders.find((folder) => pathIdentity(folder.path) === identity)
+  if (!selected) {
     throw new Error('文件夹未登记')
   }
+  assertWritableDownloadFolder(selected.path)
   return persistFolders(
     current.folders.map((folder) => ({
       ...folder,
       isDefault: pathIdentity(folder.path) === identity
     })),
-    current.active
+    selected.path
   )
+}
+
+function assertWritableDownloadFolder(folder: string): void {
+  if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) throw new Error('下载文件夹已不存在，请重新选择')
+  const probe = path.join(folder, `.kamucl-write-test-${crypto.randomUUID()}`)
+  try {
+    fs.writeFileSync(probe, '', { flag: 'wx' })
+    fs.unlinkSync(probe)
+  } catch (error) {
+    if (fs.existsSync(probe)) { try { fs.unlinkSync(probe) } catch { /* Preserve the write error. */ } }
+    throw new Error(`下载文件夹不可写：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/** Register and select the new download root in one settings commit; existing roots remain registered. */
+export function setDownloadGameFolder(input: string): GameFolder[] {
+  const resolved = resolveMinecraftRoot(input)
+  assertWritableDownloadFolder(resolved.path)
+  const current = listGameFolders()
+  const identity = pathIdentity(resolved.path)
+  const registered = current.folders.some(folder => pathIdentity(folder.path) === identity)
+  const folders = registered ? current.folders : [...current.folders, {
+    path: resolved.path, name: path.basename(resolved.path) || resolved.path, isDefault: false
+  }]
+  return persistFolders(folders.map(folder => ({ ...folder, isDefault: pathIdentity(folder.path) === identity })), resolved.path)
 }
 
 export function setActiveGameFolder(input: string): string {

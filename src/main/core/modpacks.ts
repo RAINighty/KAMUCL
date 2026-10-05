@@ -29,11 +29,11 @@ import { prepareCurseMavenFile } from './modpackAlternateDownload'
 import { waitForModpackFiles } from './modpackManualFiles'
 import { getSettings } from './settings'
 import { registerVersionFolder, versionDir, versionJsonPath, versionsDir } from './paths'
-import { allFolders, gameDir, withGameFolder } from './paths'
+import { allFolders, defaultFolderPath, gameDir, withDownloadFolder } from './paths'
 import { installVersion, listAllInstalled, readVersionJson, flattenInstance } from './versions'
 import { packRuntimeProfile } from './packRuntime'
 import { throwIfCancelled, waitIfTaskPaused } from './tasks'
-import { listGameFolders, setActiveGameFolder } from './gameFolders'
+import { listGameFolders } from './gameFolders'
 import { canonicalPath, samePath } from './folderPaths'
 import { logScope } from './launcherLog'
 
@@ -846,7 +846,7 @@ export async function restoreModpackUserFiles(
 
 function requestedGameFolder(input?: string): string {
   const state = listGameFolders()
-  if (!input) return state.active
+  if (!input) input = defaultFolderPath()
   const target = canonicalPath(input)
   const registered = state.folders.find((folder) => samePath(folder.path, target))
   if (!registered) throw new Error('目标游戏文件夹未在 KAMUCL 中登记')
@@ -931,7 +931,7 @@ export async function installModpack(
   try {
     const id = await (async () => {
       const folder = requestedGameFolder(opts?.targetFolder)
-      return withGameFolder(folder, () => installModpackInFolder(filePath, emit, { ...opts, targetFolder: folder }))
+      return withDownloadFolder(folder, () => installModpackInFolder(filePath, emit, { ...opts, targetFolder: folder }))
     })()
     packLog.info(`整合包 ${path.basename(filePath)} 安装完成：实例 ${id}（耗时 ${((Date.now() - started) / 1000).toFixed(1)}s）`)
     return id
@@ -950,7 +950,6 @@ async function installModpackInFolder(filePath: string, emit: ProgressEmit, opts
   const report: ProgressEmit = (event) =>
     emit({ ...event, manualFiles, overall: event.overall ?? event.progress })
   const targetFolder = requestedGameFolder(opts?.targetFolder)
-  setActiveGameFolder(targetFolder)
   // 1) 校验存在性与 zip 可读、探测格式
   const zip = openPackZip(filePath)
   const nameSource = opts?.nameSource === 'inner' ? 'inner' : 'file'

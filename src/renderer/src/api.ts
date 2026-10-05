@@ -159,6 +159,8 @@ export const renameFolder = (path: string, displayName: string) =>
   invoke<GameFolder[]>(IPC.foldersRename, path, displayName)
 export const setDefaultFolder = (path: string) =>
   invoke<GameFolder[]>(IPC.foldersSetDefault, path)
+export const setDownloadFolder = (path: string) =>
+  invoke<GameFolder[]>(IPC.foldersSetDownload, path)
 export const setActiveFolder = (path: string) => invoke<string>(IPC.foldersSetActive, path)
 export const scanFolder = (path: string) => invoke<FolderScanResult>(IPC.foldersScan, path)
 export const openGameFolder = (path: string) => invoke<void>(IPC.foldersOpen, path)
@@ -215,7 +217,7 @@ export const communityFiles = (
 /** 下载资源文件，返回保存路径；kind=modpack 时自动进入整合包安装流程 */
 export const communityDownload = (
   file: CommunityFile,
-  target: { versionId: string; kind: CommunityKind }
+  target: { versionId: string; kind: CommunityKind; folder?: string }
 ) => invoke<string>(IPC.communityDownload, file, target)
 
 // ---------------- Java ----------------

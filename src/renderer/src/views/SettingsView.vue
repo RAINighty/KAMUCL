@@ -10,6 +10,7 @@ import {
   checkUpdate,
   errText,
   getPendingUpdate,
+  getSettings,
   getSystemInfo,
   getUpdateState,
   hideJava,
@@ -24,6 +25,8 @@ import {
   refreshJava,
   removePlugin,
   restoreUpdateBackup,
+  selectDir,
+  setDownloadFolder,
   setPluginEnabled
 } from '../api'
 import { enterEditMode, store, toast } from '../store'
@@ -42,8 +45,10 @@ const systemMotionHelp = window.kamucl.platform === 'darwin'
     ? '若需要动画，请在 Windows 设置 → 辅助功能 → 视觉效果开启动画效果。'
     : '若需要动画，请检查本机桌面的辅助功能或动画设置。'
 import HomeLayoutEditor from '../components/HomeLayoutEditor.vue'
+import SelectMenu from '../components/SelectMenu.vue'
 import { settingsCatalog, settingsCategories, settingsScopes, scopeOfCategory, searchSettings, type SettingsCategory, type SettingsScope } from '@shared/settingsCatalog'
 import { updateSettings } from '../settingsUpdates'
+import { refreshInstalled } from '../store'
 
 const page = ref<HTMLElement | null>(null)
 /** 精确输入框自动聚焦 */
@@ -97,6 +102,41 @@ async function save(patch: Partial<Settings>) {
   } catch (e) {
     toast('保存设置失败：' + errText(e), 'error')
   }
+}
+
+const defaultDownloadFolder = computed(() => store.settings?.folders.find(folder => folder.isDefault)?.path || store.settings?.activeFolder || store.settings?.gameDir || '')
+const downloadFolderBusy = ref(false)
+const downloadFolderError = ref('')
+async function applyDownloadFolder(folder: string) {
+  if (!folder || downloadFolderBusy.value) return
+  downloadFolderBusy.value = true
+  downloadFolderError.value = ''
+  let committed = false
+  try {
+    const folders = await setDownloadFolder(folder)
+    committed = true
+    const selected = folders.find(item => item.isDefault)!.path
+    if (store.settings) store.settings = { ...store.settings, folders, activeFolder: selected, gameDir: selected }
+    store.settings = await getSettings()
+    store.resourceVersionId = ''
+    await refreshInstalled()
+    toast('默认下载位置已更改；已有游戏目录和存档保留，正在下载的任务继续使用原位置', 'success')
+  } catch (error) {
+    downloadFolderError.value = committed
+      ? '下载位置已保存，但列表暂未刷新。请重新打开页面重试：' + errText(error)
+      : '更改失败：' + errText(error)
+  } finally { downloadFolderBusy.value = false }
+}
+async function chooseNewDownloadFolder() {
+  if (downloadFolderBusy.value) return
+  downloadFolderBusy.value = true
+  downloadFolderError.value = ''
+  try {
+    const selected = await selectDir()
+    downloadFolderBusy.value = false
+    if (selected) await applyDownloadFolder(selected)
+  } catch (error) { downloadFolderError.value = '选择文件夹失败：' + errText(error) }
+  finally { downloadFolderBusy.value = false }
 }
 
 // ---------------- 关于与更新 ----------------
@@ -723,6 +763,18 @@ async function onRemovePlugin(p: PluginInfo) {
       <div data-ui="SettingsView:9816c9c5870a" class="background-settings" v-show="category === 'appearance'"><HomeLayoutEditor /></div>
     <div data-ui="SettingsView:0683ad7389b1" v-if="store.settings && category === 'appearance'" class="card group group-inline setting-target" data-section="motion" tabindex="-1"><div><h3 class="group-title">减少动态效果</h3><p data-ui="SettingsView:53f72432b671" class="muted">停止装饰动画与自动轮播，缩短过渡。系统开启减少动态效果时也会自动生效。</p><p v-if="systemReduced" class="muted" role="status">当前系统已关闭动画：启动时显示完整头像，皮肤保持站姿。{{ systemMotionHelp }}</p></div><label class="switch"><input data-ui="SettingsView:35ef39b7e9bc" type="checkbox" aria-label="减少动态效果" :checked="store.settings.reduceMotion === true" @change="save({ reduceMotion: ($event.target as HTMLInputElement).checked })"/><span data-ui="SettingsView:4490d3e5d395" class="switch-ui"/></label></div>
 
+      <div v-show="category === 'downloads'" data-section="installation" data-ui="download-location:settings" class="card group directory-setting">
+        <h3 class="group-title">默认下载位置</h3>
+        <p class="muted group-hint">新游戏版本、整合包和共享资源（依赖库、游戏素材、自动下载的 Java）保存在此处。</p>
+        <div class="dir-row download-location-row">
+          <SelectMenu class="download-location-select" :model-value="defaultDownloadFolder" :options="store.settings.folders.map(folder => ({ value: folder.path, label: folder.name + (folder.isDefault ? '（默认）' : '') }))" :disabled="downloadFolderBusy" @change="applyDownloadFolder" />
+          <button class="btn btn-gold dir-btn" data-ui="download-location:change" :disabled="downloadFolderBusy" @click="chooseNewDownloadFolder">{{ downloadFolderBusy ? '更改中…' : '更改…' }}</button>
+          <button class="btn btn-ghost dir-btn" data-ui="download-location:manage" :disabled="downloadFolderBusy" @click="store.currentView = 'game'">游戏文件夹管理</button>
+        </div>
+        <input data-ui="download-location:path" class="input mono download-location-path" :value="defaultDownloadFolder" readonly aria-label="默认下载位置" :title="defaultDownloadFolder" />
+        <p class="muted group-hint">更改后只影响新任务；已有游戏、存档和正在下载的任务保留原位置。导入时可单独选择目标文件夹。压缩包下载与解压可能暂时使用系统临时目录。</p>
+        <p v-if="downloadFolderError" class="error" role="alert" data-ui="download-location:error">{{ downloadFolderError }}</p>
+      </div>
       <!-- 下载 + 下载目标文件夹：同一行横向排布，窄窗口自动换行 -->
       <div data-ui="SettingsView:9df9d3d48082" v-show="category === 'downloads'" class="settings-grid">
         <!-- 游戏文件夹统一在版本页管理，设置页只显示当前状态，避免双入口冲突。 -->
@@ -770,18 +822,6 @@ async function onRemovePlugin(p: PluginInfo) {
           </div>
         </details>
       </div>
-        <div v-show="category === 'directories'" data-section="installation" class="card group directory-setting">
-          <h3 class="group-title">新版本安装目录</h3>
-          <p class="muted group-hint">
-            新版本将安装到此目录；在游戏版本页管理绑定目录。
-          </p>
-          <div data-ui="SettingsView:df97f9cf717f" class="dir-row">
-            <input data-ui="SettingsView:d4e967de8849" class="input mono" :value="store.settings.activeFolder" readonly title="当前游戏文件夹" />
-            <button data-ui="SettingsView:849a63a7ca8c" class="btn btn-ghost dir-btn" @click="store.currentView = 'game'">
-              前往管理
-            </button>
-          </div>
-        </div>
 
       <!-- 默认版本隔离 -->
       <div data-ui="SettingsView:72c1d8b58f43" v-show="category === 'directories'" data-section="isolation" class="card group group-inline">
@@ -1686,6 +1726,9 @@ async function onRemovePlugin(p: PluginInfo) {
 .dir-btn {
   flex-shrink: 0;
 }
+.download-location-row { flex-wrap: wrap; align-items: center; }
+.download-location-select { flex: 1 1 220px; min-width: 0; }
+.download-location-path { width: 100%; margin-top: var(--space-3); font-size: var(--text-sm); }
 
 /* 内存 */
 .memory-row {

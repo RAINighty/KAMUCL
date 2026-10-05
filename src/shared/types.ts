@@ -752,6 +752,7 @@ export const IPC = {
   foldersRemove: 'folders:remove', // (path: string) => GameFolder[]，只解除登记、绝不删除磁盘文件
   foldersRename: 'folders:rename', // (path: string, displayName: string) => GameFolder[]
   foldersSetDefault: 'folders:setDefault', // (path: string) => GameFolder[]
+  foldersSetDownload: 'folders:setDownload', // (path: string) => GameFolder[]; register + select the default download root atomically
   foldersSetActive: 'folders:setActive', // (path: string) => void  切换活动文件夹（gameDir 跟随）
   foldersScan: 'folders:scan', // (path: string) => FolderScanResult
   foldersOpen: 'folders:open', // (path: string) => void

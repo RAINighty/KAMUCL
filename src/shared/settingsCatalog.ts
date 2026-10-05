@@ -28,7 +28,7 @@ export const settingsCatalog = [
   { id: 'resolution', category: 'display', name: '游戏窗口分辨率', keywords: '宽 高 最大化 全屏 窗口化' },
   { id: 'jvm', category: 'game', name: 'JVM 参数', keywords: '高级 垃圾回收 GC G1GC 启动参数' },
   { id: 'launch', category: 'general', name: '启动器行为与正版登录', keywords: '启动后关闭启动器 微软 系统代理 Microsoft 登录' },
-  { id: 'installation', category: 'directories', name: '新版本安装目录', keywords: '游戏文件夹 路径 下载位置 绑定目录' },
+  { id: 'installation', category: 'downloads', name: '默认下载位置', keywords: '游戏文件夹 路径 游戏版本 安装目录 安装位置 新版本安装目录 新版本安装位置 游戏目录 版本目录 下载位置 默认下载目录 默认目录 绑定目录 D盘 C盘 存储' },
   { id: 'downloads', category: 'downloads', name: '下载并发与速度', keywords: '最大线程数 限速 KiB CurseForge API Key 密钥 下载队列' },
   { id: 'mirror', category: 'downloads', name: '下载镜像', keywords: '官方源 BMCLAPI 网络' },
   { id: 'features', category: 'features', name: '功能管理', keywords: '侧边栏 模组 资源包 光影 录像 MOD 面板 服务器 联机 皮肤 社区' },
