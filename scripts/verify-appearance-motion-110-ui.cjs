@@ -3,6 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 module.exports=async({call,evaluate,main,nav,wait,screenshot,recordScreencast,version,profile,ws,ownedTrack})=>{
  const proof={version,theme:process.env.KAMUCL_TEST_THEME,service:'Favorite artwork metadata fixtures; UI, settings storage, image rendering and WebGL are the actual product',checks:[],samples:[]}
  const save=()=>fs.writeFileSync(`out/appearance-motion-${proof.theme}-110.json`,JSON.stringify(proof,null,2))
+ let nativeLayoutScene=null
  const ready=async(expr,label)=>{let result;for(let i=0;i<100;i++){result=await evaluate(expr);if(result)return result;await wait(100)}throw Error(label+' timed out')}
  const coordinateClick=async(selector)=>{
    // Wait for native disclosure/resize geometry, then verify the actual hit at
@@ -10,7 +11,7 @@ module.exports=async({call,evaluate,main,nav,wait,screenshot,recordScreencast,ve
    await wait(280)
    await evaluate(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'center'})`);await wait(280)
    const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw Error('Unavailable target');const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(hit!==e&&!e.contains(hit))throw Error('Coordinate hit blocked: '+JSON.stringify({x,y,width:innerWidth,height:innerHeight,hit:hit?.className,tag:hit?.tagName}));return{x,y}})()`)
-   for(const type of ['mouseMoved','mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...p,button:type==='mouseMoved'?'none':'left',buttons:type==='mousePressed'?1:0,clickCount:type==='mouseMoved'?0:1})
+   for(const type of ['mouseMoved','mousePressed','mouseReleased']){const params={type,...p,button:type==='mouseMoved'?'none':'left',buttons:type==='mousePressed'?1:0,clickCount:type==='mouseMoved'?0:1};if(nativeLayoutScene)(proof.layoutInputs??=[]).push({atUnixMs:Date.now(),scene:nativeLayoutScene,selector,method:'Input.dispatchMouseEvent',params});await call('Input.dispatchMouseEvent',params)}
  }
  try{
   await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]})
@@ -163,18 +164,22 @@ module.exports=async({call,evaluate,main,nav,wait,screenshot,recordScreencast,ve
   await screenshot('110-favorite-project-icons');proof.checks.push('new and old favorites show decoded MOD artwork, never initials')
   await call('Fetch.disable');ws.removeEventListener('message',intercept)
   proof.layout=[]
-  for(const [width,height,zoom] of [[960,620,1],[1280,900,1.25]]){
+  const layoutScenes=process.platform==='darwin'?[[960,620,1],[1280,900,1.25],[960,620,1.25]]:[[960,620,1],[1280,900,1.25]]
+  for(const [width,height,zoom] of layoutScenes){
+    nativeLayoutScene=process.platform==='darwin'?{width,height,zoom}:null
     await main(`testElectron.BrowserWindow.getAllWindows()[0].setSize(${width},${height});testElectron.BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(${zoom})`)
     await nav('settings');await evaluate("document.querySelector('[data-section=thumbnail]').open=true")
     await coordinateClick('[aria-label="随机播放启动卡图片"]')
     await ready("window.kamucl.invoke('settings:get').then(s=>s.launchThumbnail.randomPlayback===false)",'coordinate toggle off')
-    for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:' ',code:'Space',windowsVirtualKeyCode:32})
+    for(const type of ['keyDown','keyUp']){const params={type,key:' ',code:'Space',windowsVirtualKeyCode:32};if(nativeLayoutScene)(proof.layoutInputs??=[]).push({atUnixMs:Date.now(),scene:nativeLayoutScene,method:'Input.dispatchKeyEvent',params});await call('Input.dispatchKeyEvent',params)}
     await ready("window.kamucl.invoke('settings:get').then(s=>s.launchThumbnail.randomPlayback===true)",'keyboard checkbox toggle on')
     const layout=await evaluate("(()=>{const e=document.querySelector('[aria-label=\"随机播放启动卡图片\"]'),r=e.getBoundingClientRect();return{width:innerWidth,height:innerHeight,left:r.left,right:r.right,top:r.top,bottom:r.bottom}})()")
     assert(layout.left>=0&&layout.right<=layout.width&&layout.top>=0&&layout.bottom<=layout.height)
-    proof.layout.push({width,height,zoom,...layout});await screenshot(`110-random-keyboard-${width}-${zoom}`)
+    if(process.platform==='darwin'){const native=await main("(()=>{const w=testElectron.BrowserWindow.getAllWindows()[0];return{bounds:w.getBounds(),contentBounds:w.getContentBounds(),zoom:w.webContents.getZoomFactor(),scale:testElectron.screen.getDisplayMatching(w.getBounds()).scaleFactor}})()"),renderer=await evaluate("({innerWidth,innerHeight,devicePixelRatio})");assert.equal(native.zoom,zoom);assert(Math.abs(native.contentBounds.width/native.zoom-renderer.innerWidth)<2&&Math.abs(native.contentBounds.height/native.zoom-renderer.innerHeight)<2,'Native layout and real renderer viewport must agree');proof.layout.push({width,height,zoom,...layout,requested:{width,height,zoom},native,renderer,screenshotName:`110-random-keyboard-${width}-${zoom}.png`})}else proof.layout.push({width,height,zoom,...layout});await screenshot(`110-random-keyboard-${width}-${zoom}`)
   }
+  nativeLayoutScene=null
   proof.checks.push('minimum window and 125% zoom: real coordinate checkbox and native Space toggle retain state and remain visible')
+  if(process.platform==='darwin')proof.checks.push('four-theme native 960x620 requested window at 125% zoom: original dispatched coordinates, actual bounds/viewport/device scale and unchanged full screenshot retained')
   proof.complete=true;save();console.log('PASS 1.1.10 appearance/motion '+proof.theme)
  }catch(error){proof.complete=false;proof.error=String(error);save();throw error}
 }

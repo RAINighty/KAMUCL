@@ -280,8 +280,8 @@ jobs:
         with:
           name: mac-packages-arm64
           path: release
-      - name: Enable original desktop material in this disposable native session
-        run: defaults write com.apple.universalaccess reduceTransparency -bool false
+      - name: Enable original desktop material and full motion in this disposable native session
+        run: node scripts/resource-mac113-conditions.cjs
       - name: Qualify immutable baseline and original-sample analysis failure paths
         run: node --test scripts/resource-mac113-tests.cjs
       - name: Qualify Swift task_info counters and exact owned PID creation identities
@@ -293,6 +293,7 @@ jobs:
         with:
           name: mac-resources-arm64
           path: |
+            out/resource113/mac-native-conditions/**
             out/resource113/mac-native-self-test/**
             out/resource113/mac-paired-*/run.json
             out/resource113/mac-paired-*/owner.json

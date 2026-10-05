@@ -15,6 +15,50 @@ const req=createRequire(path.resolve('package.json'))
 const later=<T>()=>{let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b});return{promise,resolve,reject}}
 const wait=()=>new Promise(resolve=>setTimeout(resolve,0))
 async function until(predicate:()=>boolean){for(let n=0;n<100;n++){await nextTick();if(predicate())return;await wait()}assert.fail('actual component state did not settle')}
+
+test('native favorites observer uses Mac editing command and verifies full selection and final input without changing DOM values',async()=>{
+ const {replaceNativeInput}=req(path.resolve('scripts/verify-favorites-113.cjs'))
+ for(const platform of ['darwin','win32']){
+  const input={value:'Reese',selectionStart:5,selectionEnd:5},document={activeElement:null as any,querySelector:()=>input},calls:any[]=[]
+  const click=async()=>{document.activeElement=input}
+  const call=async(method:string,params:any)=>{calls.push({method,params});if(method==='Input.dispatchKeyEvent'&&params.type==='keyDown'&&(platform==='darwin'?params.modifiers===4&&params.commands?.includes('selectAll'):params.modifiers===2)){input.selectionStart=0;input.selectionEnd=input.value.length}if(method==='Input.insertText'){input.value=input.value.slice(0,input.selectionStart)+params.text+input.value.slice(input.selectionEnd);input.selectionStart=input.selectionEnd=input.value.length}}
+  const evaluate=async(expression:string)=>new Function('document','return '+expression)(document)
+  const state=await replaceNativeInput(click,call,evaluate,'.search input','Cloth Config',platform)
+  assert.equal(state.selection.value,'Reese');assert.equal(state.selection.start,0);assert.equal(state.selection.end,5);assert.equal(state.value,'Cloth Config')
+  assert.deepEqual(calls.map(c=>c.method),['Input.dispatchKeyEvent','Input.dispatchKeyEvent','Input.insertText'])
+  assert.equal(calls[0].params.modifiers,platform==='darwin'?4:2);assert.deepEqual(calls[0].params.commands,platform==='darwin'?['selectAll']:undefined)
+ }
+ const input={value:'Reese',selectionStart:5,selectionEnd:5},document={activeElement:input,querySelector:()=>input},evaluate=async(expression:string)=>new Function('document','return '+expression)(document),calls:string[]=[]
+ await assert.rejects(replaceNativeInput(async()=>{},async(method:string)=>{calls.push(method)},evaluate,'.search input','Cloth Config','darwin'),/select from the beginning/)
+ assert(!calls.includes('Input.insertText'),'failed selection must not concatenate the replacement')
+ input.selectionStart=0;input.selectionEnd=5
+ await assert.rejects(replaceNativeInput(async()=>{},async(method:string,params:any)=>{if(method==='Input.insertText')input.value+=params.text},evaluate,'.search input','Cloth Config','darwin'),/ReeseCloth Config/)
+})
+
+test('extension GUI fixture preserves modern and legacy favorite query contracts, late loader responses, and valid renderer expressions',async()=>{
+ const parser=req('@babel/parser'),vm=req('node:vm'),source=fs.readFileSync('scripts/verify-extension-ui.cjs','utf8'),ast=parser.parse(source),expressions:string[]=[]
+ function visit(value:any){
+  if(!value||typeof value!=='object')return
+  if(value.type==='CallExpression'&&value.callee.type==='Identifier'){
+   const name=value.callee.name
+   if(['evaluate','main','ready'].includes(name))for(const argument of name==='ready'?value.arguments.slice(1):value.arguments.slice(0,1))if(argument.type==='StringLiteral'){
+    parser.parse(argument.value,{allowAwaitOutsideFunction:true});expressions.push(argument.value)
+   }
+  }
+  for(const child of Object.values(value))if(Array.isArray(child))child.forEach(visit);else if(child&&typeof child==='object')visit(child)
+ }
+ visit(ast)
+ const fixtureExpression=expressions.find(expression=>expression.startsWith('globalThis.extensionFavoriteRequests=[];'))
+ assert(fixtureExpression);const handlers=new Map<string,Function>(),context:any={Date,Promise,setTimeout,testElectron:{ipcMain:{removeHandler:(key:string)=>handlers.delete(key),handle:(key:string,fn:Function)=>handlers.set(key,fn)}}}
+ vm.runInNewContext(fixtureExpression,context)
+ const query=handlers.get('mods:favoriteVersions')!,fabric=query(null,'modrinth','fixtureProject','26.3','fabric','native-ticket-fabric'),forge=query(null,'modrinth','fixtureProject','26.3','forge','native-ticket-forge')
+ const forgeResult=await forge,fabricResult=await fabric
+ assert.equal(forgeResult.status,'available');assert.equal(forgeResult.files[0].fileId,'forge-file');assert.equal(fabricResult.files[0].fileId,'fabric-file')
+ const requests=context.extensionFavoriteRequests
+ assert.deepEqual(Array.from(requests,(r:any)=>[r.source,r.project,r.mc,r.loader]),[['modrinth','fixtureProject','26.3','fabric'],['modrinth','fixtureProject','26.3','forge']])
+ assert(requests.find((r:any)=>r.loader==='forge').finishedAt<requests.find((r:any)=>r.loader==='fabric').finishedAt,'the original late Fabric response remains observable')
+ const legacy=await query(null,'modrinth','fixtureProject','26.3','forge');assert(Array.isArray(legacy));assert.equal(legacy[0].fileId,'forge-file')
+})
 const favorite=(id='one',source='modrinth')=>({key:source+':'+id,name:id,source,projectId:id,added:1})
 const selection=(id='one',source='modrinth')=>({source,projectId:id,fileId:id+'-v'}) as any
 const intent=(ids=['one']):FavoriteInstallIntent=>({enabled:true,expected:ids.map(id=>({key:'modrinth:'+id,name:id})),approvedSkips:[]})
