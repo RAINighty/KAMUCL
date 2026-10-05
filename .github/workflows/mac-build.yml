@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-26
             arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
@@ -52,10 +52,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-26
             arch: arm64
             stage: app
-          - runner: macos-14
+          - runner: macos-26
             arch: arm64
             stage: dmg
     runs-on: ${{ matrix.runner }}
@@ -89,7 +89,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-26
             arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -122,7 +122,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-26
             arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -157,13 +157,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-26
             arch: arm64
             group: startup
-          - runner: macos-14
+          - runner: macos-26
             arch: arm64
             group: tools
-          - runner: macos-14
+          - runner: macos-26
             arch: arm64
             group: update
     runs-on: ${{ matrix.runner }}
@@ -205,7 +205,7 @@ jobs:
       fail-fast: false
       matrix:
         stage: [app, dmg]
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -235,7 +235,7 @@ jobs:
       fail-fast: false
       matrix:
         stage: [app, dmg]
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -269,7 +269,7 @@ jobs:
 
   resources:
     needs: package
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -298,6 +298,9 @@ jobs:
             out/resource113/mac-native-conditions/**
             out/resource113/mac-native-self-test/**
             out/resource113/mac-paired-*/run.json
+            out/resource113/mac-paired-*/baseline-run-at-freeze.json
+            out/resource113/mac-paired-*/paired-run-at-compare.json
+            out/resource113/mac-paired-*/tool-sources-analysis/**
             out/resource113/mac-paired-*/owner.json
             out/resource113/mac-paired-*/baseline-download.json
             out/resource113/mac-paired-*/frozen-baseline-noise.json

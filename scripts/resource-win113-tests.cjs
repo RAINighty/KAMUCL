@@ -36,3 +36,8 @@ test('Offline Windows review requires explicit byte-verified original source bin
   assert.throws(()=>comparePaired(paired,frozen),/source SHA/);assert.equal(comparePaired(paired,frozen,options).pass,true);paired[0].candidate.warm.functionalPass=false;paired[0].candidate.warm.complete=false;assert.throws(()=>comparePaired(paired,frozen,options),/candidate/)
  }finally{assert(path.resolve(root).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(root,{recursive:true})}
 })
+test('Windows analysis accepts only its fixed owned analysis snapshot directory before any path lookup',()=>{
+ const{assertAnalysisSnapshotDirectory}=require('./resource-win113-analysis.cjs');assert.equal(assertAnalysisSnapshotDirectory({directory:'tool-sources-analysis'}),true)
+ for(const directory of[undefined,null,'','.', '..','../external','..\\external','/absolute','C:\\external','nested/tool-sources-analysis','tool-sources-analysis\\child'])assert.throws(()=>assertAnalysisSnapshotDirectory({directory}),/fixed owned directory/)
+ assert.throws(()=>assertAnalysisSnapshotDirectory(undefined),/fixed owned directory/)
+})
