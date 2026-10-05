@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: macos-14
             arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
@@ -52,10 +52,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: macos-14
             arch: arm64
             stage: app
-          - runner: macos-15
+          - runner: macos-14
             arch: arm64
             stage: dmg
     runs-on: ${{ matrix.runner }}
@@ -89,7 +89,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: macos-14
             arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -122,7 +122,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: macos-14
             arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -157,13 +157,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: macos-14
             arch: arm64
             group: startup
-          - runner: macos-15
+          - runner: macos-14
             arch: arm64
             group: tools
-          - runner: macos-15
+          - runner: macos-14
             arch: arm64
             group: update
     runs-on: ${{ matrix.runner }}
@@ -205,7 +205,7 @@ jobs:
       fail-fast: false
       matrix:
         stage: [app, dmg]
-    runs-on: macos-15
+    runs-on: macos-14
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -235,7 +235,7 @@ jobs:
       fail-fast: false
       matrix:
         stage: [app, dmg]
-    runs-on: macos-15
+    runs-on: macos-14
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -269,7 +269,7 @@ jobs:
 
   resources:
     needs: package
-    runs-on: macos-15
+    runs-on: macos-14
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -284,8 +284,8 @@ jobs:
           path: release
       - name: Enable original desktop material and full motion in this disposable native session
         run: node scripts/resource-mac113-conditions.cjs
-      - name: Qualify immutable baseline and original-sample analysis failure paths
-        run: node --test scripts/resource-mac113-tests.cjs scripts/resource-mac113-parity-input-tests.cjs scripts/resource-mac113-gallery-tests.cjs
+      - name: Qualify callback ownership, immutable baseline and original-sample analysis failure paths
+        run: node --test scripts/resource-callback113-tests.cjs scripts/resource-mac113-tests.cjs scripts/resource-mac113-parity-input-tests.cjs scripts/resource-mac113-gallery-tests.cjs
       - name: Qualify Swift task_info counters and exact owned PID creation identities
         run: node scripts/resource-mac113-native.cjs
       - name: Freeze ten public 1.1.12 groups, then measure ten alternating current candidate pairs
