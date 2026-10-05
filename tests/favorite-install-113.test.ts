@@ -59,6 +59,64 @@ test('extension GUI fixture preserves modern and legacy favorite query contracts
  assert(requests.find((r:any)=>r.loader==='forge').finishedAt<requests.find((r:any)=>r.loader==='fabric').finishedAt,'the original late Fabric response remains observable')
  const legacy=await query(null,'modrinth','fixtureProject','26.3','forge');assert(Array.isArray(legacy));assert.equal(legacy[0].fileId,'forge-file')
 })
+function nativeFixtureExpressions(file:string){
+ const parser=req('@babel/parser'),source=fs.readFileSync(file,'utf8'),ast=parser.parse(source),expressions:string[]=[]
+ function visit(value:any){
+  if(!value||typeof value!=='object')return
+  if(value.type==='CallExpression'&&value.callee.type==='Identifier'&&['evaluate','main','ready'].includes(value.callee.name)){
+   const args=value.callee.name==='ready'?value.arguments.slice(1):value.arguments.slice(0,1)
+   for(const argument of args){const expression=argument.type==='StringLiteral'?argument.value:argument.type==='TemplateLiteral'&&argument.expressions.length===0?argument.quasis[0].value.cooked:undefined;if(typeof expression==='string'){parser.parse(expression,{allowAwaitOutsideFunction:true});expressions.push(expression)}}
+  }
+  for(const child of Object.values(value))if(Array.isArray(child))child.forEach(visit);else if(child&&typeof child==='object')visit(child)
+ }
+ visit(ast);return{source,expressions}
+}
+test('gallery favorites GUI uses reliable synthetic ticket metadata and legacy array, and requires both actual selected rows before success',async()=>{
+ const vm=req('node:vm'),{source,expressions}=nativeFixtureExpressions('scripts/verify-gallery-favorites-ui.cjs'),fixtureExpression=expressions.find(expression=>expression.startsWith('globalThis.galleryFavoriteRequests=[];'))
+ assert(fixtureExpression);const handlers=new Map<string,Function>(),context:any={Date,testElectron:{ipcMain:{removeHandler:(key:string)=>handlers.delete(key),handle:(key:string,fn:Function)=>handlers.set(key,fn)}}}
+ vm.runInNewContext(fixtureExpression,context);const query=handlers.get('mods:favoriteVersions')!
+ for(const[source,project]of[['modrinth','galleryMr'],['curseforge','987654']]){
+  const result=await query(null,source,project,'26.3','fabric','ticket-'+source)
+  assert.equal(result.status,'available');assert.equal(result.files.length,1);const file=result.files[0]
+  assert.equal(file.source,source);assert.equal(file.projectId,project);assert.equal(file.gameVersions[0],'26.3');assert.equal(file.loaders[0],'fabric');assert.equal(file.fileName,'fixture.jar');assert.equal(file.url,'https://fixture.invalid/fixture.jar');assert.match(file.sha1,/^[a-f0-9]{40}$/);assert.equal(file.sha1,'1'.repeat(40),'synthetic hash belongs to an explicitly never-downloaded fixture')
+ }
+ const legacy=await query(null,'modrinth','galleryMr','26.3','fabric');assert(Array.isArray(legacy));assert.equal(legacy[0].fileId,'fixture')
+ assert.deepEqual(Array.from(context.galleryFavoriteRequests,(row:any)=>[row.source,row.project,row.mc,row.loader,row.ticket]),[['modrinth','galleryMr','26.3','fabric','ticket-modrinth'],['curseforge','987654','26.3','fabric','ticket-curseforge'],['modrinth','galleryMr','26.3','fabric',undefined]])
+ assert(context.galleryFavoriteRequests.every((row:any)=>row.finishedAt>=row.startedAt))
+ assert(source.includes('targetRows.length===2')&&source.includes('new Set(targetRows.map(row=>row.key)).size===2')&&source.includes('row.checked===true&&row.disabled===false')&&source.includes('renderer.rows.every(row=>selectedRows.includes(row)||skippedRows.includes(row))')&&source.includes("'将安装 '+selectedRows.length+' 项收藏模组，跳过 '+skippedRows.length+' 项'")&&source.includes('request.ticket&&request.finishedAt'),'success requires both actual settled target rows, retained prior fixture favorites, exact summary and ticket requests, not names alone')
+ assert(source.includes('no real downloads or game installation in this module.'))
+})
+test('selection GUI fixture classifies incompatible modern tickets, preserves legacy and failure, and requires explicit zero-selection decisions',()=>{
+ const vm=req('node:vm'),{source,expressions}=nativeFixtureExpressions('scripts/verify-selection-ui-119.cjs'),fixtureExpression=expressions.find(expression=>expression.startsWith('globalThis.selection119Originals=new Map();'))
+ assert(fixtureExpression);const handlers=new Map<string,Function>(),context:any={Date,testElectron:{ipcMain:{_invokeHandlers:handlers,removeHandler:(key:string)=>handlers.delete(key),handle:(key:string,fn:Function)=>handlers.set(key,fn)}}}
+ vm.runInNewContext(fixtureExpression,context);const query=handlers.get('mods:favoriteVersions')!,modern=query(null,'modrinth','selection119','1.20.1','forge','selection-ticket')
+ assert.equal(modern.status,'incompatible');assert(Array.isArray(modern.files));assert.equal(modern.files.length,0);assert(Array.isArray(query(null,'modrinth','selection119','1.20.1','forge')))
+ context.selection119Reject=true;assert.throws(()=>query(null,'modrinth','selection119','1.20.1','forge','retry-ticket'),/隔离验证：兼容查询失败/);assert.throws(()=>query(null,'modrinth','selection119','1.20.1','forge'),/隔离验证：兼容查询失败/)
+ assert(source.includes('没有此 Minecraft 版本与加载器的兼容文件，本次跳过'));assert(source.includes('query failure cannot silently install'));assert(source.includes('skipping the last failed favorite still requires explicit base-only confirmation'));assert(source.includes('explicit base-only restores install readiness'));assert(source.includes('no actual fixture installation'))
+})
+test('native game observer retains original event payloads and timestamps, removes old subscriptions, and never exposes account identifiers or credentials',()=>{
+ const vm=req('node:vm'),{installFavoriteEventObserver,safeQaAccount}=req(path.resolve('scripts/verify-favorites-113.cjs')),listeners=new Map<string,Function>(),removed:string[]=[],context:any={Date,performance:{timeOrigin:1000,now:()=>12},window:{__favorite113:{off:[()=>removed.push('old')]},kamucl:{on:(channel:string,callback:Function)=>{listeners.set(channel,callback);return()=>{listeners.delete(channel);removed.push(channel)}}}}}
+ vm.runInNewContext('('+installFavoriteEventObserver.toString()+')()',context);assert.deepEqual(removed,['old']);assert.equal(listeners.size,4)
+ const state={status:'running',versionId:'owned-instance',launchId:'owned-test-launch'},progress={stage:'launch',progress:1,text:'fixture progress'}
+ listeners.get('event:launchState')!(state);listeners.get('event:launchLog')!('fixture player joined the game');listeners.get('event:progress')!(progress)
+ const observed=context.window.__favorite113;assert.equal(observed.states[0],state);assert.equal(observed.logs[0],'fixture player joined the game');assert.equal(observed.progress[0],progress);assert.equal(observed.timeline.length,3);assert.equal(observed.timeline[0].value,state);assert.equal(observed.timeline[0].rendererMs,12);assert(Number.isFinite(observed.timeline[0].receivedAt))
+ vm.runInNewContext('('+installFavoriteEventObserver.toString()+')()',context);assert.equal(listeners.size,4);assert.equal(removed.length,5);assert.equal(context.window.__favorite113.states.length,0)
+ assert.deepEqual(safeQaAccount({type:'offline',username:'FavoriteNativeQA',id:'private-id',uuid:'private-uuid',accessToken:'do-not-copy',refreshToken:'do-not-copy',profile:{private:'do-not-copy'}}),{type:'offline',username:'FavoriteNativeQA'});assert.equal(safeQaAccount(null),null);assert.throws(()=>safeQaAccount({type:'microsoft',username:'private-user'}),/Refuse account projection/)
+ const source=fs.readFileSync('scripts/verify-favorites-113.cjs','utf8');assert(source.includes("observeGame,v=>v.joined,240000"),'actual world event and original deadline remain mandatory');assert(source.includes('selectedMatchesAdded'));assert(source.includes('launchReturn??null'));assert(source.includes('lastObservedStates'));assert(source.includes("'game:launch','game:kill'"))
+})
+test('native game diagnostic archives exact isolated log bytes with hashes, excludes profile and world data, rejects secrets and never overwrites evidence',(t)=>{
+ const {archivePrivateGameLogs}=req(path.resolve('scripts/verify-favorites-113.cjs')),root=fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(),'kamucl-qa-logs-113-'))),profile=path.join(root,'profile'),games=path.join(root,'games'),output=path.join(root,'output'),instance='test §',launch='00000000-0000-0000-0000-000000000113'
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));for(const dir of [path.join(profile,'logs'),path.join(games,'versions',instance,'logs'),path.join(games,'versions',instance,'saves'),path.join(games,'kamucl-logs',launch),output])fs.mkdirSync(dir,{recursive:true})
+ fs.writeFileSync(path.join(profile,'accounts.json'),'private fixture account: never copied');fs.writeFileSync(path.join(games,'versions',instance,'saves','level.dat'),'private fixture world: never copied');fs.writeFileSync(path.join(profile,'logs','launcher-current.log'),'original fixture launcher log\n');fs.writeFileSync(path.join(games,'versions',instance,'logs','latest.log'),'FavoriteNativeQA logged in with entity\nSaving worlds\n');fs.writeFileSync(path.join(games,'kamucl-logs',launch,'stdout.log'),'original fixture stdout\n')
+ const options={output,profile,games,instanceId:instance,label:'first-game-test'},records=archivePrivateGameLogs(options);assert.equal(records.length,3);assert.equal(fs.readdirSync(output).length,3)
+ for(const row of records){const original=fs.readFileSync(row.originalPath),copied=fs.readFileSync(path.join(output,row.file));assert.deepEqual(copied,original);assert.equal(row.bytes,original.length);assert.equal(row.sha256,crypto.createHash('sha256').update(original).digest('hex'));assert.equal(row.sourceStableDuringRead,true);assert(!row.file.includes('accounts')&&!row.file.includes('level.dat'))}
+ assert.throws(()=>archivePrivateGameLogs(options),/EEXIST/);assert.throws(()=>archivePrivateGameLogs({...options,instanceId:'../outside',label:'unsafe'}));fs.writeFileSync(path.join(profile,'logs','launcher-current.log'),'ghp_'+'a'.repeat(30));assert.throws(()=>archivePrivateGameLogs({...options,label:'secret-check'}),/possible secret/);assert(!fs.readdirSync(output).some(name=>name.startsWith('secret-check')))
+})
+test('gallery resource observer retains all eight logical keys and accepts only exact current next outgoing decoded layers',()=>{
+ const {verifyRetainedCarousel}=req(path.resolve('scripts/verify-gallery-favorites-ui.cjs')),expected=Array.from({length:8},(_,index)=>'fixture:'+index),banners=expected.map(path=>({path,src:'https://fixture.invalid/'+path})),snapshot={banners,current:2,upcoming:3,outgoing:1,layerIndices:[1,2,3],images:[1,2,3].map(index=>({src:banners[index].src,active:index===2,complete:true,naturalWidth:16}))}
+ assert.deepEqual(verifyRetainedCarousel(snapshot,expected),{current:2,path:'fixture:2',layers:3});assert.throws(()=>verifyRetainedCarousel({...snapshot,banners:[banners[1],banners[0],...banners.slice(2)]},expected),/exact saved order/);assert.throws(()=>verifyRetainedCarousel({...snapshot,images:banners.map((item,index)=>({src:item.src,active:index===2,complete:true,naturalWidth:16}))},expected),/three decoded DOM|current\/next\/outgoing decoded/);assert.throws(()=>verifyRetainedCarousel({...snapshot,layerIndices:[1,2]},expected),/precisely current\/next\/outgoing/);assert.throws(()=>verifyRetainedCarousel({...snapshot,images:snapshot.images.map(image=>({...image,active:false}))},expected));assert.throws(()=>verifyRetainedCarousel({...snapshot,images:snapshot.images.map(image=>({...image,naturalWidth:0}))},expected),/actually decode/)
+ const {source}=nativeFixtureExpressions('scripts/verify-gallery-favorites-ui.cjs');assert(source.includes('expectedKeys.length,6+images.length'));assert(source.includes('observed.current,(rotation.at(-1).current+1)%expectedKeys.length'));assert(source.includes('rotation.length>=expectedKeys.length+1'));assert(source.includes('fixtureDurationsSeconds:1'))
+})
 const favorite=(id='one',source='modrinth')=>({key:source+':'+id,name:id,source,projectId:id,added:1})
 const selection=(id='one',source='modrinth')=>({source,projectId:id,fileId:id+'-v'}) as any
 const intent=(ids=['one']):FavoriteInstallIntent=>({enabled:true,expected:ids.map(id=>({key:'modrinth:'+id,name:id})),approvedSkips:[]})

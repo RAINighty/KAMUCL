@@ -27,6 +27,7 @@ import type { MemoryTrimController } from './core/memTrim'
 import { getRunningGamePids } from './core/launch'
 import { exitHistory, rememberExit } from './core/exitHistory'
 import { configureRuntimeGraphics } from './runtimeGraphics'
+import { resynchronizeWindowsRestore } from './windowRestoreVisibility'
 
 configureRuntimeGraphics(app.commandLine, process.platform, dirname(process.execPath))
 
@@ -157,6 +158,9 @@ function createWindow(startup?: Awaited<ReturnType<typeof createStartupSplash>>)
   mainWindow.on('minimize', () => reportVisibility(false))
   mainWindow.on('show', () => reportVisibility(mainWindow.isVisible() && !mainWindow.isMinimized()))
   mainWindow.on('restore', () => reportVisibility(mainWindow.isVisible() && !mainWindow.isMinimized()))
+  resynchronizeWindowsRestore(mainWindow, process.platform, (phase, error) => {
+    launcherLogWarn('window', `恢复窗口可见性同步失败：${phase}`, error)
+  })
   if (process.platform === 'win32') {
     // Native draggable regions do not dispatch DOM clicks. Observe, never consume.
     mainWindow.hookWindowMessage(0x00A1, (wParam) => {

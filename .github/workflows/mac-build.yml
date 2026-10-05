@@ -283,7 +283,7 @@ jobs:
       - name: Enable original desktop material and full motion in this disposable native session
         run: node scripts/resource-mac113-conditions.cjs
       - name: Qualify immutable baseline and original-sample analysis failure paths
-        run: node --test scripts/resource-mac113-tests.cjs
+        run: node --test scripts/resource-mac113-tests.cjs scripts/resource-mac113-parity-input-tests.cjs
       - name: Qualify Swift task_info counters and exact owned PID creation identities
         run: node scripts/resource-mac113-native.cjs
       - name: Freeze ten public 1.1.12 groups, then measure ten alternating current candidate pairs

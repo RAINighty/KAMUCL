@@ -5,6 +5,21 @@ const ROUTES=['home','game','mods','packs','shaders','recordings','projections',
 const THEMES=['transparent','black-orange','blue-white','custom']
 const LAYOUTS=[[960,620,1],[1280,900,1.25],[1440,960,1.5],[960,620,1.5]]
 const ROUTE_COMPONENTS={home:'HomeView',game:'GameView',mods:'ModsView',packs:'PacksView',shaders:'ShadersView',recordings:'RecordingsView',projections:'ProjectionsView',keys:'KeysView',bridge:'BridgeView',skins:'SkinsView',community:'CommunityView',servers:'ServersView',friends:'FriendConnectView',settings:'SettingsView',accounts:'AccountsView'}
+function assertEditableNativeTextInput(field){
+ assert.equal(field.exists,true,'An actual connected input must exist')
+ assert.equal(field.tag,'INPUT','Native text replacement cannot replace another control')
+ assert(['text','search','url','tel','email','password'].includes(field.type),'Native replacement requires a text input')
+ assert.equal(field.disabled,false,'Native replacement cannot bypass a disabled input')
+ assert.equal(field.readOnly,false,'Native replacement cannot bypass a read-only input')
+ assert.equal(field.inert,false,'Native replacement cannot bypass an inert dialog')
+ assert.equal(typeof field.value,'string')
+}
+function nativeInputLayoutReady(row,previous){
+ try{assertEditableNativeTextInput(row.field)}catch{return false}
+ if(row.native.visible!==true||row.native.minimized!==false||row.native.focused!==true||row.field.hit!==true||row.field.ancestorsVisible!==true||row.field.runningAnimations!==0||!previous)return false
+ if(row.native.pid!==previous.native?.pid||row.native.windowId!==previous.native?.windowId||row.native.webContentsId!==previous.native?.webContentsId)return false
+ return['x','y','width','height'].every(k=>['bounds','contentBounds'].every(name=>Number.isFinite(row.native[name]?.[k])&&Number.isFinite(previous.native?.[name]?.[k])&&Math.abs(row.native[name][k]-previous.native[name][k])<=.1)&&Number.isFinite(row.field.bounds[k])&&Number.isFinite(previous.field?.bounds?.[k])&&Math.abs(row.field.bounds[k]-previous.field.bounds[k])<=.1)
+}
 function installMacParityObserver(){
  const instances=()=>{
   const root=document.querySelector('#app')?.__vue_app__?._container?._vnode
@@ -224,10 +239,17 @@ module.exports=async function verifyMacParity(h){
   const selector=await evaluate(`(()=>{const e=document.querySelectorAll(${JSON.stringify(scope+' button')})[${index}];e.dataset.macParityTarget='current';return '[data-mac-parity-target="current"]'})()`)
   try{return await coordinate(selector)}finally{await evaluate(`document.querySelector(${JSON.stringify(selector)})?.removeAttribute('data-mac-parity-target')`)}
  }
- const key=async(key,code,additional={})=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key,code,...additional})}
+ const recordedInput=async(method,parameters)=>{proof.inputEvents.push({method,parameters,at:performance.now()});save();return call(method,parameters)}
+ const key=async(key,code,additional={})=>{for(const type of ['keyDown','keyUp'])await recordedInput('Input.dispatchKeyEvent',{type,key,code,...additional})}
  const type=async(selector,value)=>{
-  await coordinate(selector);await key('a','KeyA',{modifiers:4,commands:['selectAll'],windowsVirtualKeyCode:65})
-  await call('Input.insertText',{text:value});await key('Tab','Tab')
+  let previous
+  const prepared=await until('actual editable stable input '+selector,async()=>({native:await native(),field:await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e?.isConnected)return{exists:false};const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,ancestors=[];let runningAnimations=0;for(let n=e;n;n=n.parentElement){const s=getComputedStyle(n);ancestors.push(Number(s.opacity)>=.999&&s.visibility==='visible'&&s.display!=='none');runningAnimations+=n.getAnimations().filter(a=>a.playState==='running'||a.pending).length}return{exists:true,tag:e.tagName,type:e.type,disabled:e.disabled,readOnly:e.readOnly,inert:!!e.closest('[inert]'),value:e.value,focused:document.activeElement===e,selectionStart:e.selectionStart,selectionEnd:e.selectionEnd,bounds:r.toJSON(),hit:r.width>0&&r.height>0&&x>0&&y>0&&x<innerWidth&&y<innerHeight&&e.contains(document.elementFromPoint(x,y)),ancestorsVisible:ancestors.every(Boolean),runningAnimations}})()`)}),row=>{const ready=nativeInputLayoutReady(row,previous);previous=row;return ready})
+  assertEditableNativeTextInput(prepared.field)
+  // Reuse the real native editing command and observed focus/selection guard.
+  // Every dispatched key and insert is retained; no DOM value is assigned.
+  const replacement=await require('./verify-favorites-113.cjs').replaceNativeInput(coordinate,recordedInput,async expression=>{const observation=await evaluate(expression);(proof.inputObservations??=[]).push({selector,at:performance.now(),observation});save();return observation},selector,value,'darwin')
+  proof.operations.push({label:'native text input replacement',selector,prepared,replacement});save()
+  await key('Tab','Tab',{windowsVirtualKeyCode:9})
  }
  const route=async id=>{
   let position
@@ -409,4 +431,4 @@ module.exports=async function verifyMacParity(h){
  }catch(error){preservePrimaryFailure(proof,error,save);try{await screenshot('mac-parity-'+phase+'-failure')}catch{}throw error}
 }
 async function coordinatePosition(evaluate,selector){return evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!e.contains(document.elementFromPoint(x,y)))throw Error('actual queue hit target obscured');return{x,y}})()`)}
-Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,readDownloadSelectionState,assertMatchingDownloadResponse,assertDownloadTargetSelection,readMountedInstallInput,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure})
+Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertEditableNativeTextInput,nativeInputLayoutReady,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,readDownloadSelectionState,assertMatchingDownloadResponse,assertDownloadTargetSelection,readMountedInstallInput,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure})
