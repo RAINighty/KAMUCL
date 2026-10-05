@@ -10,7 +10,6 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')
 export default defineConfig({
   main: {
     plugins: [{ name: 'kamucl-native-material', closeBundle() {
-      execFileSync(process.execPath, [resolve(__dirname, 'scripts/build-mod-worker.cjs')], { stdio: 'inherit', windowsHide: true })
       execFileSync(process.execPath, [resolve(__dirname, 'scripts/build-native.cjs')], { stdio: 'inherit', windowsHide: true })
       // 内置桥接 MOD：随启动器分发，面板可一键装入实例 mods 目录
       const bridgeJar = resolve(__dirname, 'bridge/dist/kamucl-bridge-1.0.1.jar')
@@ -20,7 +19,22 @@ export default defineConfig({
     build: {
       outDir: 'out/main',
       minify: true,
-      sourcemap: false
+      sourcemap: false,
+      // One graph shares projection registries/parsers across main and workers;
+      // isolated CJS worker bundles used to embed the same immutable data twice.
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          modScanWorker: resolve(__dirname, 'src/main/core/modScanWorker.ts'),
+          projectionWorker: resolve(__dirname, 'src/main/core/projectionWorker.ts')
+        },
+        output: {
+          entryFileNames: chunk => chunk.name === 'index' ? 'index.js' : '[name].cjs',
+          // Runtime services resolve helpers relative to __dirname. All shared
+          // modules must remain beside the worker/native entry points.
+          chunkFileNames: '[name]-[hash].js'
+        }
+      }
     }
   },
   preload: {

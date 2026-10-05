@@ -1128,7 +1128,8 @@ onMounted(async () => {
       resetProgressMono(r.taskId)
       if (r.ok) {
         store.failedInstalls.delete(r.versionId)
-        toast(`版本 ${r.versionId} 安装完成`, 'success')
+        const favorites = r.favoriteModsResult
+        toast(favorites ? `版本 ${r.versionId} 安装完成；${favorites.baseOnly ? '已按确认不安装收藏模组' : `已安装 ${favorites.installed} 项收藏模组及 ${favorites.dependencies} 项必要前置，跳过 ${favorites.skipped.length} 项`}。模组目录：${favorites.modsDirectory}` : `版本 ${r.versionId} 安装完成`, 'success')
         void refreshInstalled()
       } else if (r.cancelled) {
         // 用户主动取消：不记失败、不弹错误（taskDone 已提示）

@@ -1,4 +1,14 @@
-# START HERE — KAMUCL 1.1.12
+# START HERE — KAMUCL 1.1.13
+
+2026-10-05 20:09（Asia/Hong_Kong）：当前工作为收藏模组漏装修复和资源占用优化，仅交付 Windows x64 / Mac ARM64，Electron 保持 44.3.0。实现及局部回归已完成，最终原生成品、十组基线与十组交替对照、独立三项评分正在验证；尚未发布 1.1.13。下方 1.1.12 与 1.1.11 保留为历史，不能替代本轮验收。
+
+源码验证：`npm ci`、`node scripts/build-bridge.cjs`、`npx tsc --noEmit`、`npm test`、`npm run license:check`、`npm run build`。原生收藏、资源与外观验证入口及真实服务/夹具区分见 `docs/validation-1.1.13/README.md`。原始素材、用户目录、全部历史计数及未提交文件保留；源码和交接包排除个人资料、整合包、世界及 `pelican-bicycle.html`。
+
+收藏查询失败必须重试或明确跳过，零项必须明确选择仅安装基础实例；完成摘要核对实际 MOD 文件及哈希。资源收益和弃用候选见 `docs/validation-1.1.13/OPTIMIZATIONS.md`，算法微测试不能冒充完整应用内存结论。macOS 13+，ARM64 原生；ad-hoc 签名不等于 Developer ID 签名及公证。
+
+---
+
+# Historical START HERE — KAMUCL 1.1.12
 
 2026-10-05 16:51（Asia/Hong_Kong）：当前工作范围已由用户改为整合包文件名兼容与默认下载位置修复，只制作 Windows x64 和 Mac ARM64。下方 1.1.11 记录保留为历史，不是本轮发布的验收结论。当前成品与最终独立评分以 1.1.12 交付回执为准；完整多平台资格及历史未覆盖项不因本轮限定修复转为通过。
 

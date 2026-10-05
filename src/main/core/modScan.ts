@@ -5,17 +5,19 @@ import type { ModInfo } from '../../shared/types'
 import { logScope } from './launcherLog'
 
 const scans = new Map<string, Promise<Array<ModInfo & { sha1: string }>>>()
+export type ModScanPurpose = 'analysis' | 'catalog' | 'icons'
 /** Management includes disabled files; duplicate/runtime analysis keeps the enabled-only default. */
-export async function scanManagedModDirectory(dir:string){
+export async function scanManagedModDirectory(dir:string,purpose:ModScanPurpose='analysis'){
   const entries=await fs.promises.readdir(dir,{withFileTypes:true}).catch(error=>{if(error.code==='ENOENT')return [];throw error})
-  return scanModDirectory(dir,true,entries.filter(e=>e.isFile()&&/\.jar(?:\.disabled)?$/i.test(e.name)).map(e=>e.name))
+  return scanModDirectory(dir,true,entries.filter(e=>e.isFile()&&/\.jar(?:\.disabled)?$/i.test(e.name)).map(e=>e.name),purpose)
 }
-export function scanModDirectory(dir: string, hash = false, names?: string[]): Promise<Array<ModInfo & { sha1: string; fingerprint?: number }>> {
-  const key = dir + ':' + hash + ':' + JSON.stringify(names)
+export function scanModDirectory(dir: string, hash = false, names?: string[], purpose: ModScanPurpose = 'analysis'): Promise<Array<ModInfo & { sha1: string; fingerprint?: number }>> {
+  // A catalog request must not reuse an icon-bearing result, or vice versa.
+  const key = JSON.stringify([dir, hash, names, purpose])
   if (scans.has(key)) return scans.get(key)!
   const started = Date.now()
   const pending = new Promise<Array<ModInfo & { sha1: string }>>((resolve, reject) => {
-    const worker = new Worker(path.join(__dirname, 'modScanWorker.cjs'), { workerData: { dir, hash, names } })
+    const worker = new Worker(path.join(__dirname, 'modScanWorker.cjs'), { workerData: { dir, hash, names, purpose } })
     const timer = setTimeout(() => { void worker.terminate(); reject(new Error('扫描超时，请检查是否有损坏或过大的模组文件')) }, 120_000)
     worker.once('message', ({ result, error }) => {
       clearTimeout(timer)

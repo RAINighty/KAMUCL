@@ -366,6 +366,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.versionsInstall, (_e, versionId: string, opts?: InstallOptions, folder?: string) => withDownloadFolder(folder, () => {
     const vid = String(versionId ?? '')
     const task = registerTask(`安装版本 ${vid}${opts?.loader ? ` + ${opts.loader}` : ''}`, 'version')
+    let favoriteModsResult: import('../shared/modFavorites').FavoriteInstallResult | undefined
     const progressGuard = new ProgressEventGuard()
     let lastStage = ''
     const taskEmit = (e: ProgressEvent): void => {
@@ -382,11 +383,11 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
         stage: ok ? undefined : lastStage
       })
     void versions
-        .installVersion(vid, opts ?? {}, taskEmit, task.controller.signal)
+        .installVersion(vid, opts ?? {}, taskEmit, task.controller.signal, result => { favoriteModsResult = result })
         .then((installedId) => {
           // installVersion 已在安装附加模组前落实隔离设置；这里仅通知最终结果。
           taskDone(true)
-          send(IPC_EVENT.installDone, { versionId: vid, installedId, ok: true, taskId: task.id })
+          send(IPC_EVENT.installDone, { versionId: vid, installedId, ok: true, taskId: task.id, ...(favoriteModsResult ? { favoriteModsResult } : {}) })
         })
         .catch((err) => {
           const cancelled = isCancelError(err)
@@ -912,6 +913,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   ipcMain.handle('mods:versionChoices', (_e,id:string,folder:string,name:string)=>modManagement.modVersionChoices(id,folder,name))
   ipcMain.handle('mods:versionPlan', (_e,id:string,fileId:string)=>modManagement.planModVersionChange(id,fileId))
   ipcMain.handle('mods:versionApply', (_e,id:string,confirmed:boolean)=>modManagement.applyModVersionChange(id,confirmed===true))
+  ipcMain.handle('mods:versionDiscard', (_e,id:string)=>modManagement.discardModVersionPlan(id))
   ipcMain.handle(IPC.modsApplyUpdates, (_e, versionId: string, items: unknown, folder?: string) =>
     withGameFolder(folder || folderOfVersion(String(versionId ?? '')), () =>
       modUpdates.applyModUpdates(String(versionId ?? ''), Array.isArray(items) ? items : [])

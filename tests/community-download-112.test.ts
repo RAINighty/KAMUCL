@@ -10,6 +10,7 @@ import AdmZip from 'adm-zip'
 import { build } from 'esbuild'
 import { downloadFileName } from '../src/main/core/downloadFileName'
 import type { CommunityFile, ProgressEvent } from '../src/shared/types'
+import type { PackEntry } from '../src/main/core/streamPackZip'
 
 const sha1 = (bytes: Buffer) => crypto.createHash('sha1').update(bytes).digest('hex')
 let bundle: Promise<string> | undefined
@@ -22,6 +23,7 @@ async function fixture(t: any) {
   const temp = path.join(root, 'temp'), first = path.join(root, '游戏盘一'), second = path.join(root, '游戏盘二')
   for (const folder of [temp, first, second, path.join(root, 'userData')]) fs.mkdirSync(folder)
   bundle ??= build({ stdin: { contents: `export { communityDownload } from './src/main/core/community';
+    export { extractOverrides } from './src/main/core/modpacks';
     export { getSettings } from './src/main/core/settings';
     export { listAllInstalled } from './src/main/core/versions';
     export { closeHttpClient } from './src/main/core/httpClient';`, resolveDir: process.cwd(), loader: 'ts' },
@@ -135,6 +137,75 @@ test('same-label simultaneous pack downloads allocate separate task directories 
   assert.notEqual(outcomes[0].versionId, outcomes[1].versionId)
   for (const outcome of outcomes) assert(fs.existsSync(path.join(first, 'versions', outcome.versionId, 'options.txt')))
   assert.deepEqual(fs.readdirSync(temp), [])
+})
+
+test('fullpack shared-version locks deduplicate Windows case aliases and do not acquire the same lock twice', { timeout: 15000 }, async t => {
+  const { first, runtime } = await fixture(t), zip = new AdmZip(fullpack())
+  zip.addFile('.minecraft/versions/Fixture/extra.txt', Buffer.from('second spelling, same Windows version directory'))
+  const bytes = zip.toBuffer(), base = await serve(t, (_req, res) => { res.writeHead(200, { 'content-length': bytes.length }); res.end(bytes) })
+  const done = Promise.withResolvers<any>()
+  await runtime.communityDownload(file(base + '/aliases', bytes), { versionId: '', kind: 'modpack' }, () => {}, done.resolve, AbortSignal.timeout(5000))
+  const outcome = await done.promise
+  assert.equal(outcome.ok, true, JSON.stringify(outcome))
+  assert.equal(fs.readFileSync(path.join(first, 'versions', 'Fixture', 'extra.txt'), 'utf8'), 'second spelling, same Windows version directory')
+  assert(fs.existsSync(path.join(first, 'versions', outcome.versionId, 'options.txt')))
+})
+
+test('override case aliases preserve archive order while independent real file writes still overlap', async t => {
+  const { root, runtime } = await fixture(t), destination = path.join(root, 'overrides-result')
+  const active = new Set<string>(), started: string[] = [], completed: string[] = []
+  let maximumActive = 0
+  const makeEntry = (rel: string, contents: string): PackEntry => {
+    const data = Buffer.from(contents)
+    return { entryName: 'overrides/' + rel, isDirectory: false, attr: 0,
+      header: { size: data.length, compressedSize: data.length }, getData: () => data,
+      writeTo: async (target, signal) => {
+        const identity = path.resolve(target).toLowerCase()
+        assert(!active.has(identity), 'aliased destinations must never be open for writing together')
+        active.add(identity); maximumActive = Math.max(maximumActive, active.size); started.push(rel)
+        try {
+          await new Promise<void>(resolve => setTimeout(resolve, 15))
+          signal?.throwIfAborted()
+          await fs.promises.writeFile(target, data, { signal }); completed.push(rel)
+        } finally { active.delete(identity) }
+      }
+    }
+  }
+  const entries = [makeEntry('mods/Case.jar', 'first spelling'), makeEntry('config/independent.txt', 'independent'), makeEntry('mods/case.jar', 'later spelling')]
+  const extracted = await runtime.extractOverrides({ getEntries: () => entries, getEntry: () => null }, 'overrides', destination)
+  assert.deepEqual(extracted, ['mods/Case.jar', 'config/independent.txt', 'mods/case.jar'])
+  assert.equal(started.length, 3); assert.equal(started.at(-1), 'mods/case.jar')
+  assert(started.indexOf('mods/Case.jar') < started.indexOf('mods/case.jar'), 'the later alias starts only after the earlier alias completes')
+  assert.equal(completed.at(-1), 'mods/case.jar')
+  assert(maximumActive >= 2, 'independent paths retain concurrent extraction')
+  assert.equal(active.size, 0)
+  const firstPath = path.join(destination, 'mods', 'Case.jar'), secondPath = path.join(destination, 'mods', 'case.jar')
+  const firstStat = fs.statSync(firstPath), secondStat = fs.statSync(secondPath)
+  const samePhysicalFile = firstStat.dev === secondStat.dev && firstStat.ino === secondStat.ino
+  assert.equal(fs.readFileSync(firstPath, 'utf8'), samePhysicalFile ? 'later spelling' : 'first spelling')
+  assert.equal(fs.readFileSync(secondPath, 'utf8'), 'later spelling')
+  assert.equal(fs.readFileSync(path.join(destination, 'config', 'independent.txt'), 'utf8'), 'independent')
+  t.diagnostic(JSON.stringify({ classification: 'Synthetic archive entries; actual extraction scheduler and filesystem writes', host: process.platform, samePhysicalFile, started, completed, maximumActive }))
+})
+
+test('Windows rejects trailing-dot and trailing-space archive segments before installing or changing existing instances', { timeout: 15000, skip: process.platform !== 'win32' }, async t => {
+  const { temp, first, runtime } = await fixture(t)
+  const existing = path.join(first, 'versions', 'existing-user-instance')
+  fs.mkdirSync(existing, { recursive: true }); fs.writeFileSync(path.join(existing, 'keep.txt'), 'preserved existing instance')
+  const payloads = ['.minecraft/mods/trailing.jar.', '.minecraft/mods/trailing.jar ', '.minecraft/config./legal.txt', '.minecraft/config /legal.txt'].map(name => {
+    const zip = new AdmZip(fullpack()); zip.addFile(name, Buffer.from('ambiguous destination')); return zip.toBuffer()
+  })
+  const base = await serve(t, (req, res) => { const bytes = payloads[Number(req.url!.slice(1))]; res.writeHead(200, { 'content-length': bytes.length }); res.end(bytes) })
+  for (let index = 0; index < payloads.length; index++) {
+    const done = Promise.withResolvers<any>(), events: ProgressEvent[] = []
+    await runtime.communityDownload(file(base + '/' + index, payloads[index], 'Windows unsafe segment.zip'), { versionId: '', kind: 'modpack' }, (event: ProgressEvent) => events.push(event), done.resolve)
+    const outcome = await done.promise
+    assert.equal(outcome.ok, false); assert.match(outcome.error, /不安全路径/)
+    assert(!events.some(event => event.stage === 'done'))
+    assert.deepEqual(fs.readdirSync(path.join(first, 'versions')), ['existing-user-instance'])
+    assert.equal(fs.readFileSync(path.join(existing, 'keep.txt'), 'utf8'), 'preserved existing instance')
+    assert.deepEqual(fs.readdirSync(temp), [], 'unsafe input leaves no owned download directory')
+  }
 })
 
 for (const failure of ['http', 'digest', 'cancel-download', 'invalid-pack', 'cancel-install'] as const) {

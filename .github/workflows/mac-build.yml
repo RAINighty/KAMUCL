@@ -228,3 +228,81 @@ jobs:
             release/download-location-proof-*
             release/mac-job-*
           if-no-files-found: error
+
+  favorites:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [app, dmg]
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-packages-arm64
+          path: release
+      - name: Enable original desktop material in this disposable native session
+        run: defaults write com.apple.universalaccess reduceTransparency -bool false
+      - name: Real two-source favorites, version-install UI, SHA1 readback, game world and restart
+        run: node scripts/verify-mac-job.cjs favorites arm64 ${{ matrix.stage }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-favorites-arm64-${{ matrix.stage }}
+          path: |
+            release/favorites-proof-*
+            release/mac-job-*
+          if-no-files-found: error
+
+  resources:
+    needs: package
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-packages-arm64
+          path: release
+      - name: Enable original desktop material in this disposable native session
+        run: defaults write com.apple.universalaccess reduceTransparency -bool false
+      - name: Qualify immutable baseline and original-sample analysis failure paths
+        run: node --test scripts/resource-mac113-tests.cjs
+      - name: Qualify Swift task_info counters and exact owned PID creation identities
+        run: node scripts/resource-mac113-native.cjs
+      - name: Freeze ten public 1.1.12 groups, then measure ten alternating current candidate pairs
+        run: node scripts/resource-mac113.cjs --groups=10
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-resources-arm64
+          path: |
+            out/resource113/mac-native-self-test/**
+            out/resource113/mac-paired-*/run.json
+            out/resource113/mac-paired-*/owner.json
+            out/resource113/mac-paired-*/baseline-download.json
+            out/resource113/mac-paired-*/frozen-baseline-noise.json
+            out/resource113/mac-paired-*/comparison.json
+            out/resource113/mac-paired-*/native/**
+            out/resource113/mac-paired-*/baseline-noise-*/cold/**
+            out/resource113/mac-paired-*/baseline-noise-*/warm/**
+            out/resource113/mac-paired-*/paired-*/cold/**
+            out/resource113/mac-paired-*/paired-*/warm/**
+            out/resource113/mac-paired-*/fixtures/synthetic-workloads/fixtures.json
+          if-no-files-found: error

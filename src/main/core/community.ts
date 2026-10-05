@@ -149,32 +149,32 @@ interface MrVersion {
   files?: MrVersionFile[]
 }
 
-async function mrFiles(projectId: string, filter?: CommunityFileFilter): Promise<CommunityFile[]> {
+async function mrFiles(projectId: string, filter?: CommunityFileFilter, retainUnavailable = false): Promise<CommunityFile[]> {
   const query = new URLSearchParams()
   if (filter?.mcVersion) query.set('game_versions', JSON.stringify([filter.mcVersion]))
   const loaders = (filter?.kind && MODRINTH_RESOURCE_LOADERS[filter.kind]) || (filter?.loader ? [filter.loader] : undefined)
   if (loaders) query.set('loaders', JSON.stringify(loaders))
   const arr = (await mrFetch(`/project/${encodeURIComponent(projectId)}/version?${query}`)) as MrVersion[]
-  return mapMrVersions(arr, projectId)
+  return mapMrVersions(arr, projectId, retainUnavailable)
 }
 
-function mapMrVersions(arr: MrVersion[], projectId?: string): CommunityFile[] {
+function mapMrVersions(arr: MrVersion[], projectId?: string, retainUnavailable = false): CommunityFile[] {
   const out: CommunityFile[] = []
   for (const v of arr ?? []) {
     const files = v.files ?? []
     const f = files.find((x) => x.primary) ?? files[0]
-    if (!f?.url || !f.filename) continue
-    const sha1 = f.hashes?.sha1
+    if ((!f?.url || !f.filename) && !retainUnavailable) continue
+    const sha1 = f?.hashes?.sha1
     out.push({
       source: 'modrinth',
       projectId: v.project_id ?? projectId,
       dependencies: v.dependencies?.map(d => ({ projectId: d.project_id ?? undefined, fileId: d.version_id ?? undefined, required: d.dependency_type === 'required' })),
-      fileId: String(v.id ?? f.filename),
-      fileName: f.filename,
-      version: v.version_number ?? f.filename,
-      url: f.url,
+      fileId: String(v.id ?? f?.filename ?? ''),
+      fileName: f?.filename ?? '',
+      version: v.version_number ?? f?.filename ?? '',
+      url: f?.url ?? '',
       sha1,
-      size: f.size ?? 0,
+      size: f?.size ?? 0,
       releaseType:
         v.version_type === 'beta' ? 'beta' : v.version_type === 'alpha' ? 'alpha' : 'release',
       gameVersions: v.game_versions ?? [],
@@ -500,6 +500,13 @@ export async function communityExactFile(source: CommunitySource, projectId: str
     : mapCfFiles([(await cfFetch(`/mods/${encodeURIComponent(projectId ?? '')}/files/${encodeURIComponent(fileId)}`) as { data: CfFile }).data], projectId ?? '')
   if (!files[0]) throw new Error('依赖版本没有可下载文件')
   return files[0]
+}
+
+/** Favorites need to distinguish compatibility from missing verifiable downloads. Other file lists retain their existing behavior. */
+export async function communityFavoriteCandidates(source: CommunitySource, projectId: string, mcVersion: string, loader: LoaderName): Promise<CommunityFile[]> {
+  const filter = { kind: 'mod' as const, mcVersion, loader }
+  const files = source === 'modrinth' ? await mrFiles(projectId, filter, true) : await cfFiles(projectId, filter)
+  return files.filter(file => matchesCommunityFilter(file, filter)).sort((a, b) => b.date.localeCompare(a.date))
 }
 
 // ---------------- 对外：下载 ----------------

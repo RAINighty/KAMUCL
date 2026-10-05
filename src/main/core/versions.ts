@@ -522,11 +522,12 @@ export async function installVersion(
   versionId: string,
   opts: InstallOptions = {},
   emit: ProgressEmit,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onFavoriteResult?: (result: import('../../shared/modFavorites').FavoriteInstallResult) => void
 ): Promise<string> {
   // 安装期间切换活动文件夹或默认隔离设置，不能改变本次任务的落盘目标。
   const isolated = !!opts.recordingMod || !!opts.favoriteMods?.length || getSettings().defaultIsolation
-  return withGameFolder(gameDir(), () => installVersionInFolder(versionId, opts, emit, signal, isolated))
+  return withGameFolder(gameDir(), () => installVersionInFolder(versionId, opts, emit, signal, isolated, onFavoriteResult))
 }
 
 export function launchLibraryFiles(vj: VersionJson) {
@@ -538,11 +539,18 @@ async function installVersionInFolder(
   opts: InstallOptions,
   emit: ProgressEmit,
   signal: AbortSignal | undefined,
-  isolated: boolean
+  isolated: boolean,
+  onFavoriteResult?: (result: import('../../shared/modFavorites').FavoriteInstallResult) => void
 ): Promise<string> {
   const { installRecordingMods } = await import("./recordingMods")
-  const { prepareInstallMods } = await import('./modFavorites')
+  const { prepareInstallMods, favoriteInstallResult } = await import('./modFavorites')
   const recordingFiles = await prepareInstallMods(versionId, opts,signal)
+  const finishFavorites = async (installedId: string) => {
+    if (!opts.favoriteInstallIntent && !opts.favoriteMods?.length) return
+    const modsDirectory = path.join(instanceDirectoryState(installedId, readVersionJson(installedId)).path, 'mods')
+    const result = await favoriteInstallResult(opts, recordingFiles, modsDirectory, gameDir(), installedId, signal)
+    if (result) onFavoriteResult?.(result)
+  }
   signal?.throwIfAborted()
   const report = createWeightedProgressEmit(emit, VERSION_INSTALL_STAGE_RANGES)
   // 子安装器完成并不代表整个任务完成，Fabric API 仍可能在下载。
@@ -577,14 +585,16 @@ async function installVersionInFolder(
     }
     if (recordingFiles.length) {
       const mods = path.join(instanceDirectoryState(installedId, readVersionJson(installedId)).path, 'mods')
-      try { await installRecordingMods(mods, recordingFiles, signal, fraction => report({ stage: 'download', progress: fraction, text: '下载并校验所选模组与必要前置' })) }
+      try { await installRecordingMods(mods, recordingFiles, signal, fraction => report({ stage: 'download', progress: fraction, text: '下载并校验所选模组与必要前置' })); await finishFavorites(installedId) }
       catch(e) { if(signal?.aborted)throw e;const {recordSupplementalFailure}=await import('./supplementalMods');recordSupplementalFailure({folder:gameDir(),id:installedId},versionId,opts,e);throw new Error(`${installedId} 基础实例已保留；附加模组安装失败，请选择重试或保留基础实例：${e instanceof Error ? e.message : e}`) }
     }
+    else await finishFavorites(installedId)
     report({ stage: 'done', progress: 1, text: `${installedId} 安装完成` })
     return installedId
   }
   const installedId = await installVanilla(versionId, prepareReport, 'versions', opts.instanceName, signal)
   if (isolated) setNewInstanceIsolation(installedId, true)
+  await finishFavorites(installedId)
   report({ stage: 'done', progress: 1, text: `${installedId} 安装完成` })
   return installedId
 }

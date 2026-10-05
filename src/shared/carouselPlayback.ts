@@ -43,6 +43,8 @@ export class CarouselPlayback {
   peekNext(now: number): number {
     return this.slides.length > 1 && now >= this.due ? this.next() : this.index
   }
+  /** Prepare the chosen next slide before its deadline without consuming it. */
+  upcomingIndex(): number { return this.slides.length > 1 ? this.next() : this.index }
   bookmark(now: number): CarouselBookmark {
     // Hiding must not advance to an unseen/unloaded image.
     return { path: this.slides[this.index]?.path ?? '', remainingMs: Math.max(1, this.due - now),

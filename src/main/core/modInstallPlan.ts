@@ -8,6 +8,7 @@ import { matchesVersionRange, modMatchesInstance, normalizeLoader } from '../../
 import { parseModFile } from './modinfo'
 import { communityExactFile, communityFiles, communitySearch } from './community'
 import { downloadAll } from './download'
+import { fileHash } from './fileHash'
 
 export interface DependencyRepository {
   files(source: CommunitySource, projectId: string, target: InstalledVersion): Promise<CommunityFile[]>
@@ -74,7 +75,6 @@ interface PrivatePlan {
   view: ModInstallPlan; directory: string; roots: string[]; downloads: CommunityFile[]; expires: number
 }
 const plans = new Map<string, PrivatePlan>()
-const hash = (file: string) => crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex')
 const clean = (plan: PrivatePlan) => { fs.rmSync(plan.directory, { recursive: true, force: true }); plans.delete(plan.view.id) }
 
 export async function prepareModInstall(target: InstalledVersion, input: { paths?: string[]; file?: CommunityFile }, emit: (e: ProgressEvent) => void, signal?: AbortSignal, repository = dependencyRepository): Promise<ModInstallPlan> {
@@ -114,8 +114,17 @@ export async function prepareModInstall(target: InstalledVersion, input: { paths
       if (candidate) plan.downloads.push(...await dependencyGraph([candidate], target, repository))
       else if (!plan.downloads.length) plan.view.warnings.push(`无法自动定位前置 ${req.id} ${req.range}，请手动补齐后重试`)
     }
-    plan.downloads = [...new Map(plan.downloads.map(f => [`${f.source}:${f.fileId}`, f])).values()]
-      .filter(f => !f.sha1 || !installed.some(m => hash(m.filePath) === f.sha1))
+    const installedHashes = new Map<string, string>(), uniqueDownloads = [...new Map(plan.downloads.map(f => [`${f.source}:${f.fileId}`, f])).values()]
+    plan.downloads = []
+    for (const file of uniqueDownloads) {
+      let present = false
+      if (file.sha1) for (const mod of installed) {
+        let hash = installedHashes.get(mod.filePath)
+        if (!hash) { hash = await fileHash(mod.filePath, 'sha1', signal); installedHashes.set(mod.filePath, hash) }
+        if (hash === file.sha1) { present = true; break }
+      }
+      if (!present) plan.downloads.push(file)
+    }
     plan.view.missing = missing.map(d => `${d.id} ${d.range}`)
     plan.view.files = [...mods.map(m => ({ name: m.name, version: m.version, dependency: false, fileName: m.fileName })),
       ...plan.downloads.map(f => ({ name: f.projectId ?? f.fileName, version: f.version, dependency: true, fileName: f.fileName }))]
@@ -156,7 +165,8 @@ export async function executeModPlan(id: string, includeDependencies: boolean, r
     for (const mod of staged) {
       const existing = [...installed, ...accepted].find(m => provided(m).some(p => p.id === mod.id))
       if (existing) {
-        if (hash(existing.filePath) === hash(mod.filePath)) continue
+        const [existingHash, stagedHash] = await Promise.all([fileHash(existing.filePath, 'sha1', signal), fileHash(mod.filePath, 'sha1', signal)])
+        if (existingHash === stagedHash) continue
         throw new Error(`已存在 ${mod.id}，未覆盖或重复安装；请先处理旧文件`)
       }
       accepted.push(mod)

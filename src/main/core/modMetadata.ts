@@ -8,7 +8,7 @@ type RecordValue = Record<string, any>
 
 /** Real TOML parser: comments, single quotes, multiline descriptions and quoted table names
  * must not become part of a Maven version range. Never evaluate metadata expressions. */
-export function parseModArchive(zip: AdmZip, filePath: string, fileName: string, depth = 0): ModInfo {
+export function parseModArchive(zip: AdmZip, filePath: string, fileName: string, depth = 0, includeIcons = true): ModInfo {
   const info: ModInfo = { filePath, fileName, id: '', name: '', version: '', loader: null, mcRange: '', dependencies: [] }
   const read = (name: string) => {
     const entry = zip.getEntry(name)
@@ -91,12 +91,13 @@ export function parseModArchive(zip: AdmZip, filePath: string, fileName: string,
       const e = zip.getEntry(name)
       if (!e || e.header.size > 64 * 1024 * 1024) continue
       try {
-        const child = parseModArchive(new AdmZip(zip.readFile(e)!), filePath, name, depth + 1)
+        // Nested archives only contribute dependency identities, never icons.
+        const child = parseModArchive(new AdmZip(zip.readFile(e)!), filePath, name, depth + 1, false)
         provides.push(...child.provides ?? [])
       } catch { /* Invalid optional nested content cannot supply a prerequisite. */ }
     }
     info.provides = [...new Map(provides.filter(p => p.id).map(p => [p.id, p])).values()]
-    if (typeof first.icon === 'string') {
+    if (includeIcons && typeof first.icon === 'string') {
       const e = zip.getEntry(first.icon)
       if (e && e.header.size <= 512 * 1024) info.iconDataUrl = `data:image/png;base64,${zip.readFile(e)?.toString('base64')}`
     }

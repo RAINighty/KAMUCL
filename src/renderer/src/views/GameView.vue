@@ -407,6 +407,7 @@ const modal = reactive({
   apiError: '',
   recordingMod: undefined as InstallOptions['recordingMod'],
   favoriteMods: undefined as InstallOptions['favoriteMods'],
+  favoriteInstallIntent: undefined as InstallOptions['favoriteInstallIntent'],
   instanceName: '',
   instanceEdited: false,
   targetFolder: ''
@@ -452,6 +453,7 @@ function openInstall(v: RemoteVersion) {  modal.open = true
   modal.apiError = ''
   modal.recordingMod = undefined
   modal.favoriteMods = undefined
+  modal.favoriteInstallIntent = undefined
   favoritesReady.value = true
   modal.instanceName = ''
   modal.instanceEdited = false
@@ -524,6 +526,7 @@ async function confirmInstall() {
         loader: modal.loader,
         recordingMod: modal.recordingMod,
         favoriteMods: modal.favoriteMods,
+        favoriteInstallIntent: modal.favoriteInstallIntent,
         loaderVersion: modal.loaderVersion || undefined,
         fabricApi:
           modal.loader === 'fabric' && modal.apiOn && modal.apiVersion
@@ -531,7 +534,7 @@ async function confirmInstall() {
             : undefined,
         instanceName: effectiveInstanceName.value || undefined
       }
-    : { instanceName: effectiveInstanceName.value || undefined }
+    : { instanceName: effectiveInstanceName.value || undefined, favoriteMods: modal.favoriteMods, favoriteInstallIntent: modal.favoriteInstallIntent }
   modal.open = false
   // 主进程后台异步下载，invoke 仅表示任务已受理；
   // 完成/失败由 App.vue 订阅的 installDone 事件统一提示并刷新已安装列表
@@ -1444,20 +1447,20 @@ async function confirmIsolation() {
 
           <template v-if="modal.loader">
             <p class="modal-label">加载器版本</p>
-            <div v-if="modal.loadingLoaders" class="loaders-loading">
+            <div v-if="modal.loadingLoaders" class="loaders-loading" data-ui="install:loader-loading">
               <span class="spin"></span>
               <span class="muted">正在获取 {{ modal.loader }} 版本列表…</span>
             </div>
             <template v-else>
-              <select v-if="modal.loaderVersions.length" v-model="modal.loaderVersion" class="select">
+              <select v-if="modal.loaderVersions.length" v-model="modal.loaderVersion" class="select" data-ui="install:loader-version">
                 <option v-for="lv in modal.loaderVersions" :key="lv" :value="lv">{{ lv }}</option>
               </select>
-              <p v-if="modal.loadLoadersError" class="loaders-error">{{ modal.loadLoadersError }}</p>
+              <p v-if="modal.loadLoadersError" class="loaders-error" data-ui="install:loader-error">{{ modal.loadLoadersError }}</p>
             </template>
 
             <!-- Fabric 联动：Fabric API 自动选择 -->
             <template v-if="modal.loader === 'fabric'">
-              <label class="check-option fapi-head"><input v-model="modal.apiOn" type="checkbox" /><span><strong>Fabric API</strong><small>同时安装，多数 Fabric 模组需要此项支持。</small></span></label>
+              <label class="check-option fapi-head"><input v-model="modal.apiOn" type="checkbox" data-ui="install:fabric-api" /><span><strong>Fabric API</strong><small>同时安装，多数 Fabric 模组需要此项支持。</small></span></label>
               <template v-if="modal.apiOn">
                 <div v-if="modal.loadingApi" class="loaders-loading">
                   <span class="spin"></span>
@@ -1478,7 +1481,7 @@ async function confirmIsolation() {
           </template>
 
           <RecordingModPicker v-model="modal.recordingMod" :mc="modal.version?.id || ''" :loader="modal.loader" />
-          <FavoriteModsPicker v-model="modal.favoriteMods" :mc="modal.version?.id || ''" :loader="modal.loader" @ready="favoritesReady=$event" />
+          <FavoriteModsPicker v-model="modal.favoriteMods" v-model:intent="modal.favoriteInstallIntent" :mc="modal.version?.id || ''" :loader="modal.loader" @ready="favoritesReady=$event" />
 
           <!-- 实例名（所有实例均可自定义；纯净版默认 MC 版本号，加载器实例按规则生成） -->
           <p class="modal-label">实例名</p>

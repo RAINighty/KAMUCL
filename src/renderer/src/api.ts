@@ -136,6 +136,9 @@ export const getManifest = (refresh = false) => invoke<RemoteVersion[]>(IPC.vers
 export const getInstalled = (all = false) => invoke<InstalledVersion[]>(IPC.versionsInstalled, all)
 export const installVersion = (id: string, opts?: InstallOptions, folder?: string) =>
   invoke<void>(IPC.versionsInstall, id, opts, folder)
+export const requestFavoriteVersions = (source: string, projectId: string, mc: string, loader: string, ticket: string) =>
+  invoke<import('@shared/modFavorites').FavoriteVersionResult>('mods:favoriteVersions', source, projectId, mc, loader, ticket)
+export const cancelFavoriteVersions = (ticket: string) => invoke<void>('mods:favoriteVersionsCancel', ticket)
 export const removeVersion = (id: string, folder?: string) => invoke<void>(IPC.versionsRemove, id, folder)
 export const renameVersion = (id: string, newName: string, folder?: string) =>
   invoke<void>(IPC.versionsRename, id, newName, folder)
@@ -385,9 +388,9 @@ export const onLaunchState = (cb: (s: LaunchState) => void) =>
 export const onMsLoginDone = (cb: (result: { account: Account | null; error?: string | null }) => void) =>
   subscribe<{ account: Account | null; error?: string | null }>(IPC_EVENT.msLoginDone, cb)
 export const onInstallDone = (
-  cb: (r: { versionId: string; installedId?: string; ok: boolean; error?: string; taskId?: string; cancelled?: boolean; stage?: string }) => void
+  cb: (r: { versionId: string; installedId?: string; ok: boolean; error?: string; taskId?: string; cancelled?: boolean; stage?: string; favoriteModsResult?: import('@shared/modFavorites').FavoriteInstallResult }) => void
 ) =>
-  subscribe<{ versionId: string; installedId?: string; ok: boolean; error?: string; taskId?: string; cancelled?: boolean; stage?: string }>(
+  subscribe<{ versionId: string; installedId?: string; ok: boolean; error?: string; taskId?: string; cancelled?: boolean; stage?: string; favoriteModsResult?: import('@shared/modFavorites').FavoriteInstallResult }>(
     IPC_EVENT.installDone,
     cb
   )

@@ -161,6 +161,7 @@ export type LoaderName = 'forge' | 'fabric' | 'quilt' | 'neoforge'
 
 export interface InstallOptions {
   favoriteMods?: import('./modFavorites').FavoriteSelection[]
+  favoriteInstallIntent?: import('./modFavorites').FavoriteInstallIntent
   recordingMod?: { kind: import("./recordings").RecordingKind; fileId: string }
   loader?: LoaderName
   loaderVersion?: string

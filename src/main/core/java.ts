@@ -25,6 +25,7 @@ const probeCache = new JavaProbeCache(() => path.join(app.getPath('userData'), '
 
 const javaLog = logScope('java')
 import {
+  JAVA_PROBE_VM_ARGS,
   parseJavaProbeOutput,
   javaHomeExecutable,
   parseRegistryJavaHomes,
@@ -112,7 +113,7 @@ function probeJava(exe: string): JavaInfo | null {
   const cached = probeCache.get(exe)
   if (cached) return cached
   try {
-    const r = spawnSync(exe, ['-XshowSettings:properties', '-version'], {
+    const r = spawnSync(exe, [...JAVA_PROBE_VM_ARGS, '-XshowSettings:properties', '-version'], {
       encoding: 'utf-8',
       timeout: 10000,
       windowsHide: true,
@@ -169,7 +170,7 @@ export async function probeJavaAsync(exe: string, signal?: AbortSignal): Promise
   try {
     const output = await runTextProcess(
       exe,
-      ['-XshowSettings:properties', '-version'],
+      [...JAVA_PROBE_VM_ARGS, '-XshowSettings:properties', '-version'],
       signal,
       10000
     )
@@ -184,7 +185,7 @@ export async function probeJavaAsync(exe: string, signal?: AbortSignal): Promise
 /** Resolve the JVM behind PATH shims before launching so the tracked PID owns the game. */
 export async function resolveJavaExecutable(exe: string): Promise<string> {
   const probe = /javaw\.exe$/i.test(exe) ? path.join(path.dirname(exe), 'java.exe') : exe
-  const output = await runBufferProcess(probe, ['-XshowSettings:properties', '-version'], 10000)
+  const output = await runBufferProcess(probe, [...JAVA_PROBE_VM_ARGS, '-XshowSettings:properties', '-version'], 10000)
   // Java 17 及以下按平台默认编码输出属性（中文 Windows = GBK），Java 18+ 为 UTF-8；
   // 自动下载的 JRE 落在含中文的游戏目录时，UTF-8 直读会得到乱码路径。
   // 双编码尝试：UTF-8 优先，含替换字符或路径不存在时回退 GBK。
