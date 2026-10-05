@@ -16,7 +16,9 @@ let bundle: Promise<string> | undefined
 
 /** Real transfer, ZIP classification, extraction and instance transaction; only Electron paths are private. */
 async function fixture(t: any) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kamucl-community112-'))
+  // macOS aliases /var to /private/var; production destinations use canonical
+  // paths, so all fixture expectations must share the actual physical root.
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kamucl-community112-')))
   const temp = path.join(root, 'temp'), first = path.join(root, '游戏盘一'), second = path.join(root, '游戏盘二')
   for (const folder of [temp, first, second, path.join(root, 'userData')]) fs.mkdirSync(folder)
   bundle ??= build({ stdin: { contents: `export { communityDownload } from './src/main/core/community';
