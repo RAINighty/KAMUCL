@@ -254,6 +254,8 @@ jobs:
           path: release
       - name: Enable original desktop material in this disposable native session
         run: defaults write com.apple.universalaccess reduceTransparency -bool false
+      - name: Reject foreign or reused game PIDs and retain original diagnostic failures
+        run: node --test scripts/mac-owned-game-diagnostic113-tests.cjs
       - name: Real two-source favorites, version-install UI, SHA1 readback, game world and restart
         run: node scripts/verify-mac-job.cjs favorites arm64 ${{ matrix.stage }}
       - uses: actions/upload-artifact@v4
@@ -283,7 +285,7 @@ jobs:
       - name: Enable original desktop material and full motion in this disposable native session
         run: node scripts/resource-mac113-conditions.cjs
       - name: Qualify immutable baseline and original-sample analysis failure paths
-        run: node --test scripts/resource-mac113-tests.cjs scripts/resource-mac113-parity-input-tests.cjs
+        run: node --test scripts/resource-mac113-tests.cjs scripts/resource-mac113-parity-input-tests.cjs scripts/resource-mac113-gallery-tests.cjs
       - name: Qualify Swift task_info counters and exact owned PID creation identities
         run: node scripts/resource-mac113-native.cjs
       - name: Freeze ten public 1.1.12 groups, then measure ten alternating current candidate pairs

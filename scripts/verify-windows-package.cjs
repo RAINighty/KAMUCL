@@ -77,7 +77,7 @@ for (const required of ['out/main/modScanWorker.cjs', 'out/main/projectionWorker
 // relative module edge in the ASAR instead of assuming standalone workers.
 const moduleEdges = []
 for (const name of names.filter(n => /^out\/main\/[^/]+\.(js|cjs)$/.test(n))) {
-  const code = asar.extractFile(archive, name).toString()
+  const code = asar.extractFile(archive, name.split('/').join(path.sep)).toString()
   for (const match of code.matchAll(/require\(["'](\.\/[^"']+\.(?:js|cjs))["']\)/g)) {
     const target = path.posix.normalize(path.posix.join(path.posix.dirname(name), match[1]))
     assert(names.includes(target), 'Missing production module: ' + name + ' -> ' + target)

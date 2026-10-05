@@ -2,7 +2,33 @@
 // substitutes Windows private commit, JavaScript heap or RSS for footprint.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),assert=require('node:assert/strict'),{spawn,execFileSync}=require('node:child_process'),{EventEmitter}=require('node:events')
 const swiftSource=path.join(__dirname,'resource-native-mac113.swift')
-const headerText='#include <libproc.h>\n#include <mach/mach.h>\n#include <mach/task_info.h>\nstatic const mach_msg_type_number_t RESOURCE_TASK_VM_INFO_REV1_COUNT113 = TASK_VM_INFO_REV1_COUNT;\nstatic inline int resource_pid_rusage113(pid_t pid, struct rusage_info_v2 *buffer) { return proc_pid_rusage(pid, RUSAGE_INFO_V2, (rusage_info_t *)buffer); }\n'
+const headerText=`#include <libproc.h>
+#include <mach/mach.h>
+#include <mach/task_info.h>
+#include <sys/event.h>
+#include <errno.h>
+#include <stdint.h>
+static const mach_msg_type_number_t RESOURCE_TASK_VM_INFO_REV1_COUNT113 = TASK_VM_INFO_REV1_COUNT;
+static inline int resource_pid_rusage113(pid_t pid, struct rusage_info_v2 *buffer) { return proc_pid_rusage(pid, RUSAGE_INFO_V2, (rusage_info_t *)buffer); }
+// These wrappers only register/query process lifecycle notifications. They never
+// signal, attach to, suspend, or write the observed process. Preserve every raw
+// kevent field, including the original non-pointer generation carried in udata.
+struct resource_proc_event113 { uint64_t ident; int16_t filter; uint16_t flags; uint32_t fflags; int64_t data; uint64_t generation; int32_t call_result; int32_t system_errno; };
+static inline void resource_copy_event113(struct resource_proc_event113 *out, const struct kevent *event, int result, int error) {
+ out->ident=event->ident; out->filter=event->filter; out->flags=event->flags; out->fflags=event->fflags; out->data=event->data; out->generation=(uint64_t)(uintptr_t)event->udata; out->call_result=result; out->system_errno=error;
+}
+static inline int resource_proc_register113(int queue, pid_t pid, uint64_t generation, struct resource_proc_event113 *out) {
+ struct kevent change, receipt={0}; EV_SET(&change,(uintptr_t)pid,EVFILT_PROC,EV_ADD|EV_ENABLE|EV_ONESHOT|EV_RECEIPT,NOTE_EXIT,0,(void *)(uintptr_t)generation);
+ errno=0; int result=kevent(queue,&change,1,&receipt,1,NULL); int error=errno; resource_copy_event113(out,&receipt,result,error); return result;
+}
+static inline int resource_proc_drain113(int queue, struct resource_proc_event113 *out, int capacity) {
+ struct kevent events[64]; struct timespec timeout={0,0}; if(capacity>64)capacity=64;
+ errno=0; int count=kevent(queue,NULL,0,events,capacity,&timeout); int error=errno;
+ if(count<0){ struct kevent empty={0}; resource_copy_event113(out,&empty,count,error); }
+ else for(int i=0;i<count;i++)resource_copy_event113(out+i,events+i,count,error);
+ return count;
+}
+`
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 function compileNative({directory=path.resolve('out/resource113/mac-native')}={}){
  assert.equal(process.platform,'darwin','Native Swift evidence requires macOS');assert.equal(process.arch,'arm64','Only native Mac ARM64 is supported')
@@ -57,8 +83,22 @@ function assertConfirmedLifecycleInvalidation(error,row){
  assert.equal(error.existenceProbe?.signal,0,'Existence probe must never signal a process')
  const exited=error.afterIdentity===null&&error.existenceProbe.result===-1&&error.existenceProbe.errno===3
  const reused=error.afterIdentity?.pid===error.pid&&typeof error.afterIdentity.creationUnixUS==='string'&&/^\d+$/.test(error.afterIdentity.creationUnixUS)&&error.afterIdentity.creationUnixUS!==row.creationUnixUS
- assert(exited||reused,'A lifecycle label cannot hide a live or unknown-identity counter failure')
+ const kernel=error.kernelExitEvidence!==undefined?(assertKernelExitEvidence(error.kernelExitEvidence,row,error.atUnixMs),true):false
+ assert(exited||reused||kernel,'A lifecycle label cannot hide a live or unknown-identity counter failure')
  return error
+}
+function assertKernelExitEvidence(evidence,row,observedByUnixMs=Infinity){
+ assert.equal(evidence.source,'Actual original kqueue EVFILT_PROC NOTE_EXIT notification');assert.equal(evidence.qualified,true);assert.equal(evidence.pid,row.pid)
+ const r=evidence.registration,n=evidence.notification,receipt=r?.receipt,token=r?.userDataGeneration
+ assert.equal(r?.qualified,true);assert.equal(r.pid,row.pid);assert.equal(r.expectedCreationUnixUS,row.creationUnixUS);assert.match(token,/^[1-9]\d*$/)
+ for(const id of[r.beforeIdentity,r.afterIdentity]){assert.equal(id?.pid,row.pid);assert.equal(id.creationUnixUS,row.creationUnixUS,'Registration race cannot bind an unknown or replaced identity')}
+ assert(Number.isFinite(r.registrationStartUnixMs)&&Number.isFinite(r.registrationEndUnixMs)&&r.registrationEndUnixMs>=r.registrationStartUnixMs)
+ assert.equal(r.request?.filter,-5);assert.equal(r.request.flags,85);assert.equal(r.request.fflags,2147483648);assert.equal(r.request.userDataGeneration,token)
+ assert.equal(receipt?.ident,row.pid);assert.equal(receipt.filter,-5);assert.equal(receipt.callResult,1);assert.equal(receipt.systemErrno,0);assert.equal(receipt.data,0);assert.equal(receipt.userDataGeneration,token);assert((receipt.flags&0x4000)!==0,'EV_RECEIPT must contain a successful original EV_ERROR receipt')
+ assert(Number.isFinite(receipt.observedAtUnixMs)&&receipt.observedAtUnixMs>=r.registrationStartUnixMs&&receipt.observedAtUnixMs<=r.registrationEndUnixMs)
+ assert.equal(n?.ident,row.pid);assert.equal(n.filter,-5);assert.equal(n.userDataGeneration,token);assert(Number.isInteger(n.flags)&&(n.flags&0x4000)===0);assert(Number.isInteger(n.fflags)&&(BigInt(n.fflags)&2147483648n)!==0n,'Actual kernel NOTE_EXIT is mandatory')
+ assert(Number.isInteger(n.callResult)&&n.callResult>0&&n.callResult<=64);assert.equal(n.systemErrno,0);assert(Number.isSafeInteger(n.data));assert(Number.isFinite(n.observedAtUnixMs)&&n.observedAtUnixMs>=r.registrationEndUnixMs&&n.observedAtUnixMs<=observedByUnixMs,'Later notifications cannot retroactively erase an earlier sampling failure')
+ return evidence
 }
 function assertNativeCPUUnits(row){
  if(row.cpuSource===undefined)return // Historical raw counters retain their original, unqualified unit labels.
@@ -76,7 +116,7 @@ function summarizeMac(records){
   for(const row of invalidatedRows){if(row.identityInvalidation?.lifecycleInvalidation===true)assert(lifecycle.some(error=>JSON.stringify(error)===JSON.stringify(row.identityInvalidation)),'Cannot omit a lifecycle observation');else assert(sample.counterErrors.some(error=>JSON.stringify(error)===JSON.stringify(row.identityInvalidation)),'An unproven identity invalidation must remain a required counter error')}
   if(invalidatedRows.length)phase.invalidatedSamples.push({atUnixMs:sample.atUnixMs,monoMs:sample.monoMs,phase:sample.phase,collectionMs:sample.collectionMs,invalidatedRows,counterErrors:sample.counterErrors,lifecycleInvalidations:lifecycle})
   phase.lifecycleInvalidations.push(...lifecycle)
-  const completeFullTree=invalidatedRows.length===0&&sample.counterErrors.length===0,totals=Object.fromEntries(roleGroups.map(role=>[role,[]]));for(const row of sample.rows){if(Number.isFinite(row.cpuNs)&&row.cpuSource!==undefined)assertNativeCPUUnits(row);else phase.cpuUnitsQualified=false;const key=row.pid+':'+row.creationUnixUS;(phase.identities[key]??=[]).push(row);totals[roleGroup(row)].push(row)}
+  const completeFullTree=invalidatedRows.length===0&&sample.counterErrors.length===0&&sample.wholeTreeCountersComplete!==false,totals=Object.fromEntries(roleGroups.map(role=>[role,[]]));for(const row of sample.rows){if(Number.isFinite(row.cpuNs)&&row.cpuSource!==undefined)assertNativeCPUUnits(row);else phase.cpuUnitsQualified=false;const key=row.pid+':'+row.creationUnixUS;(phase.identities[key]??=[]).push(row);totals[roleGroup(row)].push(row)}
   const sum=(rows,key)=>rows.length&&rows.every(r=>Number.isFinite(r[key]))?rows.reduce((n,r)=>n+r[key],0):rows.length?null:0
   phase.samples.push({atUnixMs:sample.atUnixMs,monoMs:sample.monoMs,collectionMs:sample.collectionMs,completeFullTree,physicalFootprintBytes:completeFullTree?sum(sample.rows,'physicalFootprintBytes'):null,residentSizeBytes:completeFullTree?sum(sample.rows,'residentSizeBytes'):null,roles:Object.fromEntries(Object.entries(totals).map(([key,rows])=>[key,{processCount:rows.length,physicalFootprintBytes:completeFullTree?sum(rows,'physicalFootprintBytes'):null,residentSizeBytes:completeFullTree?sum(rows,'residentSizeBytes'):null}]))});phase.counterErrors.push(...sample.counterErrors);phase.optionalCounterErrors.push(...(sample.optionalCounterErrors||[]))
  }
@@ -90,8 +130,30 @@ async function selfTest({directory=path.resolve('out/resource113/mac-native-self
  const native=compileNative({directory}),swiftResult=runNativeReadout(native.exe,['--self-test'],{directory,name:'swift-self-test'});const swiftProof=JSON.parse(swiftResult);assert.equal(swiftProof.passed,true);assert.equal(swiftProof.cpuQualification?.passed,true,'Native Mach timebase CPU conversion must agree with original process CPU clock brackets')
  const script='const b=Buffer.alloc(32*1024*1024,17);process.send({ready:true});process.on("message",m=>{if(m==="stop"){if(b[0]!==17)process.exitCode=2;process.disconnect()}})',startedAt=Date.now(),child=spawn(process.execPath,['-e',script],{stdio:['ignore','ignore','pipe','ipc']}),other=spawn(process.execPath,['-e',script],{stdio:['ignore','ignore','pipe','ipc']});const rows=[]
  const childReady=async c=>new Promise((resolve,reject)=>{c.once('message',resolve);c.once('error',reject)});const close=c=>c.exitCode!==null?(assert.equal(c.exitCode,0),Promise.resolve()):new Promise((resolve,reject)=>{c.once('close',(code,signal)=>code===0&&signal===null?resolve():reject(Error('Self-test child exit '+code+' signal '+signal)));c.send('stop')});let sampler
- try{await Promise.all([childReady(child),childReady(other)]);sampler=startMacSampler(row=>{rows.push(row);fs.appendFileSync(path.join(directory,'ownership-self-test.jsonl'),JSON.stringify(row)+'\n')},{...native,sudo:process.env.GITHUB_ACTIONS==='true'});await sampler.ready;sampler.send({op:'seed',pid:child.pid,startedAt,role:'owned-qualification-child'});await new Promise(r=>setTimeout(r,1600));await sampler.stop();const samples=rows.filter(r=>r.event==='sample'&&r.rows.length);assert(samples.length>=5);assert(samples.flatMap(s=>s.rows).every(r=>r.pid===child.pid),'Observer must exclude unrelated control child and itself');assert(samples.every(s=>s.rows[0].creationUnixUS===samples[0].rows[0].creationUnixUS));assert(samples.every(s=>s.rows[0].physicalFootprintBytes>0&&s.rows[0].residentSizeBytes>0));assert(samples.every(s=>s.counterErrors.length===0));const creation=samples[0].rows[0].creationUnixUS;await close(child);const exitRaw=runNativeReadout(native.exe,['--inspect-exited-owner',String(child.pid),creation],{directory,name:'owned-exit-self-test',timeout:10000});const exited=JSON.parse(exitRaw);assert.equal(exited.passed,true);assert.equal(exited.invalidatedRow.pid,child.pid);assert.equal(exited.invalidatedRow.creationUnixUS,creation);assert.equal(exited.errors.length,1);assertConfirmedLifecycleInvalidation(exited.errors[0],exited.invalidatedRow);const result={passed:true,at:new Date().toISOString(),scope:'Native Swift, native CPU-clock unit brackets and strictly owned PID/creation/awaited-natural-exit API qualification only; not App resource acceptance',cpuQualification:swiftProof.cpuQualification,ownedNaturalExit:{pid:child.pid,creationUnixUS:creation,code:child.exitCode,signal:child.signalCode,original:exited},samples:samples.length,ownedPID:child.pid,excludedControlPID:other.pid,summary:summarizeMac(rows)};fs.writeFileSync(path.join(directory,'self-test.json'),JSON.stringify(result,null,2)+'\n');return result}
+ try{
+  await Promise.all([childReady(child),childReady(other)])
+  sampler=startMacSampler(row=>{rows.push(row);fs.appendFileSync(path.join(directory,'ownership-self-test.jsonl'),JSON.stringify(row)+'\n')},{...native,sudo:process.env.GITHUB_ACTIONS==='true'})
+  await sampler.ready;sampler.send({op:'seed',pid:child.pid,startedAt,role:'owned-qualification-child'});await new Promise(r=>setTimeout(r,1600))
+  const samples=rows.filter(r=>r.event==='sample'&&r.rows.length);assert(samples.length>=5);assert(samples.flatMap(s=>s.rows).every(r=>r.pid===child.pid),'Observer must exclude unrelated control child and itself')
+  assert(samples.every(s=>s.rows[0].creationUnixUS===samples[0].rows[0].creationUnixUS));assert(samples.every(s=>s.rows[0].physicalFootprintBytes>0&&s.rows[0].residentSizeBytes>0))
+  const creation=samples[0].rows[0].creationUnixUS,registration=rows.filter(r=>r.event==='owned-exit-registration')
+  assert.equal(registration.length,1);assert.equal(registration[0].registration.pid,child.pid);assert.equal(registration[0].registration.qualified,true)
+  sampler.send({op:'mark',phase:'owned-natural-exit-qualification'});await close(child);const naturalExitAwaitedAtUnixMs=Date.now(),deadline=Date.now()+10000
+  const{isCompleteEmptyNativeSample}=require('./resource-sample113.cjs')
+  while(Date.now()<deadline){const last=rows.filter(r=>r.event==='sample'&&r.phase==='owned-natural-exit-qualification').slice(-2);if(last.length===2&&last.every(isCompleteEmptyNativeSample)&&rows.some(r=>r.event==='owned-kernel-exit'&&r.evidence.pid===child.pid))break;await new Promise(r=>setTimeout(r,50))}
+  const exitSamples=rows.filter(r=>r.event==='sample'&&r.phase==='owned-natural-exit-qualification').slice(-2)
+  assert.equal(exitSamples.length,2);assert(exitSamples.every(isCompleteEmptyNativeSample),'Kernel lifecycle partial sample cannot be counted as an absent owned tree')
+  const kernel=rows.filter(r=>r.event==='owned-kernel-exit'&&r.evidence.pid===child.pid);assert.equal(kernel.length,1);assertKernelExitEvidence(kernel[0].evidence,samples[0].rows[0])
+  const retirements=rows.filter(r=>r.event==='owned-identity-retired');assert.equal(retirements.length,1);assert.equal(retirements[0].pid,child.pid);assert.equal(retirements[0].creationUnixUS,creation)
+  const invalidated=rows.flatMap(r=>r.event==='sample'?(r.invalidatedRows??[]):[]);assert.equal(invalidated.length,1);assertConfirmedLifecycleInvalidation(invalidated[0].identityInvalidation,invalidated[0]);assert.deepEqual(invalidated[0].identityInvalidation.kernelExitEvidence,kernel[0].evidence)
+  assert(rows.filter(r=>r.event==='sample').every(s=>s.counterErrors.length===0),'Unknown live identity, registration or primary counter failures cannot pass qualification');assert.equal(other.exitCode,null,'Unrelated control must remain alive throughout the empty owned tree proof')
+  await sampler.stop();const stopped=rows.findLast(r=>r.event==='stopped');assert.equal(stopped.kernelExitObserverClose.closeResult,0);assert.equal(stopped.code,0)
+  const exitRaw=runNativeReadout(native.exe,['--inspect-exited-owner',String(child.pid),creation],{directory,name:'owned-exit-self-test',timeout:10000}),exited=JSON.parse(exitRaw)
+  assert.equal(exited.passed,true);assert.equal(exited.invalidatedRow.pid,child.pid);assert.equal(exited.invalidatedRow.creationUnixUS,creation);assert.equal(exited.errors.length,1);assertConfirmedLifecycleInvalidation(exited.errors[0],exited.invalidatedRow)
+  const result={passed:true,at:new Date().toISOString(),scope:'Native Swift, native CPU-clock unit brackets and strictly owned PID/creation/kernel NOTE_EXIT/natural exit/full empty tree API qualification only; not App resource acceptance',cpuQualification:swiftProof.cpuQualification,ownedNaturalExit:{pid:child.pid,creationUnixUS:creation,code:child.exitCode,signal:child.signalCode,naturalExitAwaitedAtUnixMs,original:exited,kernelNotification:kernel[0],retirement:retirements[0],lastTwoCompleteEmptySamples:exitSamples},kernelExitObserverClose:stopped.kernelExitObserverClose,samples:samples.length,ownedPID:child.pid,excludedControlPID:other.pid,summary:summarizeMac(rows)}
+  fs.writeFileSync(path.join(directory,'self-test.json'),JSON.stringify(result,null,2)+'\n');return result
+ }
  finally{await Promise.all([close(child),close(other)]);if(sampler&&!rows.some(r=>r.event==='stopped'))await sampler.stop()}
 }
-module.exports={compileNative,runNativeReadout,startMacSampler,summarizeMac,assertConfirmedLifecycleInvalidation,assertNativeCPUUnits,roleGroup,stats,percentile,selfTest}
+module.exports={compileNative,runNativeReadout,startMacSampler,summarizeMac,assertConfirmedLifecycleInvalidation,assertKernelExitEvidence,assertNativeCPUUnits,roleGroup,stats,percentile,selfTest,headerText}
 if(require.main===module)selfTest().then(r=>console.log(JSON.stringify(r))).catch(e=>{console.error(e);process.exitCode=1})

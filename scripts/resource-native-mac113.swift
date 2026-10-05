@@ -62,7 +62,101 @@ func processTable() -> (identities: [Identity], listedPIDs: Set<Int32>, errors: 
     return ([], [], [["stage": "proc_listallpids capacity limit", "capacity": capacity,
         "atUnixMs": epochMs(), "required": true]])
 }
-func counters(_ own: Identity, role: String) -> ([String: Any], [[String: Any]]) {
+func identityJSON(_ own: Identity?) -> Any {
+    guard let own = own else { return NSNull() }
+    return ["pid": own.pid, "ppid": own.ppid, "name": own.name,
+            "creationUnixUS": String(own.creationUS)] as [String: Any]
+}
+// Each registration is bound once to the original verified process. A numeric
+// generation in udata prevents a late event from being credited to another PID
+// generation. NOTE_EXITSTATUS/ptrace/signals are neither requested nor needed.
+final class OwnedExitObserver {
+    let fd: Int32
+    var nextGeneration: UInt64 = 0
+    var registrations: [Int32: [String: Any]] = [:]
+    var notifications: [Int32: [String: Any]] = [:]
+    var pendingErrors: [[String: Any]] = []
+    var closed = false
+    init(_ descriptor: Int32) { fd = descriptor }
+    func eventJSON(_ event: resource_proc_event113) -> [String: Any] {
+        ["ident": event.ident, "filter": event.filter, "flags": event.flags,
+         "fflags": event.fflags, "data": event.data,
+         "userDataGeneration": String(event.generation),
+         "callResult": event.call_result, "systemErrno": event.system_errno,
+         "observedAtUnixMs": epochMs()]
+    }
+    func register(_ own: Identity) {
+        if registrations[own.pid] != nil { return }
+        nextGeneration += 1
+        let before = identity(own.pid), start = epochMs(), token = nextGeneration
+        var registration: [String: Any] = ["pid": own.pid, "expectedCreationUnixUS": String(own.creationUS),
+            "userDataGeneration": String(token), "beforeIdentity": identityJSON(before),
+            "registrationStartUnixMs": start, "qualified": false,
+            "request": ["filter": Int16(EVFILT_PROC), "flags": UInt16(EV_ADD | EV_ENABLE | EV_ONESHOT | EV_RECEIPT),
+                        "fflags": UInt32(NOTE_EXIT), "userDataGeneration": String(token)],
+            "scope": "Read-only kernel process NOTE_EXIT bound to verified owned PID and creation; no signals, status, target writes or debugger attachment"]
+        if before?.creationUS == own.creationUS {
+            var receipt = resource_proc_event113()
+            _ = resource_proc_register113(fd, own.pid, token, &receipt)
+            let after = identity(own.pid)
+            registration["receipt"] = eventJSON(receipt)
+            registration["afterIdentity"] = identityJSON(after)
+            registration["qualified"] = receipt.call_result == 1 && receipt.ident == UInt64(own.pid) &&
+                receipt.filter == Int16(EVFILT_PROC) && (receipt.flags & UInt16(EV_ERROR)) != 0 && receipt.data == 0 &&
+                receipt.generation == token && after?.creationUS == own.creationUS
+        } else { registration["afterIdentity"] = NSNull(); registration["receipt"] = NSNull() }
+        registration["registrationEndUnixMs"] = epochMs()
+        registrations[own.pid] = registration
+        emit(["event": "owned-exit-registration", "atUnixMs": epochMs(), "registration": registration])
+        if registration["qualified"] as? Bool != true {
+            pendingErrors.append(["pid": own.pid, "stage": "owned NOTE_EXIT registration or same-creation recheck",
+                "atUnixMs": epochMs(), "required": true, "registration": registration,
+                "reason": "An unqualified registration cannot prove exit or hide the original owned identity"])
+        }
+    }
+    func drain() {
+        while true {
+            var events = [resource_proc_event113](repeating: resource_proc_event113(), count: 64)
+            let count = events.withUnsafeMutableBufferPointer { resource_proc_drain113(fd, $0.baseAddress!, Int32($0.count)) }
+            if count < 0 {
+                pendingErrors.append(["stage": "owned NOTE_EXIT nonblocking drain", "atUnixMs": epochMs(),
+                    "required": true, "original": eventJSON(events[0])]); return
+            }
+            if count == 0 { return }
+            for event in events.prefix(Int(count)) {
+                let raw = eventJSON(event)
+                let pid = event.ident <= UInt64(Int32.max) ? Int32(event.ident) : -1
+                let registration = registrations[pid]
+                let qualified = registration?["qualified"] as? Bool == true &&
+                    registration?["userDataGeneration"] as? String == String(event.generation) &&
+                    event.filter == Int16(EVFILT_PROC) && (event.flags & UInt16(EV_ERROR)) == 0 &&
+                    (event.fflags & UInt32(NOTE_EXIT)) != 0 && notifications[pid] == nil
+                let evidence: [String: Any] = ["pid": pid, "registration": registration ?? [:],
+                    "notification": raw, "qualified": qualified,
+                    "source": "Actual original kqueue EVFILT_PROC NOTE_EXIT notification"]
+                emit(["event": "owned-kernel-exit", "atUnixMs": epochMs(), "evidence": evidence])
+                if qualified { notifications[pid] = evidence }
+                else { pendingErrors.append(["pid": pid, "stage": "unmatched owned NOTE_EXIT notification", "required": true,
+                    "atUnixMs": epochMs(), "original": evidence]) }
+            }
+            if count < 64 { return }
+        }
+    }
+    func exitEvidence(_ own: Identity) -> [String: Any]? {
+        drain()
+        guard let value = notifications[own.pid],
+              let registration = value["registration"] as? [String: Any],
+              registration["expectedCreationUnixUS"] as? String == String(own.creationUS) else { return nil }
+        return value
+    }
+    func takeErrors() -> [[String: Any]] { let result = pendingErrors; pendingErrors.removeAll(); return result }
+    func close() -> [String: Any] {
+        if closed { return ["alreadyClosed": true] }
+        errno = 0; let result = Darwin.close(fd), code = errno; closed = true
+        return ["descriptor": fd, "closeResult": result, "errno": code, "atUnixMs": epochMs()]
+    }
+}
+func counters(_ own: Identity, role: String, exitObserver: OwnedExitObserver? = nil) -> ([String: Any], [[String: Any]]) {
     var row: [String: Any] = ["pid": own.pid, "ppid": own.ppid, "name": own.name,
         "creationUnixMs": own.creationUnixMs, "creationUnixUS": String(own.creationUS), "role": role,
         "physicalFootprintBytes": NSNull(), "residentSizeBytes": NSNull(),
@@ -78,21 +172,24 @@ func counters(_ own: Identity, role: String) -> ([String: Any], [[String: Any]])
         let existenceErrno = errno
         let reused = observed != nil && observed!.creationUS != own.creationUS
         let exited = observed == nil && existenceResult == -1 && existenceErrno == ESRCH
-        let confirmedLifecycle = exited || reused
+        let kernelExit = exitObserver?.exitEvidence(own)
+        let confirmedLifecycle = exited || reused || kernelExit != nil
         let afterIdentity: Any
         if let observed = observed {
             afterIdentity = ["pid": observed.pid, "ppid": observed.ppid,
                 "name": observed.name, "creationUnixUS": String(observed.creationUS)] as [String: Any]
         } else { afterIdentity = NSNull() }
-        let evidence: [String: Any] = ["pid": own.pid, "stage": stage,
+        var evidence: [String: Any] = ["pid": own.pid, "stage": stage,
             "beforeCreationUnixUS": String(own.creationUS),
             "afterIdentity": afterIdentity,
             "existenceProbe": ["result": existenceResult, "errno": existenceErrno, "signal": 0],
             "atUnixMs": epochMs(), "collectionStartUnixMs": collectionStartUnixMs,
             "lifecycleInvalidation": confirmedLifecycle, "required": !confirmedLifecycle,
-            "reason": reused ? "Verified creation identity changed; never bind the replacement PID" :
+            "reason": kernelExit != nil ? "Original PID/creation registration received actual kernel NOTE_EXIT; counters unavailable, never credit a terminal CPU tail" :
+                reused ? "Verified creation identity changed; never bind the replacement PID" :
                 exited ? "Owned PID no longer exists during collection" : "Identity unavailable but exit or reuse is unproven",
             "originalCounterErrors": errors]
+        if let kernelExit = kernelExit { evidence["kernelExitEvidence"] = kernelExit }
         row["invalidated"] = true
         row["identityInvalidation"] = evidence
         row["collectionEndUnixMs"] = evidence["atUnixMs"]
@@ -101,6 +198,7 @@ func counters(_ own: Identity, role: String) -> ([String: Any], [[String: Any]])
         return (row, confirmedLifecycle ? [evidence] : errors + [evidence])
     }
     let before = identity(own.pid)
+    if exitObserver?.exitEvidence(own) != nil { return invalidated("identity before counters", before) }
     guard let verifiedBefore = before, verifiedBefore.creationUS == own.creationUS else {
         return invalidated("identity before counters", before)
     }
@@ -236,13 +334,23 @@ guard CommandLine.arguments.count == 4, let ownerPID = Int32(CommandLine.argumen
       let ownerCreation = UInt64(CommandLine.arguments[3]), identity(ownerPID)?.creationUS == ownerCreation else {
     fputs("Expected control JSON, actual owner PID and native creation microseconds\n", stderr); exit(2)
 }
+func runObserver() -> Int32 {
 let controlFile = CommandLine.arguments[1], started = monoMs()
 var generation: Int = -1, phase = "observer-ready", seeds: [Int32: Double] = [:], roles: [Int32: String] = [:]
-var known: [Int32: Identity] = [:], stopping = false
+var known: [Int32: Identity] = [:], retired = Set<Int32>(), stopping = false, observerExitCode: Int32 = 0
+let queueDescriptor = kqueue()
+guard queueDescriptor >= 0 else { emit(["event": "observer-error", "stage": "read-only owned exit kqueue creation", "errno": errno]); return 2 }
+let exitObserver = OwnedExitObserver(queueDescriptor)
+defer {
+    if !exitObserver.closed {
+        emit(["event": "exit-observer-finally-close", "atUnixMs": epochMs(), "original": exitObserver.close()])
+    }
+}
 emit(["event": "ready", "observerPid": getpid(), "atUnixMs": epochMs(),
       "counter": "proc_pid_rusage ri_phys_footprint and ri_resident_size primary; optional task_info MACH_TASK_BASIC_INFO + TASK_VM_INFO cross-check; proc_pidinfo creation and cumulative CPU/faults",
       "intervalRequestedMs": 100, "writesToTarget": false, "cpuTimebase": ["numer": cpuTimebase.numer, "denom": cpuTimebase.denom],
       "cpuSource": "PROC_PIDTASKINFO Mach absolute ticks converted to nanoseconds using the original host timebase",
+      "lifecycleSource": "Read-only kqueue EVFILT_PROC NOTE_EXIT with original owned creation checked before and after registration and original udata generation",
       "gpuCounter": "No process GPU allocation API used; not available"])
 while !stopping {
     if let ownerNow = identity(ownerPID) {
@@ -254,9 +362,9 @@ while !stopping {
         emit(["event": "observer-error", "stage": "controller identity unavailable",
               "pid": ownerPID, "atUnixMs": epochMs(),
               "existenceProbe": ["result": ownerExists, "errno": ownerErrno, "signal": 0]])
-        exit(2)
+        observerExitCode = 2; break
     }
-    if monoMs() - started > 900_000 { emit(["event": "observer-error", "error": "Per-session observer time limit exceeded"]); exit(3) }
+    if monoMs() - started > 900_000 { emit(["event": "observer-error", "error": "Per-session observer time limit exceeded"]); observerExitCode = 3; break }
     do {
         let data = try Data(contentsOf: URL(fileURLWithPath: controlFile))
         if let command = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -274,7 +382,7 @@ while !stopping {
     if stopping { break }
     let sampleStart = monoMs(), snapshot = processTable(), table = snapshot.identities
     var observed: [Int32: Identity] = [:], errors = snapshot.errors
-    for row in table {
+    for row in table where !retired.contains(row.pid) {
         if let old = known[row.pid] {
             if old.creationUS == row.creationUS { observed[row.pid] = row }
             // The old owner is checked again by counters and retained as an
@@ -289,14 +397,14 @@ while !stopping {
     // Listing can succeed while identity retrieval fails for a live owned PID.
     // Recheck its original identity instead of silently dropping it. A genuine
     // ESRCH/reuse is recorded by counters; a live/unknown failure is mandatory.
-    for (pid, old) in known where snapshot.listedPIDs.contains(pid) && observed[pid] == nil {
+    for (pid, old) in known where !retired.contains(pid) && observed[pid] == nil {
         observed[pid] = old
     }
     var verifiedParentPIDs = Set(table.filter { observed[$0.pid]?.creationUS == $0.creationUS }.map { $0.pid })
     var changed = true
     while changed {
         changed = false
-        for row in table where observed[row.pid] == nil && known[row.pid] == nil {
+        for row in table where observed[row.pid] == nil && known[row.pid] == nil && !retired.contains(row.pid) {
             if verifiedParentPIDs.contains(row.ppid), let parent = observed[row.ppid], row.creationUS >= parent.creationUS {
                 known[row.pid] = row; observed[row.pid] = row; verifiedParentPIDs.insert(row.pid); changed = true
             }
@@ -304,16 +412,27 @@ while !stopping {
     }
     var rows: [[String: Any]] = [], invalidatedRows: [[String: Any]] = []
     for row in observed.values.sorted(by: { $0.pid < $1.pid }) {
+        exitObserver.register(row)
         // Java version probes are helpers. Only an explicitly observed actual
         // Game launch may receive a Game role; the executable name is not proof.
-        let (result, failures) = counters(row, role: roles[row.pid] ?? "unclassified-owned-descendant")
+        let (result, failures) = counters(row, role: roles[row.pid] ?? "unclassified-owned-descendant", exitObserver: exitObserver)
         errors += failures
-        if result["invalidated"] as? Bool == true { invalidatedRows.append(result) }
+        if result["invalidated"] as? Bool == true {
+            invalidatedRows.append(result)
+            if let evidence = result["identityInvalidation"] as? [String: Any], evidence["lifecycleInvalidation"] as? Bool == true {
+                retired.insert(row.pid)
+                emit(["event": "owned-identity-retired", "pid": row.pid, "creationUnixUS": String(row.creationUS),
+                      "atUnixMs": epochMs(), "original": evidence,
+                      "scope": "Retire original identity once; never bind replacement PID or invent terminal counters"])
+            }
+        }
         else { rows.append(result) }
     }
+    errors += exitObserver.takeErrors()
+    let requiredErrors = errors.filter { $0["required"] as? Bool != false }
     emit(["event": "sample", "atUnixMs": epochMs(), "monoMs": monoMs() - started,
           "phase": phase, "collectionMs": monoMs() - sampleStart, "rows": rows,
-          "counterErrors": errors.filter { $0["required"] as? Bool != false },
+          "counterErrors": requiredErrors, "wholeTreeCountersComplete": requiredErrors.isEmpty && invalidatedRows.isEmpty,
           "optionalCounterErrors": errors.filter { $0["required"] as? Bool == false && $0["lifecycleInvalidation"] as? Bool != true },
           "lifecycleInvalidations": errors.filter { $0["lifecycleInvalidation"] as? Bool == true },
           "invalidatedRows": invalidatedRows])
@@ -322,4 +441,11 @@ while !stopping {
 let identities = known.values.sorted(by: { $0.pid < $1.pid }).map {
     ["pid": $0.pid, "ppid": $0.ppid, "name": $0.name, "creationUnixUS": String($0.creationUS), "creationUnixMs": $0.creationUnixMs] as [String: Any]
 }
-emit(["event": "stopped", "observerPid": getpid(), "atUnixMs": epochMs(), "ownedIdentities": identities])
+let closeReceipt = exitObserver.close()
+if closeReceipt["closeResult"] as? Int32 != 0 { observerExitCode = 2 }
+emit(["event": "stopped", "observerPid": getpid(), "atUnixMs": epochMs(), "ownedIdentities": identities,
+      "retiredPIDs": retired.sorted(), "kernelExitObserverClose": closeReceipt, "code": observerExitCode])
+return observerExitCode
+}
+let observerResult = runObserver()
+if observerResult != 0 { exit(observerResult) }

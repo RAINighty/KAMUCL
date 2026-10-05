@@ -1,5 +1,32 @@
 // Real gallery files and shared favorite UI; network fixtures remain inside the isolated test process.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{gunzipSync}=require('node:zlib');
+function readMountedEnabledPlaylist(){
+ const observer=window.__macParityObserver
+ if(!observer)throw Error('Actual mounted production VNode observer missing')
+ return[...document.querySelectorAll('.launch-carousel-list>li')].filter(row=>row.querySelector('.carousel-enabled input')?.checked).map(row=>{
+  const vnode=observer.nodeForElement('HomeLayoutEditor',row),image=row.querySelector('img'),imageVNode=image&&observer.nodeForElement('HomeLayoutEditor',image)
+  if(typeof vnode.key!=='string'||!image||typeof imageVNode.props?.src!=='string')throw Error('Actual enabled carousel VNode key/source missing')
+  const source=new URL(imageVNode.props.src,document.baseURI).href
+  if(source!==image.src)throw Error('Actual enabled playlist VNode and DOM source disagree')
+  return{path:vnode.key,src:source}
+ })
+}
+function readMountedCarousel(banners){
+ const observer=window.__macParityObserver,component=observer?.one('HomeView'),hero=document.querySelector('.hero-card')
+ if(!component||!hero)throw Error('Actual mounted HomeView VNode missing')
+ const images=[...hero.querySelectorAll('.hero-image')].map(image=>{
+  const vnode=observer.nodeForElement('HomeView',image),key=vnode.key,index=banners.findIndex(item=>item.path===key),source=typeof vnode.props?.src==='string'?new URL(vnode.props.src,document.baseURI).href:null,classes=vnode.props?.class
+  if(typeof key!=='string'||index<0||banners.filter(item=>item.path===key).length!==1||source!==image.src||source!==banners[index].src||typeof classes!=='string')throw Error('Actual retained carousel VNode path/source missing or disagrees with saved playlist')
+  const active=classes.split(/\s+/).includes('active')
+  if(active!==image.classList.contains('active'))throw Error('Actual retained carousel VNode and DOM active state disagree')
+  return{index,key,vnodeSrc:source,vnodeClass:classes,src:image.src,active,complete:image.complete,naturalWidth:image.naturalWidth}
+ })
+ const active=images.filter(image=>image.active)
+ if(active.length!==1)throw Error('Exactly one actual active carousel VNode is required')
+ const current=active[0].index,next=(current+1)%banners.length,previous=(current+banners.length-1)%banners.length,layerIndices=images.map(image=>image.index).sort((a,b)=>a-b)
+ if(new Set(layerIndices).size!==layerIndices.length||!layerIndices.includes(next)||layerIndices.some(index=>![current,next,previous].includes(index)))throw Error('Actual retained VNodes must contain current/next and only the optional previous outgoing layer')
+ return{banners,current,upcoming:next,outgoing:layerIndices.includes(previous)?previous:null,layerIndices,images,documentHidden:document.hidden,timers:window.__galleryTimers.size,observer:{componentUID:component.uid,indexSource:'Original mounted image VNode path key mapped to exact saved playlist',nextSource:'Next saved playlist index, required to exist as an actual retained VNode',outgoingSource:'Previous saved playlist index only when present as an actual retained VNode',classification:'Read-only actual mounted production VNode key/props/source/class plus previously observed enabled Settings VNode playlist; no setup bindings or DOM dev expandos'}}
+}
 function verifyRetainedCarousel(snapshot,expected){
  assert.deepEqual(snapshot.banners.map(item=>item.path),expected,'all enabled logical images retain their exact saved order')
  assert.equal(snapshot.banners.length,expected.length);assert.equal(new Set(expected).size,expected.length)
@@ -68,6 +95,7 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  const imported=await evaluate("window.kamucl.invoke('appearance:importLaunchThumbnail')");
  const images=imported.launchThumbnail.images;assert(images.length>=2);assert(images.every(file=>fs.existsSync(file)));
  await call('Page.reload');await wait(1400);
+ await evaluate(`(${require('./verify-mac-parity-ui.cjs').installMacParityObserver.toString()})()`)
  // Observe actual 100ms carousel timers without changing application code.
  await evaluate("(()=>{window.__galleryTimers=new Set();window.__gallerySet=window.setInterval;window.__galleryClear=window.clearInterval;window.setInterval=(fn,ms,...args)=>{const id=window.__gallerySet(fn,ms,...args);if(ms===100)window.__galleryTimers.add(id);return id};window.clearInterval=id=>{window.__galleryTimers.delete(id);window.__galleryClear(id)}})()");
  await activateGallery('after gallery reload');
@@ -85,9 +113,19 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  // only current/next/outgoing image resources. Verify a whole real timer cycle
  // using explicit one-second durations in this isolated fixture profile.
  const expectedKeys=saved.launchThumbnail.order.filter(key=>!saved.launchThumbnail.disabled.includes(key));assert.equal(expectedKeys.length,6+images.length);assert.equal(new Set(expectedKeys).size,6+images.length)
- await evaluate(`window.kamucl.invoke('settings:set',{launchThumbnail:${JSON.stringify({...saved.launchThumbnail,randomPlayback:false,durations:Object.fromEntries(expectedKeys.map(key=>[key,1]))})}})`)
+ const actualPlaylist=await evaluate(`(${readMountedEnabledPlaylist.toString()})()`);assert.deepEqual(actualPlaylist.map(row=>row.path),expectedKeys,'Actual enabled Settings VNode order must match the persisted complete logical playlist');carouselResourceReadiness.push({actualPlaylist,expectedKeys,classification:'Original enabled Settings VNode keys/sources read before leaving Settings'});writeLiveProof()
+ // Commit fixture timing through the real editor. A direct main settings:set
+ // persists bytes but does not update the renderer's existing appearance store.
+ const randomSelector='input[aria-label="随机播放启动卡图片"]'
+ if(await evaluate(`document.querySelector(${JSON.stringify(randomSelector)}).checked`))await click(randomSelector)
+ for(const key of expectedKeys){
+  await evaluate(`(()=>{const row=[...document.querySelectorAll('.launch-carousel-list>li')].find(e=>window.__macParityObserver.nodeForElement('HomeLayoutEditor',e).key===${JSON.stringify(key)});if(!row)throw Error('Missing actual enabled duration row');const input=row.querySelector('.slide-duration input');input.value='1';input.dispatchEvent(new Event('change',{bubbles:true}))})()`)
+  let committed=false;for(let attempt=0;attempt<30;attempt++){await wait(80);const current=await settings();if(current.launchThumbnail.durations[key]===1){committed=true;break}}
+  assert(committed,'actual duration editor must persist one-second timing for '+key)
+ }
+ const cycleSettings=await settings();assert.equal(cycleSettings.launchThumbnail.randomPlayback,false);assert(expectedKeys.every(key=>cycleSettings.launchThumbnail.durations[key]===1));carouselResourceReadiness.push({cycleSettings:cycleSettings.launchThumbnail,classification:'Real duration editor change handlers and original saved settings; complete timer cycle still required within original bounds'});writeLiveProof()
  await nav('home');await activateGallery('multiple enabled images',1);assert.equal(await evaluate('window.__galleryTimers.size'),1)
- const readCarousel=()=>evaluate("(()=>{const hero=document.querySelector('.hero-card');let component=hero?.__vueParentComponent;while(component&&component.type?.__name!=='HomeView')component=component.parent;if(!component)throw Error('actual HomeView setup missing');const s=component.setupState,unwrap=value=>value&&typeof value==='object'&&'value'in value?value.value:value,banners=unwrap(s.banners);return{banners:banners.map(item=>({path:item.path,src:new URL(item.src,document.baseURI).href})),current:unwrap(s.bannerIndex),upcoming:unwrap(s.upcomingBanner),outgoing:unwrap(s.outgoingBanner),layerIndices:unwrap(s.bannerLayers).map(item=>item.index),images:[...hero.querySelectorAll('.hero-image')].map(image=>({src:image.src,active:image.classList.contains('active'),complete:image.complete,naturalWidth:image.naturalWidth})),documentHidden:document.hidden,timers:window.__galleryTimers.size}})()")
+ const readCarousel=()=>evaluate(`(${readMountedCarousel.toString()})(${JSON.stringify(actualPlaylist)})`)
  const rotation=[],rotationStarted=Date.now();let cycleComplete=false
  while(Date.now()-rotationStarted<15000){
   await wait(80);const snapshot=await readCarousel();const proof={at:Date.now(),snapshot};carouselResourceReadiness.push(proof);writeLiveProof();assert.equal(snapshot.documentHidden,false);assert.equal(snapshot.timers,1)
@@ -129,3 +167,4 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  fs.writeFileSync('out/gallery-favorites-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify({...result,motionPreference,motionReadiness,favoriteReadiness,favoritePickerReadiness,carouselResourceReadiness},null,2));console.log('Gallery and external favorites GUI checks passed');
 };
 module.exports.verifyRetainedCarousel=verifyRetainedCarousel;
+Object.assign(module.exports,{readMountedEnabledPlaylist,readMountedCarousel});
