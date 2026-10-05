@@ -12,7 +12,7 @@ const receipt={version:pkg.version,arch,stage,group,commit:execFileSync('git',['
 const save=()=>fs.writeFileSync(path.join(proof,'job.json'),JSON.stringify(receipt,null,2))
 const run=(cmd,args,options={})=>execFileSync(cmd,args,{stdio:'inherit',...options})
 const sha=async file=>{const hash=crypto.createHash('sha256');for await(const chunk of fs.createReadStream(file))hash.update(chunk);return hash.digest('hex')}
-let mount,attached=false
+let mount,attached=false,nativeDisplay
 ;(async()=>{
  save()
  const manifest=JSON.parse(fs.readFileSync(`release/mac-package-${arch}.json`,'utf8'))
@@ -40,6 +40,12 @@ let mount,attached=false
  const embedded=JSON.parse(require('asar').extractFile(path.join(appPath,'Contents/Resources/app.asar'),'package.json').toString())
  assert.equal(embedded.version,pkg.version)
  receipt.steps.push('clean native extraction or readonly mounted DMG, executable arch, ad-hoc signature and ASAR bytes verified');receipt.application=appPath;save()
+ if(group==='parity'){
+  receipt.nativeDisplayProof=path.join(proof,'native-display113','display-proof.json');save()
+  nativeDisplay=await require('./mac-native-display113.cjs').prepareNativeDisplay({outputDirectory:proof})
+  assert.equal(nativeDisplay.proofFile,receipt.nativeDisplayProof)
+  receipt.steps.push('actual native display inventory and requested layout capacity observed before navigation');save()
+ }
  if(group==='ui')run(process.execPath,['scripts/verify-mac.cjs',appPath,arch,stage],{timeout:29*60*1000})
  else if(group==='parity')run(process.execPath,['scripts/verify-mac-parity.cjs',appPath,arch,stage],{timeout:22*60*1000})
  else if(group==='game')run(process.execPath,['scripts/verify-mac-game.cjs',appPath,arch],{timeout:28*60*1000})
@@ -60,7 +66,8 @@ let mount,attached=false
   const file=path.join(crashRoot,name)
   if(/^KAMUCL.*\.(?:ips|crash)$/.test(name)&&fs.statSync(file).mtimeMs>=Date.parse(receipt.startedAt))fs.copyFileSync(file,path.join(proof,name))
  }
-}).finally(()=>{
+}).finally(async()=>{
+ if(nativeDisplay)try{await nativeDisplay.restore();receipt.nativeDisplayRestored=true}catch(error){receipt.complete=false;(receipt.cleanupErrors??=[]).push({stage:'native display restore',name:error.name,message:error.message});console.error(error);process.exitCode=1}
  if(attached)try{run('hdiutil',['detach',mount]);receipt.mountDetached=true}catch(error){receipt.complete=false;receipt.detachError=String(error);process.exitCode=1}
  receipt.finishedAt=new Date().toISOString();save()
 })

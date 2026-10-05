@@ -40,6 +40,43 @@ func identity(_ pid: Int32) -> Identity? {
                     creationUS: info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec,
                     name: String(cString: name))
 }
+struct ZombieIdentityProbe {
+    let original: [String: Any]
+    let qualified: Bool
+}
+func zombieIdentityProbe(_ own: Identity, argument: UInt64 = 1) -> ZombieIdentityProbe {
+    // Apple XNU proc_info.c sets findzomb for PROC_PIDTBSDINFO when arg != 0,
+    // then uses proc_find_zombref if proc_find fails, with normal permissions.
+    // This is an immediate second identity read, never a later exit inference.
+    var info = proc_bsdinfo()
+    let size = Int32(MemoryLayout<proc_bsdinfo>.size), start = epochMs()
+    errno = 0
+    let result = proc_pidinfo(own.pid, PROC_PIDTBSDINFO, argument, &info, size), code = errno
+    let end = epochMs()
+    let bytes = withUnsafeBytes(of: &info) { Data($0).base64EncodedString() }
+    let returnedIdentity: Any
+    let layout = resource_bsd_layout_value113()
+    let qualified = argument == 1 && result == size && code == 0 && info.pbi_pid == UInt32(own.pid) &&
+        info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec == own.creationUS &&
+        info.pbi_status == RESOURCE_PROC_STATUS_ZOMBIE113
+    if result == size {
+        returnedIdentity = ["pid": info.pbi_pid, "ppid": info.pbi_ppid,
+            "creationUnixUS": String(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec),
+            "startTimeSeconds": String(info.pbi_start_tvsec), "startTimeMicroseconds": String(info.pbi_start_tvusec),
+            "status": info.pbi_status] as [String: Any]
+    } else { returnedIdentity = NSNull() }
+    return ZombieIdentityProbe(original: [
+        "source": "Actual proc_pidinfo PROC_PIDTBSDINFO identity observation",
+        "api": "proc_pidinfo", "flavor": PROC_PIDTBSDINFO, "argument": argument,
+        "requestedPID": own.pid, "expectedCreationUnixUS": String(own.creationUS),
+        "result": result, "systemErrno": code, "bufferSize": size, "originalBufferBase64": bytes,
+        "bufferLayout": ["size": layout.size, "pid": layout.pid, "ppid": layout.ppid, "status": layout.status,
+            "startTimeSeconds": layout.start_sec, "startTimeMicroseconds": layout.start_usec, "byteOrder": "little-endian"],
+        "probeStartUnixMs": start, "probeEndUnixMs": end, "identity": returnedIdentity,
+        "zombieStatusConstant": RESOURCE_PROC_STATUS_ZOMBIE113, "qualified": qualified,
+        "scope": "Original same-creation SZOMB proves awaiting parent collection; live, short, denied or unknown results do not prove exit"],
+        qualified: qualified)
+}
 func processTable() -> (identities: [Identity], listedPIDs: Set<Int32>, errors: [[String: Any]]) {
     let requested = proc_listallpids(nil, 0)
     guard requested > 0 else {
@@ -173,7 +210,9 @@ func counters(_ own: Identity, role: String, exitObserver: OwnedExitObserver? = 
         let reused = observed != nil && observed!.creationUS != own.creationUS
         let exited = observed == nil && existenceResult == -1 && existenceErrno == ESRCH
         let kernelExit = exitObserver?.exitEvidence(own)
-        let confirmedLifecycle = exited || reused || kernelExit != nil
+        let zombieProbe = observed == nil ? zombieIdentityProbe(own) : nil
+        let zombie = zombieProbe?.qualified == true
+        let confirmedLifecycle = exited || reused || kernelExit != nil || zombie
         let afterIdentity: Any
         if let observed = observed {
             afterIdentity = ["pid": observed.pid, "ppid": observed.ppid,
@@ -186,10 +225,12 @@ func counters(_ own: Identity, role: String, exitObserver: OwnedExitObserver? = 
             "atUnixMs": epochMs(), "collectionStartUnixMs": collectionStartUnixMs,
             "lifecycleInvalidation": confirmedLifecycle, "required": !confirmedLifecycle,
             "reason": kernelExit != nil ? "Original PID/creation registration received actual kernel NOTE_EXIT; counters unavailable, never credit a terminal CPU tail" :
+                zombie ? "Immediate original same-creation PROC_PIDTBSDINFO arg=1 returned SZOMB; counters unavailable, never credit a terminal CPU tail" :
                 reused ? "Verified creation identity changed; never bind the replacement PID" :
                 exited ? "Owned PID no longer exists during collection" : "Identity unavailable but exit or reuse is unproven",
             "originalCounterErrors": errors]
         if let kernelExit = kernelExit { evidence["kernelExitEvidence"] = kernelExit }
+        if let zombieProbe = zombieProbe { evidence["zombieIdentityProbe"] = zombieProbe.original }
         row["invalidated"] = true
         row["identityInvalidation"] = evidence
         row["collectionEndUnixMs"] = evidence["atUnixMs"]
@@ -276,6 +317,128 @@ func counters(_ own: Identity, role: String, exitObserver: OwnedExitObserver? = 
     }
     row["collectionEndUnixMs"] = epochMs()
     return (row, errors)
+}
+enum ZombieQualificationFailure: Error { case failed(String) }
+func qualifyOwnedZombie() -> [String: Any] {
+    var proof: [String: Any] = ["event": "owned-zombie-qualification", "passed": false,
+        "startedAtUnixMs": epochMs(), "parentPID": getpid(),
+        "scope": "Actual own fork/pipe children; natural EOF/_exit, original same-creation SZOMB before waitpid, independent of NOTE_EXIT; no product resource acceptance"]
+    var controlFD: Int32 = -1, childFD: Int32 = -1
+    var controlPID: Int32 = -1, childPID: Int32 = -1
+    var naturalReaps: [[String: Any]] = []
+    func require(_ condition: Bool, _ reason: String) throws {
+        if !condition { throw ZombieQualificationFailure.failed(reason) }
+    }
+    func releaseAndReap(_ pid: inout Int32, _ fd: inout Int32) {
+        guard pid > 0 else { return }
+        let closeAttempted = fd >= 0
+        var closeResult: Any = NSNull(), closeErrno: Any = NSNull()
+        if closeAttempted {
+            errno = 0
+            closeResult = Darwin.close(fd); closeErrno = errno
+        }
+        fd = -1
+        var status: Int32 = 0
+        errno = 0
+        let result = resource_reap_child113(pid, &status), code = errno
+        let validated = result == pid
+        naturalReaps.append(["pid": pid, "closeAttempted": closeAttempted,
+            "releasePipeCloseResult": closeResult, "releasePipeErrno": closeErrno,
+            "waitPIDResult": result, "systemErrno": code,
+            "originalWaitStatusBuffer": status, "waitStatusValidated": validated,
+            "rawWaitStatus": validated ? status as Any : NSNull(),
+            "naturalExitCode": validated ? resource_child_exit_code113(status) as Any : NSNull(),
+            "atUnixMs": epochMs()])
+        pid = -1
+    }
+    func awaitIdentity(_ pid: Int32) throws -> Identity {
+        let deadline = monoMs() + 5000
+        while monoMs() < deadline {
+            if let own = identity(pid), own.ppid == getpid() { return own }
+            usleep(10_000)
+        }
+        throw ZombieQualificationFailure.failed("Actual fork child live identity unavailable")
+    }
+    do {
+        // Fork's child branch stays entirely inside the async-signal-safe C
+        // wrapper. The later child closes its inherited control release fd.
+        controlPID = resource_waiting_child113(&controlFD, -1)
+        try require(controlPID > 0, "Own control fork failed")
+        let control = try awaitIdentity(controlPID)
+        childPID = resource_waiting_child113(&childFD, controlFD)
+        try require(childPID > 0, "Own zombie fixture fork failed")
+        let own = try awaitIdentity(childPID)
+        proof["originalOwnedIdentity"] = identityJSON(own)
+        proof["originalControlIdentity"] = identityJSON(control)
+        let liveProbe = zombieIdentityProbe(control)
+        let (liveRow, liveErrors) = counters(control, role: "owned-live-zombie-control")
+        proof["liveControl"] = ["probe": liveProbe.original, "row": liveRow, "errors": liveErrors]
+        try require(!liveProbe.qualified && identity(control.pid)?.creationUS == control.creationUS &&
+            liveRow["invalidated"] as? Bool != true && liveErrors.filter { $0["required"] as? Bool != false }.isEmpty &&
+            (liveRow["physicalFootprintBytes"] as? UInt64 ?? 0) > 0, "Actual live control must remain measurable, never a zombie")
+        errno = 0
+        let releaseResult = Darwin.close(childFD), releaseErrno = errno
+        childFD = -1
+        proof["naturalExitRelease"] = ["pid": own.pid, "pipeCloseResult": releaseResult,
+            "systemErrno": releaseErrno, "atUnixMs": epochMs(), "signalDelivered": false]
+        try require(releaseResult == 0, "Own child natural EOF release failed")
+        let deadline = monoMs() + 5000
+        var observations: [[String: Any]] = [], sawZombie = false
+        while monoMs() < deadline {
+            let probe = zombieIdentityProbe(own)
+            observations.append(probe.original)
+            if probe.qualified { sawZombie = true; break }
+            usleep(10_000)
+        }
+        proof["zombieWaitObservations"] = observations
+        try require(sawZombie, "Actual un-reaped same-creation SZOMB unavailable")
+        let ordinaryProbe = zombieIdentityProbe(own, argument: 0)
+        proof["ordinaryIdentityAtZombie"] = ordinaryProbe.original
+        try require(ordinaryProbe.original["identity"] is NSNull, "Fixture must reproduce ordinary identity lookup failure")
+        // No exit observer is supplied. This proves the new immediate native
+        // identity branch, not a previously received or later NOTE_EXIT event.
+        let (zombieRow, zombieErrors) = counters(own, role: "owned-unreaped-zombie")
+        proof["zombieCounters"] = ["row": zombieRow, "errors": zombieErrors, "noteExitObserverSupplied": false]
+        let evidence = zombieRow["identityInvalidation"] as? [String: Any]
+        let originalProbe = evidence?["zombieIdentityProbe"] as? [String: Any]
+        let existence = evidence?["existenceProbe"] as? [String: Any]
+        let counterFields = ["physicalFootprintBytes", "residentSizeBytes", "residentSizeMaxBytes", "virtualSizeBytes",
+            "cpuNs", "pageFaultCount", "pageins", "readBytes", "writeBytes"]
+        try require(zombieRow["invalidated"] as? Bool == true && evidence?["lifecycleInvalidation"] as? Bool == true &&
+            originalProbe?["qualified"] as? Bool == true && evidence?["kernelExitEvidence"] == nil &&
+            existence?["result"] as? Int32 == 0 && existence?["errno"] as? Int32 == 0 &&
+            counterFields.allSatisfy { zombieRow[$0] is NSNull }, "Zombie branch must prove the former unknown-alive race without invented counters")
+        let wrong = Identity(pid: own.pid, ppid: own.ppid, creationUS: own.creationUS + 1, name: own.name)
+        let (wrongRow, wrongErrors) = counters(wrong, role: "qualification-only-mismatched-creation")
+        proof["mismatchedCreationDiagnostic"] = ["row": wrongRow, "errors": wrongErrors,
+            "scope": "Negative diagnostic only; deliberately wrong expected creation is never a verified owned replacement"]
+        let wrongEvidence = wrongRow["identityInvalidation"] as? [String: Any]
+        try require(wrongEvidence?["lifecycleInvalidation"] as? Bool == false && wrongEvidence?["required"] as? Bool == true &&
+            !wrongErrors.isEmpty, "A different creation must remain an original required error")
+        try require(identity(control.pid)?.creationUS == control.creationUS, "Unrelated control must remain alive before own zombie reap")
+        proof["controlAliveBeforeReap"] = identityJSON(identity(control.pid))
+        releaseAndReap(&childPID, &childFD)
+        try require(naturalReaps.last?["waitPIDResult"] as? Int32 == own.pid &&
+            naturalReaps.last?["naturalExitCode"] as? Int32 == 0 &&
+            naturalReaps.last?["systemErrno"] as? Int32 == 0, "Own zombie must be reaped with natural exit zero")
+        try require(identity(control.pid)?.creationUS == control.creationUS, "Control must remain alive after own zombie reap")
+        proof["controlAliveAfterReap"] = identityJSON(identity(control.pid))
+        releaseAndReap(&controlPID, &controlFD)
+        try require(naturalReaps.last?["waitPIDResult"] as? Int32 == control.pid &&
+            naturalReaps.last?["naturalExitCode"] as? Int32 == 0, "Own control must exit naturally")
+        proof["passed"] = true
+    } catch { proof["failure"] = String(describing: error) }
+    // Failure cleanup only releases/reaps the two PIDs returned by our forks.
+    // No global enumeration, signals, foreign process control or fabricated exit.
+    releaseAndReap(&childPID, &childFD)
+    releaseAndReap(&controlPID, &controlFD)
+    proof["naturalReaps"] = naturalReaps
+    proof["finishedAtUnixMs"] = epochMs()
+    return proof
+}
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--zombie-self-test" {
+    let proof = qualifyOwnedZombie()
+    emit(proof); exit(proof["passed"] as? Bool == true ? 0 : 1)
 }
 if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--identity",
    let pid = Int32(CommandLine.arguments[2]), let row = identity(pid) {

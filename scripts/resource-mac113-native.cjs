@@ -6,10 +6,31 @@ const headerText=`#include <libproc.h>
 #include <mach/mach.h>
 #include <mach/task_info.h>
 #include <sys/event.h>
+#include <sys/proc.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <errno.h>
 #include <stdint.h>
+#include <stddef.h>
 static const mach_msg_type_number_t RESOURCE_TASK_VM_INFO_REV1_COUNT113 = TASK_VM_INFO_REV1_COUNT;
+static const uint32_t RESOURCE_PROC_STATUS_ZOMBIE113 = SZOMB;
+struct resource_bsd_layout113 { uint32_t size, pid, ppid, status, start_sec, start_usec; };
+static inline struct resource_bsd_layout113 resource_bsd_layout_value113(void) {
+ struct resource_bsd_layout113 layout={sizeof(struct proc_bsdinfo),offsetof(struct proc_bsdinfo,pbi_pid),offsetof(struct proc_bsdinfo,pbi_ppid),offsetof(struct proc_bsdinfo,pbi_status),offsetof(struct proc_bsdinfo,pbi_start_tvsec),offsetof(struct proc_bsdinfo,pbi_start_tvusec)};return layout;
+}
 static inline int resource_pid_rusage113(pid_t pid, struct rusage_info_v2 *buffer) { return proc_pid_rusage(pid, RUSAGE_INFO_V2, (rusage_info_t *)buffer); }
+// Qualification only: the fork child executes async-signal-safe C calls, never
+// Swift/Foundation. Closing its owned parent pipe releases it to natural _exit.
+static inline pid_t resource_waiting_child113(int *release_fd, int inherited_release_fd) {
+ int descriptors[2]; if(pipe(descriptors)!=0)return -1;
+ pid_t child=fork(); int error=errno;
+ if(child==0){close(descriptors[1]);if(inherited_release_fd>=0)close(inherited_release_fd);char byte;ssize_t result;do{result=read(descriptors[0],&byte,1);}while(result<0&&errno==EINTR);close(descriptors[0]);_exit(result>=0?0:2);}
+ close(descriptors[0]);if(child<0){close(descriptors[1]);errno=error;return -1;}*release_fd=descriptors[1];return child;
+}
+static inline pid_t resource_reap_child113(pid_t child,int *status) {
+ pid_t result;do{result=waitpid(child,status,0);}while(result<0&&errno==EINTR);return result;
+}
+static inline int resource_child_exit_code113(int status) { return WIFEXITED(status)?WEXITSTATUS(status):-1; }
 // These wrappers only register/query process lifecycle notifications. They never
 // signal, attach to, suspend, or write the observed process. Preserve every raw
 // kevent field, including the original non-pointer generation carried in udata.
@@ -84,8 +105,45 @@ function assertConfirmedLifecycleInvalidation(error,row){
  const exited=error.afterIdentity===null&&error.existenceProbe.result===-1&&error.existenceProbe.errno===3
  const reused=error.afterIdentity?.pid===error.pid&&typeof error.afterIdentity.creationUnixUS==='string'&&/^\d+$/.test(error.afterIdentity.creationUnixUS)&&error.afterIdentity.creationUnixUS!==row.creationUnixUS
  const kernel=error.kernelExitEvidence!==undefined?(assertKernelExitEvidence(error.kernelExitEvidence,row,error.atUnixMs),true):false
- assert(exited||reused||kernel,'A lifecycle label cannot hide a live or unknown-identity counter failure')
+ const zombie=error.zombieIdentityProbe?.qualified===true?(assertZombieIdentityEvidence(error.zombieIdentityProbe,row,error.collectionStartUnixMs,error.atUnixMs),true):false
+ assert(exited||reused||kernel||zombie,'A lifecycle label cannot hide a live or unknown-identity counter failure')
  return error
+}
+function assertZombieIdentityEvidence(probe,row,collectionStartUnixMs,observedByUnixMs){
+ assert.equal(probe.source,'Actual proc_pidinfo PROC_PIDTBSDINFO identity observation');assert.equal(probe.api,'proc_pidinfo');assert.equal(probe.flavor,3);assert.equal(probe.argument,1)
+ assert.equal(probe.qualified,true);assert.equal(probe.requestedPID,row.pid);assert.equal(probe.expectedCreationUnixUS,row.creationUnixUS)
+ assert.equal(probe.zombieStatusConstant,5);assert.equal(probe.systemErrno,0);assert(Number.isSafeInteger(probe.bufferSize)&&probe.bufferSize>0);assert.equal(probe.result,probe.bufferSize,'Short or failed native identity reads never prove lifecycle')
+ assert(Number.isFinite(collectionStartUnixMs)&&Number.isFinite(observedByUnixMs));assert(Number.isFinite(probe.probeStartUnixMs)&&Number.isFinite(probe.probeEndUnixMs)&&probe.probeStartUnixMs>=collectionStartUnixMs&&probe.probeEndUnixMs>=probe.probeStartUnixMs&&probe.probeEndUnixMs<=observedByUnixMs,'Only the current original collection may prove a zombie; later evidence is not retroactive')
+ const id=probe.identity;assert.equal(id?.pid,row.pid);assert.equal(id.status,5,'Live or unknown state cannot replace original SZOMB');assert.equal(id.creationUnixUS,row.creationUnixUS)
+ for(const field of['startTimeSeconds','startTimeMicroseconds'])assert.match(id[field],/^\d+$/)
+ assert(BigInt(id.startTimeMicroseconds)<1000000n);assert.equal(BigInt(id.startTimeSeconds)*1000000n+BigInt(id.startTimeMicroseconds),BigInt(row.creationUnixUS),'Native creation seconds/useconds must bind the original process')
+ assert.equal(typeof probe.originalBufferBase64,'string');const bytes=Buffer.from(probe.originalBufferBase64,'base64');assert.equal(bytes.toString('base64'),probe.originalBufferBase64);assert.equal(bytes.length,probe.bufferSize)
+ const layout=probe.bufferLayout;assert.equal(layout?.size,probe.bufferSize);assert.equal(layout.byteOrder,'little-endian')
+ const read=(field,width)=>{const offset=layout[field];assert(Number.isSafeInteger(offset)&&offset>=0&&offset+width<=bytes.length,'Original SDK field layout must be within the full returned struct');return width===8?bytes.readBigUInt64LE(offset):bytes.readUInt32LE(offset)}
+ assert.equal(read('pid',4),id.pid);assert.equal(read('ppid',4),id.ppid);assert.equal(read('status',4),id.status);assert.equal(read('startTimeSeconds',8),BigInt(id.startTimeSeconds));assert.equal(read('startTimeMicroseconds',8),BigInt(id.startTimeMicroseconds),'Returned identity fields must match the original native buffer bytes')
+ return probe
+}
+function assertNativeZombieQualification(proof){
+ assert.equal(proof.event,'owned-zombie-qualification');assert.equal(proof.passed,true)
+ assert(Number.isFinite(proof.startedAtUnixMs)&&Number.isFinite(proof.finishedAtUnixMs)&&proof.finishedAtUnixMs>=proof.startedAtUnixMs)
+ const own=proof.originalOwnedIdentity,control=proof.originalControlIdentity
+ assert(Number.isInteger(proof.parentPID)&&proof.parentPID>0)
+ for(const id of[own,control]){assert(Number.isInteger(id?.pid)&&id.pid>0&&id.pid!==proof.parentPID);assert.equal(id.ppid,proof.parentPID);assert.match(id.creationUnixUS,/^\d+$/)}assert.notEqual(own.pid,control.pid)
+ const live=proof.liveControl;assert.equal(live?.probe?.qualified,false);assert.equal(live.probe.argument,1);assert.equal(live.probe.result,live.probe.bufferSize);assert.equal(live.probe.systemErrno,0);assert.equal(live.probe.identity.pid,control.pid);assert.equal(live.probe.identity.creationUnixUS,control.creationUnixUS);assert.notEqual(live.probe.identity.status,5)
+ assert.equal(live.row.pid,control.pid);assert.equal(live.row.creationUnixUS,control.creationUnixUS);assert.notEqual(live.row.invalidated,true);assert(live.row.physicalFootprintBytes>0&&live.row.residentSizeBytes>0);assert(live.errors.every(e=>e.required===false),'The live control must have no primary identity/counter errors')
+ const release=proof.naturalExitRelease;assert.equal(release?.pid,own.pid);assert.equal(release.pipeCloseResult,0);assert.equal(release.systemErrno,0);assert.equal(release.signalDelivered,false);assert(Number.isFinite(release.atUnixMs))
+ const ordinary=proof.ordinaryIdentityAtZombie;assert.equal(ordinary?.api,'proc_pidinfo');assert.equal(ordinary.flavor,3);assert.equal(ordinary.argument,0);assert.equal(ordinary.requestedPID,own.pid);assert.equal(ordinary.expectedCreationUnixUS,own.creationUnixUS);assert.equal(ordinary.identity,null);assert.equal(ordinary.result,0);assert.equal(ordinary.systemErrno,3,'Actual qualification must reproduce normal lookup failure before parent collection')
+ const measured=proof.zombieCounters,row=measured?.row,error=row?.identityInvalidation
+ assert.equal(measured?.noteExitObserverSupplied,false);assert.equal(row?.pid,own.pid);assert.equal(row.creationUnixUS,own.creationUnixUS);assert.equal(error.kernelExitEvidence,undefined);assert.equal(error.afterIdentity,null);assert.equal(error.existenceProbe.result,0);assert.equal(error.existenceProbe.errno,0,'The native fixture must actually exercise the former unknown-alive race')
+ assert.equal(measured.errors.length,1);assert.deepEqual(measured.errors[0],error);assertConfirmedLifecycleInvalidation(error,row);assertZombieIdentityEvidence(error.zombieIdentityProbe,row,error.collectionStartUnixMs,error.atUnixMs)
+ assert.equal(error.stage,'identity before counters');assert.deepEqual(error.originalCounterErrors,[])
+ for(const field of['physicalFootprintBytes','residentSizeBytes','residentSizeMaxBytes','virtualSizeBytes','cpuNs','pageFaultCount','pageins','readBytes','writeBytes'])assert.equal(row[field],null,'No unobserved zombie memory/CPU/fault/IO value may be credited')
+ assert(Array.isArray(proof.zombieWaitObservations)&&proof.zombieWaitObservations.length>0);const last=proof.zombieWaitObservations.at(-1);assertZombieIdentityEvidence(last,row,release.atUnixMs,error.atUnixMs)
+ const negative=proof.mismatchedCreationDiagnostic,nrow=negative?.row,nerror=nrow?.identityInvalidation,nprobe=nerror?.zombieIdentityProbe
+ assert.equal(nrow?.pid,own.pid);assert.equal(BigInt(nrow.creationUnixUS),BigInt(own.creationUnixUS)+1n);assert.equal(nrow.invalidated,true);assert.equal(nerror.lifecycleInvalidation,false);assert.equal(nerror.required,true);assert.equal(nerror.afterIdentity,null);assert.equal(nerror.kernelExitEvidence,undefined);assert.equal(nprobe?.qualified,false);assert.equal(nprobe.identity.pid,own.pid);assert.equal(nprobe.identity.creationUnixUS,own.creationUnixUS);assert.equal(nprobe.identity.status,5);assert.equal(negative.errors.length,1);assert.deepEqual(negative.errors[0],nerror)
+ for(const id of[proof.controlAliveBeforeReap,proof.controlAliveAfterReap]){assert.equal(id?.pid,control.pid);assert.equal(id.creationUnixUS,control.creationUnixUS);assert.equal(id.ppid,proof.parentPID)}
+ assert.equal(proof.naturalReaps?.length,2);for(const[index,id]of[own,control].entries()){const reap=proof.naturalReaps[index];assert.equal(reap.pid,id.pid);assert.equal(reap.waitPIDResult,id.pid);assert.equal(reap.systemErrno,0);assert.equal(reap.waitStatusValidated,true,'Failed waitpid cannot validate the initial status buffer');assert.equal(reap.originalWaitStatusBuffer,0);assert.equal(reap.rawWaitStatus,reap.originalWaitStatusBuffer);assert.equal(reap.naturalExitCode,0);assert.equal(reap.closeAttempted,index===1,'Zombie release was already observed before SZOMB; only control release occurs during reap');assert.equal(reap.releasePipeCloseResult,index===1?0:null,'Unperformed close must be null, never a fabricated success');assert.equal(reap.releasePipeErrno,index===1?0:null);assert(Number.isFinite(reap.atUnixMs)&&reap.atUnixMs>=error.atUnixMs&&reap.atUnixMs<=proof.finishedAtUnixMs)}
+ return proof
 }
 function assertKernelExitEvidence(evidence,row,observedByUnixMs=Infinity){
  assert.equal(evidence.source,'Actual original kqueue EVFILT_PROC NOTE_EXIT notification');assert.equal(evidence.qualified,true);assert.equal(evidence.pid,row.pid)
@@ -128,6 +186,7 @@ function summarizeMac(records){
 }
 async function selfTest({directory=path.resolve('out/resource113/mac-native-self-test')}={}){
  const native=compileNative({directory}),swiftResult=runNativeReadout(native.exe,['--self-test'],{directory,name:'swift-self-test'});const swiftProof=JSON.parse(swiftResult);assert.equal(swiftProof.passed,true);assert.equal(swiftProof.cpuQualification?.passed,true,'Native Mach timebase CPU conversion must agree with original process CPU clock brackets')
+ const zombieRaw=runNativeReadout(native.exe,['--zombie-self-test'],{directory,name:'owned-zombie-self-test',timeout:30000}),zombieProof=JSON.parse(zombieRaw);assertNativeZombieQualification(zombieProof)
  const script='const b=Buffer.alloc(32*1024*1024,17);process.send({ready:true});process.on("message",m=>{if(m==="stop"){if(b[0]!==17)process.exitCode=2;process.disconnect()}})',startedAt=Date.now(),child=spawn(process.execPath,['-e',script],{stdio:['ignore','ignore','pipe','ipc']}),other=spawn(process.execPath,['-e',script],{stdio:['ignore','ignore','pipe','ipc']});const rows=[]
  const childReady=async c=>new Promise((resolve,reject)=>{c.once('message',resolve);c.once('error',reject)});const close=c=>c.exitCode!==null?(assert.equal(c.exitCode,0),Promise.resolve()):new Promise((resolve,reject)=>{c.once('close',(code,signal)=>code===0&&signal===null?resolve():reject(Error('Self-test child exit '+code+' signal '+signal)));c.send('stop')});let sampler
  try{
@@ -145,15 +204,15 @@ async function selfTest({directory=path.resolve('out/resource113/mac-native-self
   assert.equal(exitSamples.length,2);assert(exitSamples.every(isCompleteEmptyNativeSample),'Kernel lifecycle partial sample cannot be counted as an absent owned tree')
   const kernel=rows.filter(r=>r.event==='owned-kernel-exit'&&r.evidence.pid===child.pid);assert.equal(kernel.length,1);assertKernelExitEvidence(kernel[0].evidence,samples[0].rows[0])
   const retirements=rows.filter(r=>r.event==='owned-identity-retired');assert.equal(retirements.length,1);assert.equal(retirements[0].pid,child.pid);assert.equal(retirements[0].creationUnixUS,creation)
-  const invalidated=rows.flatMap(r=>r.event==='sample'?(r.invalidatedRows??[]):[]);assert.equal(invalidated.length,1);assertConfirmedLifecycleInvalidation(invalidated[0].identityInvalidation,invalidated[0]);assert.deepEqual(invalidated[0].identityInvalidation.kernelExitEvidence,kernel[0].evidence)
+  const invalidated=rows.flatMap(r=>r.event==='sample'?(r.invalidatedRows??[]):[]);assert.equal(invalidated.length,1);assertConfirmedLifecycleInvalidation(invalidated[0].identityInvalidation,invalidated[0]);if(invalidated[0].identityInvalidation.kernelExitEvidence!==undefined)assert.deepEqual(invalidated[0].identityInvalidation.kernelExitEvidence,kernel[0].evidence);else assertZombieIdentityEvidence(invalidated[0].identityInvalidation.zombieIdentityProbe,invalidated[0],invalidated[0].collectionStartUnixMs,invalidated[0].identityInvalidation.atUnixMs)
   assert(rows.filter(r=>r.event==='sample').every(s=>s.counterErrors.length===0),'Unknown live identity, registration or primary counter failures cannot pass qualification');assert.equal(other.exitCode,null,'Unrelated control must remain alive throughout the empty owned tree proof')
   await sampler.stop();const stopped=rows.findLast(r=>r.event==='stopped');assert.equal(stopped.kernelExitObserverClose.closeResult,0);assert.equal(stopped.code,0)
   const exitRaw=runNativeReadout(native.exe,['--inspect-exited-owner',String(child.pid),creation],{directory,name:'owned-exit-self-test',timeout:10000}),exited=JSON.parse(exitRaw)
   assert.equal(exited.passed,true);assert.equal(exited.invalidatedRow.pid,child.pid);assert.equal(exited.invalidatedRow.creationUnixUS,creation);assert.equal(exited.errors.length,1);assertConfirmedLifecycleInvalidation(exited.errors[0],exited.invalidatedRow)
-  const result={passed:true,at:new Date().toISOString(),scope:'Native Swift, native CPU-clock unit brackets and strictly owned PID/creation/kernel NOTE_EXIT/natural exit/full empty tree API qualification only; not App resource acceptance',cpuQualification:swiftProof.cpuQualification,ownedNaturalExit:{pid:child.pid,creationUnixUS:creation,code:child.exitCode,signal:child.signalCode,naturalExitAwaitedAtUnixMs,original:exited,kernelNotification:kernel[0],retirement:retirements[0],lastTwoCompleteEmptySamples:exitSamples},kernelExitObserverClose:stopped.kernelExitObserverClose,samples:samples.length,ownedPID:child.pid,excludedControlPID:other.pid,summary:summarizeMac(rows)}
+  const result={passed:true,at:new Date().toISOString(),scope:'Native Swift, CPU-clock brackets, immediate original SZOMB, strictly owned PID/creation/kernel NOTE_EXIT/natural exit/full empty tree API qualification only; not App resource acceptance',cpuQualification:swiftProof.cpuQualification,ownedZombieQualification:zombieProof,ownedNaturalExit:{pid:child.pid,creationUnixUS:creation,code:child.exitCode,signal:child.signalCode,naturalExitAwaitedAtUnixMs,original:exited,kernelNotification:kernel[0],retirement:retirements[0],lastTwoCompleteEmptySamples:exitSamples},kernelExitObserverClose:stopped.kernelExitObserverClose,samples:samples.length,ownedPID:child.pid,excludedControlPID:other.pid,summary:summarizeMac(rows)}
   fs.writeFileSync(path.join(directory,'self-test.json'),JSON.stringify(result,null,2)+'\n');return result
  }
  finally{await Promise.all([close(child),close(other)]);if(sampler&&!rows.some(r=>r.event==='stopped'))await sampler.stop()}
 }
-module.exports={compileNative,runNativeReadout,startMacSampler,summarizeMac,assertConfirmedLifecycleInvalidation,assertKernelExitEvidence,assertNativeCPUUnits,roleGroup,stats,percentile,selfTest,headerText}
+module.exports={compileNative,runNativeReadout,startMacSampler,summarizeMac,assertConfirmedLifecycleInvalidation,assertZombieIdentityEvidence,assertNativeZombieQualification,assertKernelExitEvidence,assertNativeCPUUnits,roleGroup,stats,percentile,selfTest,headerText}
 if(require.main===module)selfTest().then(r=>console.log(JSON.stringify(r))).catch(e=>{console.error(e);process.exitCode=1})

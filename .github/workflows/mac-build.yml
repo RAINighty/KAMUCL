@@ -106,7 +106,11 @@ jobs:
           path: release
       - name: Enable desktop material in disposable native session
         run: defaults write com.apple.universalaccess reduceTransparency -bool false
+      - name: Reject invented display coverage or unsafe native mode preparation
+        run: node --test scripts/mac-native-display113-tests.cjs scripts/mac-parity-layout113-tests.cjs
       - name: Full navigation coordinates, offline persistence, queue limit and real public MOD install
+        # A native display mode is observed and, only when safe, temporarily
+        # prepared by the owned job driver. Requested bounds alone never pass.
         run: node scripts/verify-mac-job.cjs parity ${{ matrix.arch }} app
       - uses: actions/upload-artifact@v4
         if: always()
@@ -285,7 +289,7 @@ jobs:
       - name: Enable original desktop material and full motion in this disposable native session
         run: node scripts/resource-mac113-conditions.cjs
       - name: Qualify callback ownership, immutable baseline and original-sample analysis failure paths
-        run: node --test scripts/resource-callback113-tests.cjs scripts/resource-mac113-tests.cjs scripts/resource-mac113-parity-input-tests.cjs scripts/resource-mac113-gallery-tests.cjs
+        run: node --test scripts/resource-callback113-tests.cjs scripts/resource-protocol113-tests.cjs scripts/resource-mac113-tests.cjs scripts/resource-mac113-parity-input-tests.cjs scripts/resource-mac113-gallery-tests.cjs scripts/resource-mac113-zombie-tests.cjs
       - name: Qualify Swift task_info counters and exact owned PID creation identities
         run: node scripts/resource-mac113-native.cjs
       - name: Freeze ten public 1.1.12 groups, then measure ten alternating current candidate pairs
