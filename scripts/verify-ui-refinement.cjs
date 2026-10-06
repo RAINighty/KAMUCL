@@ -41,7 +41,40 @@ async function readActualRendererTheme(beforeTimeOrigin) {
   const store=candidates.length===1?candidates[0][1]:null
   return{before,timeOrigin:performance.timeOrigin,url:document.URL,readyState:document.readyState,settingsTheme:settings.theme,moduleURL,storeExportKey:store?candidates[0][0]:null,storeCandidates:candidates.length,storeFound:!!store,initialized:store?.initialized,storeTheme:store?.settings?.theme,domTheme:document.documentElement.dataset.theme}
 }
-module.exports={classifyThemeReadiness,waitForThemeReadiness,readActualRendererTheme}
+function readSettingsScopeState() {
+  const visible=e=>!!e&&e.getClientRects().length>0
+  const isolation=document.querySelector('[data-section=isolation] input[type=checkbox]'),location=document.querySelector('[data-ui="download-location:path"]')
+  return{scope:document.querySelector('.settings-scopes [aria-current=page]')?.textContent.trim(),category:document.querySelector('.settings-categories [aria-current=page]')?.textContent.trim(),categories:[...document.querySelectorAll('.settings-categories button')].map(e=>e.textContent.trim()),visibleSections:[...document.querySelectorAll('.settings-body [data-section]')].filter(visible).map(e=>e.dataset.section),isolation:{visible:visible(isolation),type:isolation?.type,disabled:isolation?.disabled,checked:isolation?.checked,hint:document.querySelector('[data-section=isolation] .group-hint')?.textContent.trim()},download:{card:visible(document.querySelector('[data-ui="download-location:settings"]')),path:visible(location),readOnly:location?.readOnly,value:location?.value,change:visible(document.querySelector('[data-ui="download-location:change"]')),manage:visible(document.querySelector('[data-ui="download-location:manage"]'))}}
+}
+function assertSettingsScopeState(state,expected) {
+  const check=require('node:assert/strict')
+  check.equal(state.scope,expected==='game'?'游戏设置':'启动器设置','actual settings scope')
+  check.equal(state.category,expected==='game'?'目录与隔离':'下载','actual settings category')
+  check.deepEqual(state.categories,expected==='game'?['运行环境','游戏窗口','目录与隔离']:['外观','行为与登录','下载','功能与插件','关于与更新'],'each scope exposes only its own categories')
+  if(expected==='game'){
+    check.deepEqual(state.visibleSections,['isolation'],'game directories exposes its actual isolation control, not the download-location card')
+    check.equal(state.isolation.visible,true);check.equal(state.isolation.type,'checkbox');check.equal(state.isolation.disabled,false)
+    check.match(state.isolation.hint,/独立保存存档、模组与配置/,'actual isolation explanation')
+    check.equal(state.download.card,false);check.equal(state.download.path,false);check.equal(state.download.change,false);check.equal(state.download.manage,false)
+  }else{
+    check.deepEqual(state.visibleSections,['installation','downloads','mirror'],'downloads exposes location and download controls while other settings remain hidden')
+    check.equal(state.isolation.visible,false)
+    for(const key of ['card','path','readOnly','change','manage'])check.equal(state.download[key],true,'actual download-location '+key)
+    check.equal(typeof state.download.value,'string');check(state.download.value.length>0,'actual default download path must be displayed')
+  }
+}
+function readSettingsCoordinate(group,label) {
+  const matches=[...document.querySelectorAll(group+' button')].filter(e=>e.textContent.trim()===label)
+  if(matches.length!==1)return{matches:matches.length}
+  const e=matches[0],r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y),ancestors=[]
+  for(let node=e;node;node=node.parentElement){const c=getComputedStyle(node);ancestors.push(c.display!=='none'&&c.visibility==='visible'&&Number(c.opacity)===1)}
+  return{matches:1,x,y,width:r.width,height:r.height,viewport:{width:innerWidth,height:innerHeight},disabled:e.disabled,inert:!!e.closest('[inert]'),hit:hit===e||e.contains(hit),ancestorsVisible:ancestors.every(Boolean),runningFiniteAnimations:document.getAnimations().filter(a=>a.playState==='running'&&a.effect?.getComputedTiming().iterations!==Infinity).length}
+}
+function settingsCoordinateReady(state) {
+  return state.matches===1&&state.disabled===false&&state.inert===false&&state.hit===true&&state.ancestorsVisible===true&&state.runningFiniteAnimations===0&&['x','y','width','height'].every(key=>Number.isFinite(state[key]))&&state.width>0&&state.height>0&&state.x>=0&&state.y>=0&&state.x<state.viewport?.width&&state.y<state.viewport?.height
+}
+const MAC_QUIT_INSPECTION='setTimeout(()=>testElectron.app.quit(),500);true'
+module.exports={classifyThemeReadiness,waitForThemeReadiness,readActualRendererTheme,readSettingsScopeState,assertSettingsScopeState,readSettingsCoordinate,settingsCoordinateReady,MAC_QUIT_INSPECTION}
 // The established skin-surface CLI intentionally imports this runner.
 if(require.main===module||module.parent?.filename===require.resolve('./verify-skin-surfaces-ui.cjs')){
 if (process.argv[2]) {
@@ -98,7 +131,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
 
   const shotDir=path.resolve('release/ui-refinement-'+(process.env.KAMUCL_TEST_THEME||'black-orange'));fs.mkdirSync(shotDir,{recursive:true});
   fs.writeFileSync('out/ui-live.json',JSON.stringify({root,port,mainPort,pid:child.pid,shotDir}));
-  if(macParity)await main("globalThis.testElectron=process.mainModule.require('electron')");
+  if(macParity)await main("globalThis.testElectron=process.mainModule.require('electron');true");
   else{
   const skinFixture = await evaluate("(()=>{const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');g.fillStyle='#49a595';g.fillRect(0,0,64,64);g.fillStyle='#a07856';g.fillRect(8,8,8,8);return c.toDataURL()})()");
   await main(`globalThis.testElectron=process.mainModule.require('electron');globalThis.uiSkin=${JSON.stringify(skinFixture)};globalThis.uiAccount={id:'ui-fixture',type:'microsoft',username:'界面验证账户',uuid:'00000000000000000000000000000001'};for(const [channel,handler] of [['accounts:selected',()=>uiAccount],['accounts:list',()=>[uiAccount]],['skin:profile',()=>({username:uiAccount.username,skins:[{id:'fixture',variant:'classic',dataUrl:uiSkin,url:''}],capes:[]})],['skin:history',()=>[]],['skin:avatar',()=>uiSkin]]){testElectron.ipcMain.removeHandler(channel);testElectron.ipcMain.handle(channel,handler)}`);
@@ -215,7 +248,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   // Return the diagnostic response before destroying its renderer. Completion
   // still requires the actual owned process to exit cleanly; a lost CDP reply
   // from immediate destruction must not be mistaken for a failed close.
-  const closeApp=async()=>{if(process.platform==='darwin')await main('setTimeout(()=>testElectron.app.quit(),500)');mainWs.close();await wait(100);if(process.platform!=='darwin')await evaluate("setTimeout(()=>window.kamucl.send('window:close'),100); true");for(let i=0;i<100&&child.exitCode===null;i++)await wait(100);assert.equal(child.exitCode,0)};
+  const closeApp=async()=>{if(process.platform==='darwin')await main(MAC_QUIT_INSPECTION);mainWs.close();await wait(100);if(process.platform!=='darwin')await evaluate("setTimeout(()=>window.kamucl.send('window:close'),100); true");for(let i=0;i<100&&child.exitCode===null;i++)await wait(100);assert.equal(child.exitCode,0)};
   if(process.env.KAMUCL_EXTENSION_ONLY){await closeApp();return}
   // Reset renderer caches populated by extension fixtures before the original regression.
   if(process.env.KAMUCL_EXTENSION_GUI)await reloadThemeReady('after-extensions')
@@ -271,15 +304,37 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
 
   await nav('settings');
   // Two scopes expose only their own categories; ordinary items stay compact.
-  await evaluate('[...document.querySelectorAll(".settings-scopes button")].find(e=>e.textContent==="游戏设置").click()');await wait(160);
+  const settingsScopeEvidence=[]
+  const settingsCoordinateClick=async(group,label)=>{
+    let state
+    for(let i=0;i<50;i++){
+      state=await evaluate(`(${readSettingsCoordinate.toString()})(${JSON.stringify(group)},${JSON.stringify(label)})`)
+      if(settingsCoordinateReady(state)){
+        await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,x:state.x,y:state.y})
+        await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,x:state.x,y:state.y})
+        settingsScopeEvidence.push({operation:'actual coordinate click',group,label,state});return
+      }
+      await wait(80)
+    }
+    throw Error('Actual settings coordinate did not become ready: '+JSON.stringify({group,label,state}))
+  }
+  const settingsScopeCheck=async(expected,name)=>{
+    const state=await evaluate(`(${readSettingsScopeState.toString()})()`)
+    settingsScopeEvidence.push({operation:'actual scope observation',expected,state})
+    fs.writeFileSync(path.join(shotDir,name+'.json'),JSON.stringify({classification:'Actual owned UI coordinate operations and section visibility; no product relocation or synthetic settings response',operations:settingsScopeEvidence},null,2))
+    await screenshot(name);assertSettingsScopeState(state,expected)
+    if(expected==='game')assert.equal(state.isolation.checked,true,'fixture default isolation remains enabled')
+    else assert.equal(fs.realpathSync.native(state.download.value),fs.realpathSync.native(games),'visible download location retains the actual default root')
+  }
+  await settingsCoordinateClick('.settings-scopes','游戏设置');await wait(160);
   assert.deepEqual(await evaluate('[...document.querySelectorAll(".settings-categories button")].map(e=>e.textContent)'),['运行环境','游戏窗口','目录与隔离']);await screenshot('settings-game-runtime');await checkLayout('settings-game-runtime');
   assert(await evaluate('[...document.querySelectorAll(".runtime-grid>[data-section]")].every(e=>e.getBoundingClientRect().height<350)'),'runtime defaults must stay compact');
-  await evaluate('[...document.querySelectorAll(".settings-categories button")].find(e=>e.textContent==="目录与隔离").click()');await screenshot('settings-game-directories');
-  assert(await evaluate('!!document.querySelector("[data-section=installation]").getClientRects().length'));
-  await evaluate('[...document.querySelectorAll(".settings-scopes button")].find(e=>e.textContent==="启动器设置").click()');await wait(160);
+  await settingsCoordinateClick('.settings-categories','目录与隔离');await wait(160);await settingsScopeCheck('game','settings-game-directories');
+  await settingsCoordinateClick('.settings-scopes','启动器设置');await wait(160);
   assert(await evaluate('[...document.querySelectorAll(".settings-categories button")].some(e=>e.textContent==="行为与登录")'));
   assert(!await evaluate('document.querySelector("[data-section=memory]").getClientRects().length'));
   await screenshot('settings-launcher-compact');
+  await settingsCoordinateClick('.settings-categories','下载');await wait(160);await settingsScopeCheck('launcher','settings-launcher-downloads');
   // Every indexed setting must lead to its actual, visible control group.
   const index=require('fs').readFileSync('src/shared/settingsCatalog.ts','utf8');
   const settingIds=[...index.matchAll(/id: '([^']+)', category: '[^']+', name: '([^']+)'/g)];
