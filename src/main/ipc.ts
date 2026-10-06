@@ -1034,13 +1034,37 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
 
   const modTargets = () => scanModTargets(settings.getSettings().folders.map(f => f.path), versions.scanInstalledFolder)
   ipcMain.handle(IPC.modsTargets, () => modTargets())
-  ipcMain.handle(IPC.modsPrepare, async (_e, ref: { id: string; folder: string }, input: { paths?: string[]; file?: CommunityFile }) => {
+  ipcMain.handle(IPC.modsPrepare, async (_e, ref: { id: string; folder: string }, input: { paths?: string[]; file?: CommunityFile }, operationId?: string) => {
     const target = selectModTarget(modTargets().versions, ref.id, ref.folder)
-    return prepareModInstall(target, input, emit)
+    const task = registerTask(`准备 MOD ${input.file?.fileName || '本地文件'}（尚未安装）`, 'download')
+    const progressGuard = new ProgressEventGuard()
+    let lastStage = 'mod-prepare'
+    const taskEmit = (event: ProgressEvent) => {
+      if (!['done', 'error'].includes(event.stage)) lastStage = event.stage
+      emit({ ...progressGuard.normalize(event), taskId: task.id, taskTitle: task.title, ...(typeof operationId === 'string' && /^[a-zA-Z0-9:_-]{1,96}$/.test(operationId) ? { operationId } : {}) })
+    }
+    taskEmit({ stage: 'mod-prepare', progress: 0, indeterminate: true, text: '读取 MOD 来源及兼容性，准备下载（尚未安装）…' })
+    try {
+      const plan = await community.withCommunitySignal(task.controller.signal, () => prepareModInstall(target, input, taskEmit, task.controller.signal))
+      send(IPC_EVENT.taskDone, { taskId: task.id, ok: true })
+      return plan
+    } catch (error) {
+      const cancelled = isCancelError(error)
+      if (!cancelled) taskEmit({ stage: 'error', progress: 0, text: `MOD 准备失败：${errText(error)}` })
+      send(IPC_EVENT.taskDone, { taskId: task.id, ok: false, error: errText(error), cancelled, stage: lastStage })
+      throw error
+    } finally { finishTask(task.id) }
   })
   ipcMain.handle(IPC.modsDiscard, (_e, id: string) => discardModPlan(String(id)))
-  ipcMain.handle(IPC.modsCommit, async (_e, id: string, includeDependencies: boolean) => {
+  ipcMain.handle(IPC.modsCommit, async (_e, id: string, includeDependencies: boolean, operationId?: string) => {
     const task = registerTask('安装 MOD 与前置依赖', 'download')
+    const progressGuard = new ProgressEventGuard()
+    let lastStage = 'mod-verify'
+    const taskEmit = (event: ProgressEvent) => {
+      if (!['done', 'error'].includes(event.stage)) lastStage = event.stage
+      emit({ ...progressGuard.normalize(event), taskId: task.id, taskTitle: task.title, ...(typeof operationId === 'string' && /^[a-zA-Z0-9:_-]{1,96}$/.test(operationId) ? { operationId } : {}) })
+    }
+    taskEmit({ stage: 'mod-verify', progress: 0, indeterminate: true, text: '准备下载前置及校验 MOD…' })
     try {
       const result = await executeModPlan(id, includeDependencies === true,
         ref => {
@@ -1048,11 +1072,13 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
           if (launch.getRunningVersionIds().has(ref.id)) throw new Error('目标实例正在运行，未安装任何 MOD；请退出该游戏后重试')
           return selectModTarget(modTargets().versions, ref.id, ref.folder!)
         },
-        e => emit({ ...e, taskId: task.id, taskTitle: task.title }), task.controller.signal)
+        taskEmit, task.controller.signal)
       send(IPC_EVENT.taskDone, { taskId: task.id, ok: true })
       return result
     } catch (error) {
-      send(IPC_EVENT.taskDone, { taskId: task.id, ok: false, error: errText(error), cancelled: isCancelError(error) })
+      const cancelled = isCancelError(error)
+      if (!cancelled) taskEmit({ stage: 'error', progress: 0, text: `MOD 安装失败：${errText(error)}` })
+      send(IPC_EVENT.taskDone, { taskId: task.id, ok: false, error: errText(error), cancelled, stage: lastStage })
       throw error
     } finally { finishTask(task.id) }
   })
@@ -1100,6 +1126,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
     void shell.openPath(dir)
   })
   ipcMain.handle(IPC.fsList, (_e, rel: string, folder?: string) => listDir(String(rel ?? ''), folder))
+  ipcMain.handle(IPC.fsPath, (_e, rel: string, folder?: string) => safeDir(String(rel ?? ''), folder))
   ipcMain.handle(IPC.fsRemove, async (_e, rel: string, name: string, folder?: string) => {
     const dir = await safeDir(String(rel ?? ''), folder)
     const parts = String(rel ?? '').split(/[\\/]+/).filter(Boolean)

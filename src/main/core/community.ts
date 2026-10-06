@@ -22,7 +22,8 @@ import { downloadAll } from './download'
 import { readVersionJson } from './versions'
 import { instanceDirectoryState } from './instances'
 import { getSettings } from './settings'
-import { MOD_ZH, chineseModSearchTerms } from './community-zh'
+import { MOD_ZH, chineseModSearchTerms, hasExactChineseModName } from './community-zh'
+import { lookupMcmod } from './mcmodSearch'
 import { effectiveCommunityFilter, matchesCommunityFilter, usesCommunityLoader, MODRINTH_RESOURCE_LOADERS, type CommunityFileFilter } from '../../shared/communityPolicy'
 import { communityPageSlots } from './communityPaging'
 import { logScope } from './launcherLog'
@@ -343,7 +344,7 @@ function withZhTitle(list: CommunityResult[]): CommunityResult[] {
   return list.map((r) => {
     const originalTitle = r.originalTitle ?? r.title
     const zh = MOD_ZH[r.slug]
-    if (zh && !r.title.startsWith(zh)) {
+    if (zh && !r.title.startsWith(zh) && !(r.originalTitle && r.title !== r.originalTitle)) {
       return { ...r, originalTitle, title: `${zh} | ${r.title}` }
     }
     return { ...r, originalTitle }
@@ -354,6 +355,50 @@ const sourceCounts = new Map<string, { total: number; time: number }>()
 const rawProviderSearch = (source: CommunitySource, q: CommunityQuery) => source === 'modrinth' ? mrSearch(q) : cfSearch(q)
 const aliasCatalogs = new Map<string, { time: number; items: CommunityResult[]; warnings: string[] }>()
 async function providerSearch(source: CommunitySource, q: CommunityQuery): Promise<CommunitySearchPage> {
+  if (q.kind === 'mod' && /[一-鿿]/.test(q.keyword) && !hasExactChineseModName(q.keyword)) {
+    const key = JSON.stringify({ ...q, source, offset: 0, limit: 0, mcmod: true })
+    let catalog = aliasCatalogs.get(key)
+    if (!catalog || Date.now() - catalog.time >= 60_000) {
+      const encyclopedia = await lookupMcmod(q.keyword)
+      if (!encyclopedia.entries.length) {
+        const page = await builtinProviderSearch(source, q)
+        return { ...page, warnings: [...(page.warnings ?? []), ...encyclopedia.warnings] }
+      }
+      // Keep domestic projects returned for the user's original query. MC百科
+      // provides an identity bridge, never a replacement download repository.
+      const original = await rawProviderSearch(source, { ...q, offset: 0, limit: 50 })
+      const items = [...original.items], warnings = [...(original.warnings ?? []), ...encyclopedia.warnings]
+      const linkedIdentities = [...new Map(encyclopedia.entries.flatMap(entry => entry.projects.filter(link => link.source === source).map(link => [link.slug, { ...link, title: entry.title } ] as const))).values()]
+      const identities = linkedIdentities.slice(0, 10)
+      if (linkedIdentities.length > 10) warnings.push('百科条目关联的来源项目较多，本次仅核对前 10 项；请使用完整中文名缩小范围。')
+      if (!identities.length) warnings.push(`MC百科条目未提供 ${source === 'modrinth' ? 'Modrinth' : 'CurseForge'} 项目链接，已保留原中文结果；可切换来源。`)
+      let cursor = 0
+      await Promise.all(Array.from({ length: Math.min(2, identities.length) }, async () => {
+        while (cursor < identities.length) {
+          const index = cursor++, identity = identities[index]
+          try {
+            const page = await rawProviderSearch(source, { ...q, keyword: identity.slug, offset: 0, limit: 50 })
+            // Do not pick similarly named forks, add-ons or the first search hit.
+            for (const item of page.items.filter(item => item.slug.toLowerCase() === identity.slug)) {
+              const originalTitle = item.originalTitle ?? item.title
+              items.push({ ...item, originalTitle, title: `${identity.title} | ${originalTitle}` })
+            }
+          } catch { warnings.push(`“${identity.title}”的 ${source === 'modrinth' ? 'Modrinth' : 'CurseForge'} 项目查询失败，可重试；未使用同名项目替代。`) }
+        }
+      }))
+      if (encyclopedia.entries.length) warnings.push('MC百科中文名称关联：仅使用百科条目明确链接且当前版本／加载器筛选匹配的来源项目。')
+      if (original.total > 50) warnings.push('原中文关键词匹配较多，本次百科关联合并前 50 项；请缩小关键词查看其他结果。')
+      // On an encyclopedia outage preserve the existing alias path and its full
+      // provider pagination; a failure must not turn into a cached empty match.
+      catalog = { time: Date.now(), items: [...new Map(items.map(item => [`${item.source}:${item.projectId}`, item])).values()], warnings: [...new Set(warnings)] }
+      if (aliasCatalogs.size >= 12) aliasCatalogs.delete(aliasCatalogs.keys().next().value!)
+      if (!encyclopedia.warnings.length && !warnings.some(warning => warning.includes('查询失败'))) aliasCatalogs.set(key, catalog)
+    }
+    return { items: catalog.items.slice(q.offset, q.offset + q.limit), total: catalog.items.length, offset: q.offset, limit: q.limit, warnings: catalog.warnings }
+  }
+  return builtinProviderSearch(source, q)
+}
+async function builtinProviderSearch(source: CommunitySource, q: CommunityQuery): Promise<CommunitySearchPage> {
   const terms = q.kind === 'mod' ? chineseModSearchTerms(q.keyword) : []
   if (!terms.length) return rawProviderSearch(source, q)
   if (terms.length === 1) {
@@ -401,17 +446,18 @@ export async function communitySearchPage(input: CommunityQuery): Promise<Commun
     return { ...page, items: withZhTitle(page.items) }
   }
   const sources: CommunitySource[] = ['modrinth', 'curseforge']
+  const warnings: string[] = []
   const counts = await Promise.allSettled(sources.map(async source => {
     const key = JSON.stringify({ ...q, source, offset: 0, limit: 1 })
     const cached = sourceCounts.get(key)
     if (q.offset > 0 && cached && Date.now() - cached.time < 60_000) return cached.total
     const page = await providerSearch(source, { ...q, source, offset: 0, limit: 1 })
+    warnings.push(...(page.warnings ?? []))
     if (sourceCounts.size > 100) sourceCounts.clear()
     sourceCounts.set(key, { total: page.total, time: Date.now() })
     return page.total
   }))
   if (counts.every(r => r.status === 'rejected')) throw (counts[0] as PromiseRejectedResult).reason
-  const warnings: string[] = []
   const totals = { modrinth: 0, curseforge: 0 }
   counts.forEach((result, i) => {
     if (result.status === 'fulfilled') totals[sources[i]] = result.value

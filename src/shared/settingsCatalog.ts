@@ -26,7 +26,7 @@ export const settingsCatalog = [
   { id: 'isolation', category: 'directories', name: '新版本默认隔离', keywords: '存档 模组 配置 独立 共享目录' },
   { id: 'memory', category: 'game', name: '内存分配', keywords: 'RAM 自动分配 GB 性能' },
   { id: 'java', category: 'game', name: 'Java 运行时', keywords: 'JDK JVM 路径 自动下载 检测 扫描 手动添加' },
-  { id: 'resolution', category: 'display', name: '游戏窗口分辨率', keywords: '宽 高 最大化 全屏 窗口化' },
+  { id: 'resolution', category: 'display', name: '游戏窗口分辨率', keywords: '宽 高 最大化 全屏 窗口化 退出游戏 自动保存 窗口大小 记住' },
   { id: 'jvm', category: 'game', name: 'JVM 参数', keywords: '高级 垃圾回收 GC G1GC 启动参数' },
   { id: 'launch', category: 'general', name: '启动器行为与正版登录', keywords: '启动后关闭启动器 微软 系统代理 Microsoft 登录' },
   { id: 'installation', category: 'downloads', name: '默认下载位置', keywords: '游戏文件夹 路径 游戏版本 安装目录 安装位置 新版本安装目录 新版本安装位置 游戏目录 版本目录 下载位置 默认下载目录 默认目录 绑定目录 D盘 C盘 存储' },

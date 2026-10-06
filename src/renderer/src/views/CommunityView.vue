@@ -510,7 +510,7 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
         <input data-ui="CommunityView:bc0450fd9c8f"
           v-model="query.keyword"
           class="input"
-          placeholder="输入资源名称，回车搜索…"
+          :placeholder="query.kind === 'mod' ? '输入 MOD 名称或 MC百科中文名，回车搜索…' : '输入资源名称，回车搜索…'"
           @keyup.enter="onSearch"
         />
         <button data-ui="CommunityView:ce39174e4563" class="btn btn-gold search-btn" :disabled="loading" @click="onSearch">

@@ -147,7 +147,7 @@ onBeforeUnmount(()=>{endGesture();disposed=true;contentResize?.disconnect();clea
 <template>
   <Teleport to="body">
     <div class="modal-mask skin-editor-mask" @keydown="keys"><section class="modal skin-editor" role="dialog" aria-modal="true" aria-label="绘制皮肤" :inert="finishingClose || askClose || uploadConfirm">
-      <header class="editor-header"><div><h2>绘制皮肤</h2><p class="muted">64 × 64 像素 · {{dirty?'有未保存更改':'已保存'}}</p></div><button ref="closeButton" class="icon-btn editor-close" :disabled="finishingClose" @click="requestClose()" aria-label="关闭绘制皮肤" data-modal-dismiss><UiGlyph name="close" /></button></header>
+      <header class="editor-header"><div><h2>绘制皮肤</h2><p class="muted">64 × 64 像素 · {{dirty?'有未保存更改':'已保存'}}</p></div><button ref="closeButton" type="button" class="icon-btn editor-close" :disabled="finishingClose" @click="requestClose()" aria-label="关闭绘制皮肤" data-modal-dismiss><UiGlyph name="close" /></button></header>
       <div ref="contentElement" class="editor-content" :style="{'--editor-tool-max-height':`${toolRailHeight}px`}" :class="{'preview-expanded':previewExpanded}" :inert="busy">
         <nav class="editor-tool-rail" aria-label="绘制工具">
           <button v-for="item in drawingTools" :key="item.key" class="editor-tool" :class="{selected:tool===item.key}" :aria-pressed="tool===item.key" :title="`${item.name} (${item.shortcut})`" :disabled="blocked" @click="tool=item.key"><UiGlyph :name="item.key" :size="24" /><span>{{item.name}}</span></button>
@@ -184,6 +184,9 @@ onBeforeUnmount(()=>{endGesture();disposed=true;contentResize?.disconnect();clea
 @media(max-height:620px) and (max-width:980px){.editor-header{padding:8px 16px}.editor-header h2{font-size:18px}.editor-header>div{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.editor-header p{font-size:11px;margin:0}.editor-footer{padding:7px 16px;gap:4px 8px}.editor-footer .btn{min-height:30px;font-size:11px}.editor-footer-save .btn{min-width:86px}.editor-operation-status{font-size:10px}.editor-content{padding-bottom:10px}.editor-model{height:clamp(224px,calc(100dvh - 172px),450px);min-height:224px}.editor-preview{min-height:120px}.editor-tool{min-height:42px;gap:3px;font-size:10px}.editor-tool svg{width:18px;height:18px}.editor-tool-rail{gap:5px}.editor-controls{padding:6px 8px;margin-top:6px}.editor-view-controls{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px}.view-tools{margin:0;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}.view-tools .btn{min-height:28px;font-size:10px}.view-tools svg{display:none}.editor-part-controls{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px}.editor-part-controls .control-heading{display:contents}.editor-part-controls .control-label{grid-column:1;grid-row:1;white-space:nowrap}.editor-show-all{grid-column:3;grid-row:1;white-space:nowrap;font-size:10px;padding:4px}.part-tools{grid-column:2;grid-row:1;margin:0;gap:4px}.part-tools .btn{font-size:10px;min-height:26px;padding:4px 6px}.editor-empty-parts{grid-column:1 / -1}.preview-camera{top:8px;right:8px;gap:5px}.preview-light{top:8px;left:8px}.preview-camera>.icon-btn,.preview-light{width:28px;height:28px}.preview-zoom .icon-btn{width:26px;height:26px}.editor-pointer-help{font-size:10px;bottom:5px}}
 </style>
 <style scoped>
+.skin-editor-mask{ -webkit-app-region:no-drag; }
+.editor-close{position:relative;z-index:1;-webkit-app-region:no-drag;}
+.editor-close :deep(svg){pointer-events:none;display:block;}
 .preview-zoom{display:flex;flex-direction:column}
 @media(max-width:980px){.editor-tool-rail{max-height:var(--editor-tool-max-height);overflow-y:auto}.editor-model{height:var(--editor-tool-max-height);min-height:var(--editor-tool-max-height);overflow:auto}}
 </style>

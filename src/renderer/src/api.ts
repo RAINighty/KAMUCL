@@ -291,8 +291,8 @@ export const prepareServerLaunch = (id: string, versionId?: string, folder?: str
 
 // ---------------- MOD 拖入即装 ----------------
 export const getModTargets = () => invoke<{ versions: InstalledVersion[]; errors: string[] }>(IPC.modsTargets)
-export const prepareModInstall = (target: { id: string; folder: string }, input: { paths?: string[]; file?: CommunityFile }) => invoke<ModInstallPlan>(IPC.modsPrepare, target, input)
-export const commitModInstall = (id: string, includeDependencies: boolean) => invoke<string>(IPC.modsCommit, id, includeDependencies)
+export const prepareModInstall = (target: { id: string; folder: string }, input: { paths?: string[]; file?: CommunityFile }, operationId?: string) => invoke<ModInstallPlan>(IPC.modsPrepare, target, input, operationId)
+export const commitModInstall = (id: string, includeDependencies: boolean, operationId?: string) => invoke<string>(IPC.modsCommit, id, includeDependencies, operationId)
 export const discardModInstall = (id: string) => invoke<void>(IPC.modsDiscard, id)
 export const parseMods = (paths: string[]) => invoke<ModInfo[]>(IPC.modsParse, paths)
 export const installMods = (files: string[], targetVersionId: string, folder?: string) =>
@@ -372,6 +372,7 @@ export const findModCrossDuplicates = (versionIds: string[], folder?: string) =>
 export const openDir = (rel = '', folder?: string) => invoke<void>(IPC.appOpenDir, rel, folder)
 /** 列出游戏目录下某个子目录的文件 */
 export const listFs = (rel: string, folder?: string) => invoke<FsEntry[]>(IPC.fsList, rel, folder)
+export const fsPath = (rel: string, folder?: string) => invoke<string>(IPC.fsPath, rel, folder)
 /** 删除游戏目录下某个子目录中的文件，返回删除后的列表 */
 export const removeFs = (rel: string, name: string, folder?: string) => invoke<FsEntry[]>(IPC.fsRemove, rel, name, folder)
 export const toggleDisableFs = (rel: string, name: string, folder?: string) => invoke<FsEntry[]>(IPC.fsToggleDisable, rel, name, folder)

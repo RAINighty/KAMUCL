@@ -1166,6 +1166,10 @@ onMounted(async () => {
         launchFail.title = '游戏启动失败'
         launchFail.text = s.text
       } else if (s.status === 'exited') {
+        if (s.savedWindowSize?.scope === 'global' && store.settings && JSON.stringify(store.settings.resolution) === JSON.stringify(s.savedWindowSize.previous)) {
+          store.settings.resolution = { ...s.savedWindowSize.resolution }
+        }
+        if (s.savedWindowSize?.scope === 'instance') void refreshInstalled().catch(() => undefined)
         if (shouldReportGameCrash(s)) {
           launchFail.open = true
           launchFail.title = `游戏异常退出（代码 ${signedExitCode(s.code ?? null) ?? '未知'}）`
@@ -1461,7 +1465,7 @@ onUnmounted(() => {
             </div>
             <div data-ui="App:61130e12d278" v-if="!store.tasks.length" class="notice-empty">没有进行中的任务</div>
             <div data-ui="App:9f518a7bbb67" v-else class="notice-list">
-              <div data-ui="App:ac5c4222257f" v-for="t in store.tasks" :key="t.id" class="dl-item" :class="'dl-' + t.status">
+              <div data-ui="App:ac5c4222257f" v-for="t in store.tasks" :key="t.id" :data-task-id="t.id" class="dl-item" :class="'dl-' + t.status">
                 <div data-ui="App:1147e17bfe61" class="dl-item-head">
                   <span data-ui="App:a4f0a4d42456" class="dl-title" :title="t.title">{{ t.title }}</span>
                   <span data-ui="App:7faad0b50853" v-if="t.status === 'running'" class="dl-actions">

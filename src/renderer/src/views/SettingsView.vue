@@ -115,6 +115,16 @@ async function changeWindowFit(event: Event) {
 }
 
 const defaultDownloadFolder = computed(() => store.settings?.folders.find(folder => folder.isDefault)?.path || store.settings?.activeFolder || store.settings?.gameDir || '')
+const windowSizeBusy = ref(false)
+const canRememberWindow = window.kamucl.platform === 'win32'
+async function toggleWindowSize(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!store.settings || windowSizeBusy.value) return
+  windowSizeBusy.value = true
+  try { await updateSettings({ rememberGameWindowSize: input.checked }) }
+  catch (error) { toast('保存窗口大小设置失败：' + errText(error), 'error') }
+  finally { windowSizeBusy.value = false; input.checked = store.settings?.rememberGameWindowSize === true }
+}
 const downloadFolderBusy = ref(false)
 const downloadFolderError = ref('')
 async function applyDownloadFolder(folder: string) {
@@ -1076,6 +1086,11 @@ async function onRemovePlugin(p: PluginInfo) {
           <p v-else class="muted group-hint">
             窗口化使用以上宽高；最大化使用启动时所在显示器的工作区；全屏不会修改显示器分辨率。
           </p>
+          <div class="remember-window-row">
+            <div><strong>退出游戏自动保存窗口化大小</strong><p class="muted group-hint">启用后从下次启动开始记录正常窗口化尺寸；异常退出不覆盖设置，实例专属尺寸单独保存。</p></div>
+            <label class="switch"><input type="checkbox" aria-label="退出游戏自动保存窗口化大小" :checked="store.settings.rememberGameWindowSize === true" :disabled="windowSizeBusy || !canRememberWindow" @change="toggleWindowSize"/><span class="switch-ui"></span></label>
+          </div>
+          <p v-if="!canRememberWindow" class="muted group-hint">当前仅支持 Windows 游戏窗口。</p>
         </div>
 
       </div>
@@ -1822,6 +1837,9 @@ async function onRemovePlugin(p: PluginInfo) {
 }
 
 /* 分辨率 */
+.remember-window-row { display:flex; align-items:center; gap:20px; margin-top:18px; padding-top:16px; border-top:1px solid var(--border); }
+.remember-window-row > div { flex:1; min-width:0; }
+.remember-window-row .switch { flex-shrink:0; }
 .resolution-row {
   display: flex;
   align-items: center;

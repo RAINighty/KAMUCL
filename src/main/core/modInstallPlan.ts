@@ -86,37 +86,45 @@ export async function prepareModInstall(target: InstalledVersion, input: { paths
   try {
     const roots: CommunityFile[] = []
     if (input.file) {
+      signal?.throwIfAborted()
       if (!input.file.source || !input.file.projectId) throw new Error('缺少项目来源，请重新打开下载页')
       const file = await repository.exact(input.file.source, input.file.projectId, input.file.fileId)
       if (!communityFileMatchesInstance(file, target)) throw new Error('所选 MOD 文件与目标实例不兼容')
       const dest = path.join(directory, path.basename(file.fileName))
-      emit({ stage: 'download', progress: 0, text: '读取所选 MOD，解析内置前置要求…' })
-      await downloadAll([{ url:file.url, dest, sha1:file.sha1, size:file.size || undefined }], (_d,_t,speed,detail) => emit({stage:'download', progress:detail.fraction ?? 0, text:'下载所选 MOD', speed, bytesDone:detail.bytesDone, bytesTotal:detail.bytesTotal ?? undefined, etaSeconds:detail.etaSeconds ?? undefined}), 8, 'official', signal)
+      emit({ stage: 'download', progress: 0, overall: 0, indeterminate: true, text: '读取所选 MOD，解析内置前置要求…' })
+      await downloadAll([{ url:file.url, dest, sha1:file.sha1, size:file.size || undefined }], (_d,_t,speed,detail) => emit({stage:'download', progress:detail.fraction ?? 0, overall:(detail.fraction ?? 0) * 0.85, indeterminate:detail.indeterminate, text:`下载所选 MOD：${file.fileName}`, speed, bytesDone:detail.bytesDone, bytesTotal:detail.bytesTotal ?? undefined, etaSeconds:detail.etaSeconds ?? undefined}), 8, 'official', signal)
       plan.roots.push(dest); roots.push(file)
     } else {
       for (const [index, file] of (input.paths ?? []).entries()) {
+        signal?.throwIfAborted()
         const destDir = path.join(directory, String(index)); fs.mkdirSync(destDir)
         const dest = path.join(destDir, path.basename(file)); fs.copyFileSync(file, dest); plan.roots.push(dest)
       }
     }
+    signal?.throwIfAborted()
+    emit({ stage: 'mod-prepare', progress: 0, overall: input.file ? 0.85 : 0, indeterminate: true, text: 'MOD 已准备，正在检测兼容性和必要前置（尚未安装）…' })
     if (!plan.roots.length) throw new Error('没有待安装的 MOD')
     const mods = plan.roots.map(parseModFile)
     for (const mod of mods) if (!modMatchesInstance(mod, target)) throw new Error(`${mod.name || mod.fileName}：${mod.error || '与目标实例的 MC / Loader 版本不兼容'}`)
     const installed = installedMods(target)
     const missing = missingRequirements(mods, target, [...installed, ...mods])
     const graph = await dependencyGraph(roots, target, repository)
+    signal?.throwIfAborted()
     const rootKeys = new Set(roots.map(f => `${f.source}:${f.fileId}`))
     plan.downloads = graph.filter(f => !rootKeys.has(`${f.source}:${f.fileId}`))
     // Local drops lack repository project IDs; resolve mod-id candidates separately.
     for (const req of [...new Map(missing.map(d => [d.id, d])).values()]) {
+      signal?.throwIfAborted()
       if (plan.downloads.some(f => f.projectId && f.projectId.replace(/[-_]/g, '') === req.id.replace(/[-_]/g, ''))) continue
       const candidate = await repository.find(req.id, target)
+      signal?.throwIfAborted()
       if (candidate) plan.downloads.push(...await dependencyGraph([candidate], target, repository))
       else if (!plan.downloads.length) plan.view.warnings.push(`无法自动定位前置 ${req.id} ${req.range}，请手动补齐后重试`)
     }
     const installedHashes = new Map<string, string>(), uniqueDownloads = [...new Map(plan.downloads.map(f => [`${f.source}:${f.fileId}`, f])).values()]
     plan.downloads = []
     for (const file of uniqueDownloads) {
+      signal?.throwIfAborted()
       let present = false
       if (file.sha1) for (const mod of installed) {
         let hash = installedHashes.get(mod.filePath)
@@ -128,7 +136,9 @@ export async function prepareModInstall(target: InstalledVersion, input: { paths
     plan.view.missing = missing.map(d => `${d.id} ${d.range}`)
     plan.view.files = [...mods.map(m => ({ name: m.name, version: m.version, dependency: false, fileName: m.fileName })),
       ...plan.downloads.map(f => ({ name: f.projectId ?? f.fileName, version: f.version, dependency: true, fileName: f.fileName, source: f.source, projectId: f.projectId }))]
+    signal?.throwIfAborted()
     plans.set(id, plan)
+    emit({ stage: 'done', progress: 1, overall: 1, indeterminate: false, text: '预下载及检测完成，等待确认安装（尚未写入实例）' })
     return plan.view
   } catch (error) { clean(plan); throw error }
 }
@@ -147,7 +157,9 @@ export async function executeModPlan(id: string, includeDependencies: boolean, r
     const rootMods = plan.roots.map(parseModFile)
     const staged = [...rootMods]
     const dependencies = includeDependencies ? plan.downloads.map((file,index) => ({ ...file, dest:path.join(plan.directory, 'dep-'+index, path.basename(file.fileName)) })) : []
-    await downloadAll(dependencies.map(f => ({url:f.url,dest:f.dest,sha1:f.sha1,size:f.size || undefined})), (_d,_t,speed,detail) => emit({stage:'download',progress:detail.fraction ?? 0,text:'下载必要前置',speed,bytesDone:detail.bytesDone,bytesTotal:detail.bytesTotal ?? undefined,etaSeconds:detail.etaSeconds ?? undefined}), 8, 'official', signal)
+    emit({ stage: dependencies.length ? 'download' : 'mod-verify', progress: 0, overall: 0, indeterminate: true, text: dependencies.length ? `准备下载 ${dependencies.length} 个必要前置…` : '正在校验已准备的 MOD…' })
+    await downloadAll(dependencies.map(f => ({url:f.url,dest:f.dest,sha1:f.sha1,size:f.size || undefined})), (_d,_t,speed,detail) => emit({stage:'download',progress:detail.fraction ?? 0,overall:(detail.fraction ?? 0)*0.85,indeterminate:detail.indeterminate,text:`下载 ${dependencies.length} 个必要前置`,speed,bytesDone:detail.bytesDone,bytesTotal:detail.bytesTotal ?? undefined,etaSeconds:detail.etaSeconds ?? undefined}), 8, 'official', signal)
+    emit({ stage: 'mod-verify', progress: 0, overall: dependencies.length ? 0.85 : 0, indeterminate: true, text: '下载已完成，正在校验兼容性、哈希与前置…' })
     for (const file of dependencies) {
       signal?.throwIfAborted()
       const mod = parseModFile(file.dest)
@@ -172,12 +184,15 @@ export async function executeModPlan(id: string, includeDependencies: boolean, r
       accepted.push(mod)
     }
     const dir = path.join(target.gameDirectory!, 'mods'); fs.mkdirSync(dir, { recursive: true })
+    emit({ stage: 'mod-commit', progress: 0, overall: 0.95, indeterminate: true, text: `正在写入 ${accepted.length} 个 MOD…` })
     for (const mod of accepted) {
       signal?.throwIfAborted()
       const dest = path.join(dir, path.basename(mod.fileName))
       fs.copyFileSync(mod.filePath, dest, fs.constants.COPYFILE_EXCL); created.push(dest)
     }
-    return `已安装 ${created.length} 个 MOD 到 ${dir}`
+    const message = `已安装 ${created.length} 个 MOD 到 ${dir}`
+    emit({ stage: 'done', progress: 1, overall: 1, indeterminate: false, text: message })
+    return message
   } catch (error) {
     // Only files created by this transaction, never existing user content.
     for (const file of created) fs.unlinkSync(file)

@@ -5,6 +5,7 @@ import { fetchVersionCatalog } from './versionCatalog'
 import { minecraftRuleOs } from '../../shared/platform'
 import { nativeLibraryForHost } from './platformNatives'
 import { resolveInstanceMetadata } from './instanceMetadata'
+import { cachedClientVersionEvidence, readClientVersionEvidence } from './instanceVersionEvidence'
 import { mavenIdentity } from './mavenIdentity'
 import { withFileJob } from './fileJobs'
 import { downloadLimiter } from './downloadLimits'
@@ -12,6 +13,7 @@ import { app, shell } from 'electron'
 import { recycleVersion } from './versionRemoval'
 import { samePath } from './folderPaths'
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type {
   GameResolution,
@@ -801,11 +803,21 @@ export function scanInstalledFolder(folder: string, onlyId?: string): {
     }
     try {
       const j = parseVersionFile(jp)
-      const resolved = resolveInstanceMetadata(j, id => {
+      const localParent = (id: string): VersionJson | undefined => {
         try {
           const local = versionJsonInFolder(root, id)
-          return parseVersionFile(fs.existsSync(local) ? local : baseVersionJsonPath(id))
+          const localBase = path.join(root, '.kamucl', 'base', id, `${id}.json`)
+          return parseVersionFile(fs.existsSync(local) ? local : fs.existsSync(localBase) ? localBase : baseVersionJsonPath(id))
         } catch { return undefined }
+      }
+      const resolved = resolveInstanceMetadata(j, localParent, chain => {
+        // Only unresolved metadata reads the client manifest/cache; listing never contacts a service.
+        const id = chain.length === 1 ? name : chain.at(-2)!.inheritsFrom!
+        const jar = chain.length === 1 ? path.join(dir, name, `${name}.jar`)
+          : fs.existsSync(versionJsonInFolder(root, id)) ? path.join(dir, id, `${id}.jar`)
+          : fs.existsSync(path.join(root, '.kamucl', 'base', id, `${id}.json`)) ? path.join(root, '.kamucl', 'base', id, `${id}.jar`)
+          : baseVersionJarPath(id)
+        return readClientVersionEvidence(jar) ?? cachedClientVersionEvidence(chain, [dir, path.join(root, '.kamucl', 'base'), path.dirname(baseVersionDir('_'))])
       })
       const item: InstalledVersion = { id: name, mcVersion: resolved.mcVersion, loader: resolved.loader, loaderVersion: resolved.loaderVersion, folder: root }
       if (j._modpackName) item.modpackName = j._modpackName
@@ -1038,7 +1050,13 @@ export function setVersionResolution(id: string, resolution: GameResolution | nu
   } else {
     delete version._resolution
   }
-  fs.writeFileSync(jp, JSON.stringify(version, null, 2), 'utf-8')
+  const temporary = `${jp}.window-size-${randomUUID()}.tmp`
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(version, null, 2), { encoding: 'utf-8', flag: 'wx' })
+    fs.renameSync(temporary, jp)
+  } finally {
+    try { fs.unlinkSync(temporary) } catch { /* Missing temporary file or failed cleanup never replaces the original. */ }
+  }
 }
 
 // ---------------- 版本隔离 ----------------

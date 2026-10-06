@@ -482,6 +482,11 @@ export const MOD_ZH_ALIASES: Record<string, string[]> = {
 export function normalizeChineseModKeyword(value: string): string {
   return value.normalize('NFKC').toLowerCase().replace(/\s+/g, '').replace(/(?:模组|模組|mod)$/i, '').replace(/[·：:()（）]/g, '')
 }
+/** A verified built-in exact name needs no network translation round trip. */
+export function hasExactChineseModName(keyword: string): boolean {
+  const key = normalizeChineseModKeyword(keyword)
+  return !!key && [...Object.keys(MOD_ZH_ALIASES), ...Object.keys(ZH_TO_SLUGS)].some(name => normalizeChineseModKeyword(name) === key)
+}
 /** Exact names win over substrings ("钠" must not become Sodium Extra). */
 export function chineseModSearchTerms(keyword: string): string[] {
   if (!/[一-鿿]/.test(keyword)) return []

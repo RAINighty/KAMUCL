@@ -12,6 +12,7 @@ import { getSettings, saveSettings } from './settings'
 import { runtimesDir } from './paths'
 import { downloadFile } from './download'
 import type { VersionJson } from './versions'
+import { isMinecraftVersionId } from './instanceMetadata'
 import { waitIfTaskPaused, isCancelError } from './tasks'
 import { logScope } from './launcherLog'
 import { JavaProbeCache } from './javaProbeCache'
@@ -865,11 +866,11 @@ export function hideJava(javaPath: string): void {
 }
 
 /** 推断运行该版本所需的 Java 主版本号 */
-export function requiredMajor(versionJson: VersionJson): number {
+export function requiredMajor(versionJson: VersionJson, verifiedMcVersion?: string): number {
   const declared = versionJson.javaVersion?.majorVersion
   if (declared && declared > 0) return declared
   // 按 MC 版本号推断（id 形如 1.20.5 / 1.18 / 1.8.9；自定义命名的原版取 _mcVersion）
-  const verId = versionJson.inheritsFrom ?? versionJson._mcVersion ?? versionJson.id
+  const verId = [verifiedMcVersion, versionJson.inheritsFrom, versionJson._mcVersion, versionJson.id].find(isMinecraftVersionId) ?? ''
   const m = /^1\.(\d+)(?:\.(\d+))?/.exec(verId)
   if (!m) {
     // 非 1.x 命名（如 26.2 新版号、24w14a 快照）：均为现代版本，需 Java 21
@@ -898,12 +899,12 @@ export function selectJavaByMajor<T extends { major: number; is64Bit: boolean; a
  * 返回 java 可执行文件绝对路径。
  */
 const javaPreparations = new ObservedPreparation<string, ProgressEvent>()
-export function ensureJava(versionJson: VersionJson, emit: ProgressEmit): Promise<string> {
+export function ensureJava(versionJson: VersionJson, emit: ProgressEmit, verifiedMcVersion?: string): Promise<string> {
   requireDesktopGamePlatform(process.platform)
   // NeoForge repair and game launch may need the same JRE concurrently. Never
   // let two downloads/extractions replace the same runtime under one another.
-  const key = `${pathKey(path.resolve(runtimesDir()))}:${requiredMajor(versionJson)}:${gameJavaArchitecture(versionJson) ?? process.arch}`
-  return javaPreparations.run(key, emit, progress => ensureJavaInternal(versionJson, progress))
+  const key = `${pathKey(path.resolve(runtimesDir()))}:${requiredMajor(versionJson, verifiedMcVersion)}:${gameJavaArchitecture(versionJson) ?? process.arch}`
+  return javaPreparations.run(key, emit, progress => ensureJavaInternal(versionJson, progress, verifiedMcVersion))
 }
 
 export async function selectHealthyJava(available: JavaInfo[], need: number, architecture?: string): Promise<JavaInfo | null> {
@@ -921,8 +922,8 @@ export async function selectHealthyJava(available: JavaInfo[], need: number, arc
   return null
 }
 
-async function ensureJavaInternal(versionJson: VersionJson, emit: ProgressEmit): Promise<string> {
-  const need = requiredMajor(versionJson)
+async function ensureJavaInternal(versionJson: VersionJson, emit: ProgressEmit, verifiedMcVersion?: string): Promise<string> {
+  const need = requiredMajor(versionJson, verifiedMcVersion)
   const started = Date.now()
   const architecture = gameJavaArchitecture(versionJson)
   const local = await selectHealthyJava(await scanJavaForLaunch(emit), need, architecture)

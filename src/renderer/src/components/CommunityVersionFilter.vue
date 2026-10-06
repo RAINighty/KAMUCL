@@ -46,7 +46,7 @@ onBeforeUnmount(close)
 </script>
 <template>
   <div class="community-version-filter">
-    <input ref="input" data-ui="CommunityView:df846b92dee0" v-model="text" class="input" aria-label="Minecraft 版本" role="combobox" aria-autocomplete="list" :aria-expanded="open" aria-controls="community-version-options" :aria-activedescendant="open && keyboardSelection ? 'community-version-option-' + active : undefined" :placeholder="loading ? '加载版本列表…' : '全部版本'" @focus="keyboardSelection = false; show()" @input="typing" @keydown="keyboard" @blur="close" />
+    <input ref="input" data-ui="CommunityView:df846b92dee0" v-model="text" class="input" aria-label="Minecraft 版本" role="combobox" aria-autocomplete="list" :aria-expanded="open" aria-controls="community-version-options" :aria-activedescendant="open && keyboardSelection ? 'community-version-option-' + active : undefined" :placeholder="loading ? '加载版本列表…' : '全部版本'" @focus="keyboardSelection = false; show()" @click="keyboardSelection = false; show()" @input="typing" @keydown="keyboard" @blur="close" />
     <Teleport to="body">
       <div v-if="open" ref="menu" id="community-version-options" data-ui="CommunityView:8e1248a50470" class="community-version-popup" :style="position" role="listbox" @wheel.stop>
         <button v-for="(version, i) in options" :id="'community-version-option-' + i" :key="version" type="button" role="option" :aria-selected="modelValue === version" :data-focused="active === i" :class="{ selected: modelValue === version }" @pointerdown.prevent @click="choose(version)">{{ version || '全部版本' }}</button>

@@ -394,6 +394,8 @@ export interface Settings {
   memoryOrganizeBeforeLaunch?: boolean
   jvmArgs: string
   resolution: GameResolution
+  /** Windows: remember the last observed normal game client size on clean exit; default off. */
+  rememberGameWindowSize?: boolean
   mirror: 'official' | 'bmclapi'
   /** 跨所有任务的 HTTP 并发上限。 */
   downloadThreads: number
@@ -665,6 +667,8 @@ export interface ManualModpackFile {
 }
 export interface ManualModpackRequest { token: string; files: ManualModpackFile[] }
 export interface ProgressEvent {
+  /** Optional renderer-generated correlation ID; separates simultaneous MOD dialogs. */
+  operationId?: string
   manualFiles?: ManualModpackRequest | null
   /** Concurrent preparation lanes; absent once the task enters its final commit stage. */
   parallelStages?: ParallelStage[]
@@ -695,6 +699,7 @@ export interface ProgressEvent {
 }
 
 export interface LaunchState {
+  savedWindowSize?: { scope: 'global' | 'instance'; previous: GameResolution; resolution: GameResolution }
   launchId?: string
   versionId?: string
   folder?: string
@@ -920,6 +925,7 @@ export const IPC = {
   appOpenDir: 'app:openDir', // (rel?: string) => void  用系统资源管理器打开目录
   fsImportResources: 'fs:importResources',
   fsList: 'fs:list', // (rel: string) => FsEntry[]
+  fsPath: 'fs:path', // (rel: string, folder?: string) => string; backend-resolved native path
   fsRemove: 'fs:remove', // (rel: string, name: string) => FsEntry[]
   fsToggleDisable: 'fs:toggleDisable', // (rel: string, name: string) => FsEntry[] —— 模组禁用/启用（.jar ↔ .jar.disabled）
 
