@@ -54,6 +54,7 @@ function defaults(): Settings {
     ...DEFAULT_DOWNLOAD_LIMITS,
     defaultIsolation: true,
     reduceMotion: false,
+    uiWindowAutoFit: false,
     msClientId: DEFAULT_MS_CLIENT_ID,
     theme: 'transparent',
     custom: structuredClone(DEFAULT_CUSTOM_THEME),
@@ -95,6 +96,7 @@ export function getSettings(): Settings {
     cached = {
       ...def,
       ...raw,
+      uiWindowAutoFit: raw.uiWindowAutoFit === true,
       ...normalizeVersionCategoryState(raw),
       visualDesign: cleanDesign(raw.visualDesign),
       resolution: { ...def.resolution, ...(raw.resolution ?? {}) },
@@ -171,6 +173,7 @@ export function getSettings(): Settings {
 
 /** 合并 patch 并写盘，返回合并后的完整 Settings */
 export function saveSettings(patch: Partial<Settings>): Settings {
+  if (Object.prototype.hasOwnProperty.call(patch, 'uiWindowAutoFit') && typeof patch.uiWindowAutoFit !== 'boolean') throw new Error('UI窗口自适应必须为开启或关闭')
   const cur = getSettings()
   validateDownloadLimits({ ...cur, ...patch })
   if (

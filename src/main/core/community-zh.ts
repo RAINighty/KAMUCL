@@ -471,3 +471,24 @@ export const ZH_TO_SLUGS: Record<string, string[]> = (() => {
   }
   return map
 })()
+
+/** Common community names supplement the display name, without changing project identity. */
+export const MOD_ZH_ALIASES: Record<string, string[]> = {
+  '玉': ['jade'], '物品管理器': ['jei', 'rei', 'emi'], '物品查询': ['jei', 'rei', 'emi'],
+  '机械动力前置': ['flywheel'], '小地图': ['xaeros-minimap', 'journeymap'],
+  '大地图': ['xaeros-world-map', 'journeymap'], '暮色': ['twilightforest'],
+  '万用皮肤': ['customskinloader'],
+}
+export function normalizeChineseModKeyword(value: string): string {
+  return value.normalize('NFKC').toLowerCase().replace(/\s+/g, '').replace(/(?:模组|模組|mod)$/i, '').replace(/[·：:()（）]/g, '')
+}
+/** Exact names win over substrings ("钠" must not become Sodium Extra). */
+export function chineseModSearchTerms(keyword: string): string[] {
+  if (!/[一-鿿]/.test(keyword)) return []
+  const key = normalizeChineseModKeyword(keyword)
+  if (!key) return []
+  const entries = [...Object.entries(MOD_ZH_ALIASES), ...Object.entries(ZH_TO_SLUGS)]
+  const exact = entries.filter(([name]) => normalizeChineseModKeyword(name) === key)
+  const candidates = exact.length ? exact : entries.filter(([name]) => normalizeChineseModKeyword(name).includes(key)).sort((a, b) => a[0].length - b[0].length)
+  return [...new Set(candidates.flatMap(([, slugs]) => slugs))].slice(0, 5)
+}

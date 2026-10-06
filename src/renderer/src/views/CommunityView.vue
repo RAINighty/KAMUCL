@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import ContentSkeleton from '../components/ContentSkeleton.vue'
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { communityDownload, communityFiles, communitySearch, errText, getManifest, getModTargets } from '../api'
 import { store, toast, selectedInstance, selectInstance, displayVersionName as versionLabel } from '../store'
 import { instanceKey } from '@shared/modCompatibility'
 import { communityFileMatchesInstance, usesCommunityLoader } from '@shared/communityPolicy'
 import { mcmodSearchUrl } from '@shared/communityLinks'
 import SelectMenu from '../components/SelectMenu.vue'
+import CommunityVersionFilter from '../components/CommunityVersionFilter.vue'
+import { readCommunitySession, saveCommunitySession } from '../communitySession'
+const previousSession = readCommunitySession()
 import MarqueeText from '../components/MarqueeText.vue'
 import ModInstallDialog from '../components/ModInstallDialog.vue'
 import CommunityFavorites from '../components/CommunityFavorites.vue'
@@ -52,8 +55,8 @@ const currentInstance = selectedInstance
 const allTargets = ref<InstalledVersion[]>([])
 const modRequest = ref<{ target: InstalledVersion; input: { file: CommunityFile } } | null>(null)
 const detailProject = ref<CommunityProjectReference | null>(null)
-const communityTab = ref<'browse' | 'favorites'>('browse')
-const favoriteSearch = ref('')
+const communityTab = ref<'browse' | 'favorites'>(previousSession?.tab ?? 'browse')
+const favoriteSearch = ref(previousSession?.favoriteSearch ?? '')
 watch(communityTab, tab => { if (tab === 'browse') void nextTick(updateKindBlob) })
 function sectionKeyboard(event: KeyboardEvent) {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -143,27 +146,7 @@ async function loadManifest() {
   }
 }
 
-/** 版本筛选下拉（支持输入搜索定位） */
-const versionInput = ref('')
-const versionDropdownOpen = ref(false)
-const filteredVersionOptions = computed(() => {
-  const kw = versionInput.value.trim().toLowerCase()
-  if (!kw) return manifestVersions.value.slice(0, 60)
-  return manifestVersions.value.filter((v) => v.toLowerCase().includes(kw)).slice(0, 60)
-})
-
-function pickVersion(v: string) {
-  query.mcVersion = v
-  versionInput.value = query.mcVersion
-  versionDropdownOpen.value = false
-  onFilterChange()
-}
-
-function applyVersionInput() {
-  query.mcVersion = versionInput.value.trim()
-  versionDropdownOpen.value = false
-  onFilterChange()
-}
+const versionInput = ref(previousSession?.versionInput ?? '')
 
 onMounted(() => void loadManifest())
 
@@ -175,6 +158,7 @@ const query = reactive({
   loader: currentInstance.value?.loader ?? '' as '' | LoaderName,
   sort: 'relevance' as 'relevance' | 'downloads' | 'newest'
 })
+if (previousSession) Object.assign(query, previousSession.query)
 // query 必须先初始化。过早运行 getter 会抛错，导致监听未订阅分类变化。
 watch(() => query.kind, () => nextTick(updateKindBlob), { flush: 'post' })
 const supportsLoader = computed(() => usesCommunityLoader(query.kind))
@@ -188,16 +172,16 @@ const sortOptions = [
 ]
 
 // ---------------- 搜索与列表 ----------------
-const results = ref<CommunityResult[]>([])
+const results = ref<CommunityResult[]>(previousSession?.results ?? [])
 const loading = ref(false)
 const loadingMore = ref(false)
-const searched = ref(false) // 是否已发起过搜索（区分初始空态）
-const loadError = ref('')
-const offset = ref(0)
-const hasMore = ref(false)
-const currentPage = ref(1)
-const totalResults = ref(0)
-const searchWarnings = ref<string[]>([])
+const searched = ref(previousSession?.searched ?? false) // 是否已发起过搜索（区分初始空态）
+const loadError = ref(previousSession?.error ?? '')
+const offset = ref(previousSession?.offset ?? 0)
+const hasMore = ref(previousSession?.hasMore ?? false)
+const currentPage = ref(previousSession?.page ?? 1)
+const totalResults = ref(previousSession?.total ?? 0)
+const searchWarnings = ref<string[]>(previousSession?.warnings ?? [])
 const totalPages = computed(() => Math.max(1, Math.ceil(totalResults.value / PAGE_SIZE)))
 const visiblePages = computed(() => {
   const start = Math.max(1, Math.min(currentPage.value - 2, totalPages.value - 4))
@@ -206,7 +190,13 @@ const visiblePages = computed(() => {
 const listCard = ref<HTMLElement | null>(null)
 
 let searchGeneration = 0
+let disposed = false
+onBeforeUnmount(() => {
+  saveCommunitySession({ query: { ...query }, tab: communityTab.value, favoriteSearch: favoriteSearch.value, versionInput: versionInput.value, results: results.value, searched: searched.value, error: loadError.value, offset: offset.value, hasMore: hasMore.value, page: currentPage.value, total: totalResults.value, warnings: searchWarnings.value, scrollTop: document.querySelector<HTMLElement>('.content')?.scrollTop ?? 0, topKeyword: store.searchKeyword, interrupted: loading.value || loadingMore.value })
+  disposed = true; searchGeneration++; fileGeneration++; openGeneration++
+})
 async function doSearch(reset: boolean, page = currentPage.value) {
+  if (disposed) return
   if (!reset && (loading.value || loadingMore.value)) return
   const generation = ++searchGeneration
   if (reset) {
@@ -315,7 +305,17 @@ function onReset() {
   void doSearch(true)
 }
 
-onMounted(() => { query.keyword = store.searchKeyword.trim(); void doSearch(true) })
+onMounted(async () => {
+  // A route-local snapshot keeps the query, loaded pages and scroll without retaining DOM.
+  const newKeyword = store.searchKeyword.trim()
+  if (!previousSession || (newKeyword && newKeyword !== previousSession.topKeyword.trim())) { query.keyword = newKeyword; void doSearch(true) }
+  else {
+    await nextTick()
+    const content = document.querySelector<HTMLElement>('.content')
+    if (content) content.scrollTop = previousSession.scrollTop
+    if (previousSession.interrupted) loadError.value = '上次查询在离开页面时中断，已保留原结果；请重试。'
+  }
+})
 
 // ---------------- 顶栏搜索联动：顶栏输入防抖驱动社区搜索 ----------------
 let topSearchTimer: ReturnType<typeof setTimeout> | null = null
@@ -423,12 +423,12 @@ async function openDownload(item: CommunityProjectReference, kind: CommunityKind
   modal.downloading = false
   try {
     const scanned = await getModTargets()
-    if (generation !== openGeneration || !modal.open) return
+    if (disposed || generation !== openGeneration || !modal.open) return
     allTargets.value = scanned.versions
     if (scanned.errors.length) toast('部分目录扫描失败：' + scanned.errors.join('；'), 'error')
     await loadFiles()
   } catch (e) {
-    if (generation === openGeneration) modal.filesError = '获取文件列表失败：' + errText(e)
+    if (!disposed && generation === openGeneration) modal.filesError = '获取文件列表失败：' + errText(e)
   } finally {
     if (generation === openGeneration) modal.loadingFiles = false
   }
@@ -526,35 +526,7 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
 
       <div class="filter-row">
         <SelectMenu aria-label="资源来源" v-model="query.source" class="filter-select" :options="sourceOptions" @change="onFilterChange" />
-        <!-- 可搜索版本下拉：完整 MC 版本列表（远程清单数据源） -->
-        <div data-ui="CommunityView:a7e5c548e576" class="ver-filter">
-          <input data-ui="CommunityView:df846b92dee0"
-            v-model="versionInput"
-            class="input ver-filter-input"
-            :placeholder="manifestLoading ? '加载版本列表…' : (query.mcVersion || '全部版本')"
-            @focus="versionDropdownOpen = true"
-            @input="versionDropdownOpen = true"
-            @change="applyVersionInput"
-            @keydown.enter.prevent="applyVersionInput"
-          />
-          <div data-ui="CommunityView:c262110ba1ea" v-if="versionDropdownOpen" class="menu-overlay" @click="versionDropdownOpen = false"></div>
-          <div data-ui="CommunityView:8e1248a50470" v-if="versionDropdownOpen" class="float-menu ver-filter-menu">
-            <button data-ui="CommunityView:45317b5bff2e" class="menu-item" :class="{ active: !query.mcVersion }" @mousedown.prevent @click="pickVersion('')">
-              全部版本
-            </button>
-            <button data-ui="CommunityView:7bf879d180c7"
-              v-for="v in filteredVersionOptions"
-              :key="v"
-              class="menu-item"
-              :class="{ active: query.mcVersion === v }"
-              @mousedown.prevent
-              @click="pickVersion(v)"
-            >
-              {{ v }}
-            </button>
-            <div data-ui="CommunityView:6570e9d15e20" v-if="!filteredVersionOptions.length" class="ver-menu-empty">无匹配版本</div>
-          </div>
-        </div>
+        <CommunityVersionFilter v-model="query.mcVersion" :versions="manifestVersions" :loading="manifestLoading" @change="versionInput = query.mcVersion; onFilterChange()" />
         <SelectMenu aria-label="加载器" v-if="supportsLoader" v-model="query.loader" class="filter-select" :options="loaderOptions" @change="onFilterChange" />
         <SelectMenu aria-label="排序" v-model="query.sort" class="filter-select" :options="sortOptions" @change="onFilterChange" />
       </div>
@@ -820,31 +792,6 @@ function selectDownloadInstance() { const target = targetOptions.value.find(v =>
   width: auto;
   flex: 1;
   min-width: 140px;
-}
-
-/* 可搜索版本下拉 */
-.ver-filter {
-  position: relative;
-  flex: 1.4;
-  min-width: 170px;
-}
-.ver-filter-input {
-  width: 100%;
-}
-.ver-filter-menu {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  left: 0;
-  right: 0;
-  max-height: 260px;
-  overflow-y: auto;
-  z-index: 9001;
-}
-.ver-menu-empty {
-  padding: var(--space-3);
-  text-align: center;
-  color: var(--text-dim);
-  font-size: var(--text-xs);
 }
 
 /* ---------------- 结果列表（卡片横向网格，窄窗口自动换行） ---------------- */

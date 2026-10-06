@@ -22,7 +22,7 @@ import { downloadAll } from './download'
 import { readVersionJson } from './versions'
 import { instanceDirectoryState } from './instances'
 import { getSettings } from './settings'
-import { MOD_ZH, ZH_TO_SLUGS } from './community-zh'
+import { MOD_ZH, chineseModSearchTerms } from './community-zh'
 import { effectiveCommunityFilter, matchesCommunityFilter, usesCommunityLoader, MODRINTH_RESOURCE_LOADERS, type CommunityFileFilter } from '../../shared/communityPolicy'
 import { communityPageSlots } from './communityPaging'
 import { logScope } from './launcherLog'
@@ -338,22 +338,6 @@ function mapCfFiles(files: CfFile[], projectId: string): CommunityFile[] {
 
 // ---------------- 对外：搜索 / 文件列表 ----------------
 
-const hasChinese = (s: string): boolean => /[一-鿿]/.test(s)
-
-// ---------------- 中文名检索（community-zh 映射表） ----------------
-
-/** 中文关键词反查 slug：中文名包含关键词的映射项（取前 5 个 slug） */
-function zhKeywordToSlugs(keyword: string): string[] {
-  const kw = keyword.trim().toLowerCase()
-  if (!kw || !hasChinese(kw)) return []
-  const out: string[] = []
-  for (const [zh, slugs] of Object.entries(ZH_TO_SLUGS)) {
-    if (zh.includes(kw)) out.push(...slugs)
-    if (out.length >= 5) break
-  }
-  return [...new Set(out)].slice(0, 5)
-}
-
 /** 给搜索结果标题加中文名前缀（slug 命中映射表时） */
 function withZhTitle(list: CommunityResult[]): CommunityResult[] {
   return list.map((r) => {
@@ -367,13 +351,48 @@ function withZhTitle(list: CommunityResult[]): CommunityResult[] {
 }
 
 const sourceCounts = new Map<string, { total: number; time: number }>()
-const providerSearch = (source: CommunitySource, q: CommunityQuery) => source === 'modrinth' ? mrSearch(q) : cfSearch(q)
+const rawProviderSearch = (source: CommunitySource, q: CommunityQuery) => source === 'modrinth' ? mrSearch(q) : cfSearch(q)
+const aliasCatalogs = new Map<string, { time: number; items: CommunityResult[]; warnings: string[] }>()
+async function providerSearch(source: CommunitySource, q: CommunityQuery): Promise<CommunitySearchPage> {
+  const terms = q.kind === 'mod' ? chineseModSearchTerms(q.keyword) : []
+  if (!terms.length) return rawProviderSearch(source, q)
+  if (terms.length === 1) {
+    const page = await rawProviderSearch(source, { ...q, keyword: terms[0] })
+    // A domestic project may advertise only its Chinese name. Never replace that
+    // user's query permanently with an alias that has no compatible results.
+    if (!page.total) return rawProviderSearch(source, q)
+    return { ...page, warnings: [...(page.warnings ?? []), `中文别名检索：${q.keyword} → ${terms[0]}`] }
+  }
+  // Multiple aliases are a bounded catalog, with honest totals for the retrieved
+  // union. Pagination slices the same deduplicated snapshot rather than mixing
+  // provider offsets from different searches.
+  const key = JSON.stringify({ ...q, source, offset: 0, limit: 0 })
+  let catalog = aliasCatalogs.get(key)
+  if (!catalog || Date.now() - catalog.time >= 60_000) {
+    const searches = [...new Set([q.keyword, ...terms])]
+    const pages: CommunitySearchPage[] = []
+    let cursor = 0
+    await Promise.all(Array.from({ length: Math.min(2, searches.length) }, async () => {
+      while (cursor < searches.length) {
+        const index = cursor++, keyword = searches[index]
+        const first = await rawProviderSearch(source, { ...q, keyword, offset: 0, limit: 50 })
+        const second = first.total > 50 ? await rawProviderSearch(source, { ...q, keyword, offset: 50, limit: 50 }) : undefined
+        pages[index] = { ...first, items: [...first.items, ...(second?.items ?? [])], warnings: first.total > 100 ? [`“${keyword}”匹配较多，本次中文别名检索仅合并前 100 项；可用具体英文名搜索完整结果。`] : [] }
+      }
+    }))
+    const items = [...new Map(pages.flatMap(page => page.items).map(item => [`${item.source}:${item.projectId}`, item])).values()]
+    catalog = { time: Date.now(), items, warnings: [...new Set([`中文别名检索：${terms.join('、')}`, ...pages.flatMap(page => page.warnings ?? [])])] }
+    if (aliasCatalogs.size >= 12) aliasCatalogs.delete(aliasCatalogs.keys().next().value!)
+    aliasCatalogs.set(key, catalog)
+  }
+  return { items: catalog.items.slice(q.offset, q.offset + q.limit), total: catalog.items.length, offset: q.offset, limit: q.limit, warnings: catalog.warnings }
+}
 
 /** 分页总数来自源站；中文别名也走相同筛选请求，禁止把未筛选项目塞回结果。 */
 export async function communitySearchPage(input: CommunityQuery): Promise<CommunitySearchPage> {
   const q: CommunityQuery = {
     ...input, ...effectiveCommunityFilter(input),
-    keyword: (input.kind === 'mod' ? zhKeywordToSlugs(input.keyword)[0] : undefined) ?? input.keyword.trim(),
+    keyword: input.keyword.trim(),
     offset: Math.max(0, Math.floor(input.offset || 0)),
     limit: Math.max(1, Math.min(50, Math.floor(input.limit || 20)))
   }
@@ -403,6 +422,7 @@ export async function communitySearchPage(input: CommunityQuery): Promise<Commun
     const own = slots.filter(slot => slot.source === source)
     if (!own.length) return { source, offset: 0, items: [] as CommunityResult[] }
     const page = await providerSearch(source, { ...q, source, offset: own[0].index, limit: own.length })
+    warnings.push(...(page.warnings ?? []))
     return { source, offset: own[0].index, items: page.items }
   }))
   const items = slots.flatMap(slot => {
@@ -410,7 +430,7 @@ export async function communitySearchPage(input: CommunityQuery): Promise<Commun
     const item = page.items[slot.index - page.offset]
     return item ? [item] : []
   })
-  return { items: withZhTitle(items), total: totals.modrinth + totals.curseforge, offset: q.offset, limit: q.limit, warnings }
+  return { items: withZhTitle(items), total: totals.modrinth + totals.curseforge, offset: q.offset, limit: q.limit, warnings: [...new Set(warnings)] }
 }
 
 import { favoriteIconUrl } from '../../shared/modFavorites'

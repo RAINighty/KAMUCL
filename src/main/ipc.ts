@@ -1,4 +1,5 @@
 import { currentPlatformInfo } from './platform'
+import { applyUiWindowAutoFit } from './uiWindowSizing'
 import { registerRecordingsIpc } from './core/recordingsIpc'
 import { probeImport } from './core/importProbe'
 import { registerSkinEditorIpc } from './core/skinEditorIpc'
@@ -205,6 +206,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.settingsSet, (_e, patch: Partial<Settings>) => {
     const saved = settings.saveSettings(patch)
     applyNativeAppearance(getWin(), saved)
+    applyUiWindowAutoFit(getWin(), saved.uiWindowAutoFit === true)
     return saved
   })
   ipcMain.handle(IPC.appSelectImage, async () => {

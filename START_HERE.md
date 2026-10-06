@@ -1,4 +1,18 @@
-# START HERE — KAMUCL 1.1.15 Windows
+# START HERE — KAMUCL 1.1.16 Windows
+
+## Current delivery
+
+本批交付 Windows x64 的 VoxLink 协议修复、社区前置勾选与关联、返回保留搜索、常见中文名查询、版本浮层、自适应开关和运行文件生成进度。默认自适应关闭：在“设置 → 启动器设置 → 外观 → UI 窗口自适应”开启。资源占用优化已撤回，Mac不在本批范围。
+
+附件为 KAMUCL-1.1.16.exe、紧凑/展开 Windows ZIP、源码、交接包及 SHA256SUMS.txt。普通 ZIP 解压运行便携 EXE；展开 ZIP 运行 KAMUCL.exe。使用自己的账号和游戏目录，不包含发送者玩家数据。用户数据、旧实例及收藏无需迁移。
+
+全量1232项中1231通过、0失败、1 Linux专属跳过；相关构建、原始界面与独立评分见 source/docs/validation-1.1.16/（独立源码位于 docs/validation-1.1.16/）。交接验证命令仍为 ["node","source/scripts/check-licenses.cjs"]，仅验证许可，不能代替游戏与联机验收。
+
+VoxLink验证到真实本地UDP与官方Java对端；尚未完成互联网两机、实际Minecraft与语音。社区真实中文查询与合成安装、进度回放分别标注；原卡住的整合包未取得。物理1366×768、完整模型动画基准及听感未覆盖。Windows未发行者签名。最终提交与源码/交接身份在外部 DELIVERY-1.1.16.json 和公开Release核对，避免自引用。
+
+## Historical 1.1.15 instructions
+
+以下保留上一版操作与历史证据，文件名、统计及摘要只适用于1.1.15，当前交付以上述1.1.16说明和CURRENT_STATUS为准。
 
 ## What this package contains
 

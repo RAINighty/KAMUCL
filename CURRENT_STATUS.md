@@ -1,4 +1,20 @@
-# CURRENT STATUS — KAMUCL 1.1.15 Windows
+# CURRENT STATUS — KAMUCL 1.1.16 Windows
+
+## Current batch identity and limits
+
+- Version: 1.1.16；香港分钟日志为2026-10-06 20:49。本批仅Windows x64，Electron44.3.0。
+- Product: release/KAMUCL-1.1.16.exe，97,293,239字节，SHA256 `1cd995f199944a4205f4e198eaa832f5ceb1a9ebbb832643af884ea43365fbec`；两个ZIP及源码/交接摘要由外部DELIVERY-1.1.16.json及公开SHA256SUMS核对。
+- Production inputs: 重新构建前冻结502项；严格Java→生成阶段断言找出旧ec0候选缺陷后重新构建。旧成品及原失败保留历史，不作为当前发布。
+- Verification: 最终全量1232/1231通过/0失败/1 Linux专属跳过；类型、许可、生产构建。四主题实际坐标、原生前台键盘、窗口适配、社区返回、前置失败恢复、版本浮层、进度回放及自然退出归属原件见 docs/validation-1.1.16/。各项合理性/功能性/外观≥8.5门槛由独立评审逐项判断。
+- Changes: VoxLink四块冗余恢复与快速重传；社区必要前置选择/关联；路由搜索与滚动保持；常见中文别名；版本浮层不被卡片遮挡；默认关闭自适应；运行文件生成等待原因、Java观察者和嵌套语义传播。
+- Classification: 真实平台中文元数据；真实本地UDP+上游Java；社区安装本地HTTP夹具与GUI合成响应；进度为原产品管线夹具事件回放。分类证据不相互代替。
+- Uncovered: 原反馈网络精确原因、互联网NAT/实际游戏/语音、原卡住包实机复现、物理1366×768、完整模型动效基准、人工听感和Mac。本版Windows未发行者签名。
+- Preserve: 用户设置、图片、收藏、全部历史计数、旧实例及pelican-bicycle.html；用户录像ZIP不公开。停止资源占用优化；不操作wuhui，不强推；main只cherry-pick保留独立历史。
+- Packaging: 源码保留Git blob字节；工作输入文本CRLF/LF等价性单列；后补QA/文档不视为成品重构建。交接干净解压和运输验证记录到外部回执。发布、标签、远端及六附件在发布后独立读取核对。
+
+## Historical 1.1.15 record
+
+以下原件仅说明上一版，不替代本轮身份与验证。
 
 ## Identity
 

@@ -151,7 +151,11 @@ async function pickJavaForInstaller(mcVersion: string, emit: ProgressEmit): Prom
 function runInstaller(javaPath: string, jar: string, emit: ProgressEmit, signal?: AbortSignal, target = gameDir()): Promise<void> {
   // External Java installers rewrite launcher_profiles.json in their target folder.
   // Only this final installer phase is serialized; version/file downloads remain concurrent.
-  return withFileJob(path.join(target, '.kamucl-installer'), signal, () => runInstallerUnlocked(javaPath, jar, emit, signal, target))
+  emit({ stage: 'loader-process', progress: 0, indeterminate: true, text: '等待同一游戏目录的安装器任务完成…' })
+  return withFileJob(path.join(target, '.kamucl-installer'), signal, () => {
+    emit({ stage: 'loader-process', progress: 0, indeterminate: true, text: '正在启动加载器安装器…' })
+    return runInstallerUnlocked(javaPath, jar, emit, signal, target)
+  })
 }
 
 function runInstallerUnlocked(javaPath: string, jar: string, emit: ProgressEmit, signal: AbortSignal | undefined, target: string): Promise<void> {
@@ -422,6 +426,7 @@ async function installLoaderInternal(
         { id: 'installer', label: '加载器下载', weight: 0.2 },
         { id: 'processor', label: '生成运行文件', weight: 0.2 }
       ], emit, '同步准备原版环境与加载器', [0, 0.9])
+      parallel.waiting('processor', '等待游戏本体、依赖库和加载器准备完成…')
       let resolvePrepared!: () => void, rejectPrepared!: (error: unknown) => void
       const prepared = { promise: new Promise<void>((resolve, reject) => { resolvePrepared = resolve; rejectPrepared = reject }),
         resolve: () => resolvePrepared(), reject: (error: unknown) => rejectPrepared(error) }
@@ -429,10 +434,12 @@ async function installLoaderInternal(
       await runParallelTasks([
         async signal => {
           await prepareVanilla(e => parallel.update('vanilla', e), signal, async signal => {
+            parallel.waiting('processor', '等待加载器依赖下载与校验完成…')
             await prepared.promise
             signal.throwIfAborted()
             const processorEmit: ProgressEmit = e => parallel.update('processor', e)
-            const javaPath = await pickJavaForInstaller(mcVersion, processorEmit)
+            processorEmit({ stage: 'java', progress: 0, indeterminate: true, text: '正在检查加载器所需的 Java 环境…' })
+            const javaPath = await pickJavaForInstaller(mcVersion, e => processorEmit({ ...e, progress: 0, overall: undefined, indeterminate: true }))
             // Forge/NeoForge 安装器要求目标目录存在 launcher_profiles.json，否则报错退出
             const lp = path.join(gameDir(), 'launcher_profiles.json')
             if (!fs.existsSync(lp)) {

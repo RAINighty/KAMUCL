@@ -369,6 +369,8 @@ export type VersionCategoryAction =
   | { type: 'assign'; target: { id: string; folder: string }; categoryId: string }
 
 export interface Settings {
+  /** Fit the launcher to available desktop space only when explicitly enabled. */
+  uiWindowAutoFit?: boolean
   /** Explicit reduction is additive to the operating system preference; absent means follow system. */
   reduceMotion?: boolean
   visualDesign?: import('./visualDesign').VisualDesign
@@ -645,6 +647,8 @@ export interface SkinHistoryEntry extends SkinHistoryItem {
 }
 export interface ParallelStage {
   id: string
+  /** Semantic child phase, so nested preparation does not hide Java→installer transitions. */
+  stage?: string
   label: string
   text: string
   progress: number
@@ -1046,7 +1050,7 @@ export interface ModRequirement { id: string; range: string }
 export interface ModInstallPlan {
   id: string
   target: InstalledVersion
-  files: Array<{ name: string; version: string; dependency: boolean; fileName: string }>
+  files: Array<{ name: string; version: string; dependency: boolean; fileName: string; source?: CommunitySource; projectId?: string }>
   missing: string[]
   warnings: string[]
 }

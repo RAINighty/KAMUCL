@@ -15,7 +15,8 @@ import type { VersionJson } from './versions'
 import { waitIfTaskPaused, isCancelError } from './tasks'
 import { logScope } from './launcherLog'
 import { JavaProbeCache } from './javaProbeCache'
-import { mapLaunchFiles, SharedPreparation } from './launchPreparation'
+import { mapLaunchFiles } from './launchPreparation'
+import { ObservedPreparation } from './observedPreparation'
 import { gameJavaArchitecture } from './javaArchitecture'
 import { requireDesktopGamePlatform } from '../../shared/platform'
 import { provisionJava, javaPackageSize } from './javaSources'
@@ -407,11 +408,13 @@ export function scanJava(refresh = false): JavaInfo[] {
 
 /** Same discovery/selection as scanJava, without serial child processes blocking
  * the renderer or the other launch preparation branches. */
-export async function scanJavaForLaunch(): Promise<JavaInfo[]> {
+export async function scanJavaForLaunch(emit?: ProgressEmit): Promise<JavaInfo[]> {
+  emit?.({ stage: 'java-scan', progress: 0, indeterminate: true, text: '正在检查本机 Java 与运行环境缓存…' })
   if (scanCache && Date.now() - scanCache.time < SCAN_TTL) return mergeCustom(scanCache.list)
   const persisted = cachedCompleteList(PERSISTENT_SCAN_TTL)
   if (persisted) return mergeCustom(persisted)
   const candidates = quickCandidates(false)
+  emit?.({ stage: 'java-scan', progress: 0, indeterminate: true, text: '正在检查 PATH 中的 Java…' })
   try {
     const output = await runTextProcess(IS_WIN ? 'where.exe' : 'which', ['java'], undefined, 10000)
     for (const executable of output.split(/\r?\n/).filter(Boolean)) candidates.push({ executable: executable.trim(), sourceDetail: 'PATH' })
@@ -423,6 +426,7 @@ export async function scanJavaForLaunch(): Promise<JavaInfo[]> {
     seen.add(pathKey(real)); return true
   })
   const found = await mapLaunchFiles(unique, async candidate => {
+    emit?.({ stage: 'java-scan', progress: 0, indeterminate: true, text: `正在验证 Java：${candidate.executable}` })
     const info = await probeJavaAsync(realExecutable(candidate.executable) ?? candidate.executable)
     return info ? { ...info, path: path.resolve(candidate.executable), source: 'auto' as const, sourceDetail: candidate.sourceDetail } : null
   })
@@ -893,13 +897,13 @@ export function selectJavaByMajor<T extends { major: number; is64Bit: boolean; a
  * Windows 为 zip（adm-zip 解压）；macOS/Linux 为 tar.gz（系统 tar 解压）。
  * 返回 java 可执行文件绝对路径。
  */
-const javaPreparations = new SharedPreparation<string>()
+const javaPreparations = new ObservedPreparation<string, ProgressEvent>()
 export function ensureJava(versionJson: VersionJson, emit: ProgressEmit): Promise<string> {
   requireDesktopGamePlatform(process.platform)
   // NeoForge repair and game launch may need the same JRE concurrently. Never
   // let two downloads/extractions replace the same runtime under one another.
   const key = `${pathKey(path.resolve(runtimesDir()))}:${requiredMajor(versionJson)}:${gameJavaArchitecture(versionJson) ?? process.arch}`
-  return javaPreparations.run(key, () => ensureJavaInternal(versionJson, emit))
+  return javaPreparations.run(key, emit, progress => ensureJavaInternal(versionJson, progress))
 }
 
 export async function selectHealthyJava(available: JavaInfo[], need: number, architecture?: string): Promise<JavaInfo | null> {
@@ -921,7 +925,7 @@ async function ensureJavaInternal(versionJson: VersionJson, emit: ProgressEmit):
   const need = requiredMajor(versionJson)
   const started = Date.now()
   const architecture = gameJavaArchitecture(versionJson)
-  const local = await selectHealthyJava(await scanJavaForLaunch(), need, architecture)
+  const local = await selectHealthyJava(await scanJavaForLaunch(emit), need, architecture)
   if (local) {
     if (local.major === need) javaLog.debug(`本机已有 Java ${need}（64位）：${local.path}`)
     else javaLog.info(`本机没有 Java ${need}，向上兼容选用 Java ${local.major}（${local.version}，64位）：${local.path}`)

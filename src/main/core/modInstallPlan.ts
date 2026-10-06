@@ -127,7 +127,7 @@ export async function prepareModInstall(target: InstalledVersion, input: { paths
     }
     plan.view.missing = missing.map(d => `${d.id} ${d.range}`)
     plan.view.files = [...mods.map(m => ({ name: m.name, version: m.version, dependency: false, fileName: m.fileName })),
-      ...plan.downloads.map(f => ({ name: f.projectId ?? f.fileName, version: f.version, dependency: true, fileName: f.fileName }))]
+      ...plan.downloads.map(f => ({ name: f.projectId ?? f.fileName, version: f.version, dependency: true, fileName: f.fileName, source: f.source, projectId: f.projectId }))]
     plans.set(id, plan)
     return plan.view
   } catch (error) { clean(plan); throw error }
