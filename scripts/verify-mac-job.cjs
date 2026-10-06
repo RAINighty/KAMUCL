@@ -40,7 +40,7 @@ let mount,attached=false,nativeDisplay
  const embedded=JSON.parse(require('asar').extractFile(path.join(appPath,'Contents/Resources/app.asar'),'package.json').toString())
  assert.equal(embedded.version,pkg.version)
  receipt.steps.push('clean native extraction or readonly mounted DMG, executable arch, ad-hoc signature and ASAR bytes verified');receipt.application=appPath;save()
- if(group==='parity'){
+ if(['ui','parity','favorites'].includes(group)){
   receipt.nativeDisplayProof=path.join(proof,'native-display113','display-proof.json');save()
   nativeDisplay=await require('./mac-native-display113.cjs').prepareNativeDisplay({outputDirectory:proof})
   assert.equal(nativeDisplay.proofFile,receipt.nativeDisplayProof)

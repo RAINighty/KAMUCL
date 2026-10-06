@@ -216,13 +216,62 @@ function preservePrimaryFailure(proof,error,save){
  try{save()}catch(diagnosticError){(proof.diagnosticErrors??=[]).push({stage:'primary failure receipt',name:diagnosticError.name,message:diagnosticError.message})}
  return error
 }
+function assertParityTrustedTarget(trace,expected){
+ assert(trace&&typeof trace==='object','original trusted-target receipt required')
+ assert.equal(trace.selector,expected.selector);assert.equal(trace.token,expected.token)
+ assert.equal(trace.timeOrigin,expected.timeOrigin);assert.equal(trace.url,expected.url);assert.equal(trace.overflow,false)
+ assert.deepEqual(trace.records.map(row=>row.type),['pointerdown','mousedown','pointerup','mouseup','click'],'one original trusted pointer/mouse/click sequence must target the intended control')
+ for(const row of trace.records){
+  assert.equal(row.isTrusted,true);assert.equal(row.matchesSelector,true,'the original native event must hit the intended target, not stale coordinates')
+  assert.equal(row.timeOrigin,expected.timeOrigin);assert.equal(row.url,expected.url)
+  assert.equal(row.renderer.hasFocus,true);assert.equal(row.renderer.hidden,false)
+  assert(Number.isFinite(row.at)&&Number.isFinite(row.x)&&Number.isFinite(row.y));assert(row.target&&typeof row.target.tag==='string')
+ }
+}
+function createParityCoordinate({call,evaluate,native,wait,identity,documentBinding,proof,save,now=()=>performance.now(),geometry=require('./qa-coordinate-geometry114.cjs')}){
+ return async(selector,{expectedLayout,deadline,absentSelectors=selector.startsWith('.download-modal')?['.download-modal .files-loading']:[]}={})=>{
+  const end=Math.min(deadline??Infinity,now()+10000),remaining=()=>Math.max(1,end-now())
+  const operation={label:'stable owned coordinate '+selector,classification:'Actual owned native/renderer geometry, two stable hits, one original input dispatch and trusted event targets; no DOM click or retry',selector,absentSelectors,deadline:end,samples:[],complete:false}
+  proof.operations.push(operation);save();let token,primaryError
+  try{
+   assert(now()<end,'Original coordinate deadline elapsed before observation')
+   await evaluate(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`,remaining())
+   const expected={pid:identity.pid,windowId:identity.windowId,webContentsId:identity.webContentsId,...documentBinding,...(expectedLayout?{zoom:expectedLayout.zoom}:{})}
+   const observed=await geometry.waitForStableCoordinate({expected,deadline:end,now,wait,onSample:row=>{operation.samples.push(row);save()},read:async()=>{
+    const actualNative=await native(identity,remaining())
+    assert(now()<end,'Original coordinate deadline elapsed before renderer observation')
+    return{native:actualNative,coordinate:await evaluate(geometry.coordinateExpression(selector,{absentSelectors}),remaining())}
+   }})
+   if(expectedLayout)assert(nativeNavigationLayoutReady(observed,operation.samples.at(-2)?.value,{...expectedLayout,pid:identity.pid,windowId:identity.windowId,webContentsId:identity.webContentsId}),'original native navigation geometry condition must remain satisfied')
+   assert(now()<end,'Original coordinate deadline elapsed before trusted-target observation')
+   token=await evaluate(geometry.trustedTargetStartExpression(selector),remaining());operation.token=token;save()
+   const point=observed.coordinate
+   for(const[type,buttons]of[['mouseMoved',0],['mousePressed',1],['mouseReleased',0]]){
+    assert(now()<end,'Original coordinate deadline elapsed before input dispatch')
+    const input={type,x:point.x,y:point.y,button:type==='mouseMoved'?'none':'left',buttons,clickCount:type==='mouseMoved'?0:1}
+    proof.inputEvents.push({method:'Input.dispatchMouseEvent',parameters:input,at:now()});save();await call('Input.dispatchMouseEvent',input,remaining())
+    assert(now()<end,'Original coordinate deadline elapsed during input dispatch')
+   }
+   operation.observed=observed;operation.complete=true;return point
+  }catch(error){primaryError=error;operation.error={name:error.name,message:error.message};throw error}
+  finally{
+   if(token!==undefined)try{
+    operation.trustedTargets=await evaluate(geometry.trustedTargetStopExpression(token),remaining())
+    assertParityTrustedTarget(operation.trustedTargets,{selector,token,...documentBinding})
+    assert(now()<end,'Original coordinate deadline elapsed during trusted-target observation')
+   }catch(error){operation.complete=false;operation.trustedTargetError={name:error.name,message:error.message};if(!primaryError)throw error}
+   finally{save()}
+   save()
+  }
+ }
+}
 module.exports=async function verifyMacParity(h){
  const{call,evaluate,main,wait,root,profile,games,version,phase,recordScreencast}=h
  assert.equal(process.platform,'darwin');assert(['first','restart'].includes(phase))
  const output=path.resolve(`out/mac-parity-${phase}.json`)
  assert(!fs.existsSync(output),'native phase receipt must be fresh; never replace old evidence')
  const sourceCommit=require('node:child_process').execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()
- const native=owned=>main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>${owned?`w.id===${owned.windowId}&&w.webContents.id===${owned.webContentsId}`:"w.webContents.getURL().includes('/renderer/index.html')"});if(!w)throw Error('Owned parity window unavailable');return{pid:process.pid,platform:process.platform,arch:process.arch,runtimeVersion:process.versions.electron,version:testElectron.app.getVersion(),executable:process.execPath,actualUserData:process.mainModule.require('node:fs').realpathSync.native(testElectron.app.getPath('userData')),windowId:w.id,webContentsId:w.webContents.id,bounds:w.getBounds(),contentBounds:w.getContentBounds(),zoom:w.webContents.getZoomFactor(),focused:w.isFocused(),visible:w.isVisible(),minimized:w.isMinimized(),appHidden:testElectron.app.isHidden()}})()`)
+ const native=(owned,timeoutMs)=>main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows().find(w=>${owned?`w.id===${owned.windowId}&&w.webContents.id===${owned.webContentsId}`:"w.webContents.getURL().includes('/renderer/index.html')"});if(!w)throw Error('Owned parity window unavailable');return{pid:process.pid,platform:process.platform,arch:process.arch,runtimeVersion:process.versions.electron,version:testElectron.app.getVersion(),executable:process.execPath,actualUserData:process.mainModule.require('node:fs').realpathSync.native(testElectron.app.getPath('userData')),windowId:w.id,webContentsId:w.webContents.id,bounds:w.getBounds(),contentBounds:w.getContentBounds(),zoom:w.webContents.getZoomFactor(),focused:w.isFocused(),visible:w.isVisible(),minimized:w.isMinimized(),appHidden:testElectron.app.isHidden()}})()`,timeoutMs)
  const proof={schemaVersion:1,version,phase,sourceCommit,startedAt:new Date().toISOString(),complete:false,fullParityAcceptance:false,classification:'Actual native packaged UI and real persistence. Instance metadata is disposable synthetic data and is never launched. Real public-service downloads are separately labelled. No credential login or physical listening claim.',navigation:[],screenshots:[],operations:[],inputEvents:[],uncovered:['Microsoft authenticated login/refresh/license/game','Yggdrasil account login/refresh and server launch','physical audio listening','two-user multiplayer services','physical Intel hardware'],identity:{...(await native()),sourceCommit,profile:fs.realpathSync.native(profile)}}
  assert.equal(proof.identity.actualUserData,proof.identity.profile,'the observed native profile must equal the owned persistent profile')
  assert.equal(proof.identity.pid,h.ownedTrack.pid);assert.equal(proof.identity.arch,process.arch)
@@ -230,25 +279,14 @@ module.exports=async function verifyMacParity(h){
  assert.equal(fs.realpathSync.native(proof.identity.executable),fs.realpathSync.native(process.env.KAMUCL_GUI_APP))
  await evaluate(`(${installMacParityObserver.toString()})()`)
  const save=()=>fs.writeFileSync(output,JSON.stringify(proof,null,2))
+ proof.documentBinding=await evaluate('({timeOrigin:performance.timeOrigin,url:location.href})')
  save()
  const until=async(label,read,accept,maximumMs=10000,deadline)=>{
   const started=performance.now(),samples=[];let value
   do{if(deadline!==undefined&&performance.now()>=deadline)break;value=await read();const at=performance.now();samples.push({at,value});if((deadline===undefined||at<deadline)&&accept(value)){proof.operations.push({label,classification:'actual observed state',samples,...(deadline===undefined?{}:{deadline})});save();return value}const remaining=deadline===undefined?75:deadline-performance.now();if(remaining<=0)break;await wait(Math.min(75,remaining))}while(performance.now()-started<maximumMs&&(deadline===undefined||performance.now()<deadline))
   proof.failure={label,samples,...(deadline===undefined?{}:{deadline,finishedAt:performance.now()})};save();assert.fail(label+' did not reach its required actual state')
  }
- const coordinate=async(selector,{expectedLayout,deadline}={})=>{
-  await evaluate(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`)
-  const read=()=>evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),renderer={width:innerWidth,height:innerHeight,hasFocus:document.hasFocus(),hidden:document.hidden,pixelRatio:devicePixelRatio};if(!e)return{hit:false,renderer};const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return{hit:!!r.width&&!!r.height&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&!e.disabled&&!e.closest('[inert]')&&e.contains(document.elementFromPoint(x,y)),x,y,bounds:r.toJSON(),renderer,label:e.getAttribute('aria-label')||e.textContent.trim()}})()`)
-  let previous
-  const observed=expectedLayout?await until('stable native navigation coordinate '+selector,async()=>({requestedLayout:expectedLayout,native:await native(proof.identity),coordinate:await read()}),value=>{const ready=nativeNavigationLayoutReady(value,previous,{...expectedLayout,pid:proof.identity.pid,windowId:proof.identity.windowId,webContentsId:proof.identity.webContentsId});previous=value;return ready},10000,deadline):await until('visible coordinate '+selector,read,r=>r.hit)
-  const row=expectedLayout?observed.coordinate:observed
-  assert(deadline===undefined||performance.now()<deadline,'Original navigation deadline elapsed before coordinate dispatch')
-  for(const[type,buttons]of[['mouseMoved',0],['mousePressed',1],['mouseReleased',0]]){
-   const input={type,x:row.x,y:row.y,button:type==='mouseMoved'?'none':'left',buttons,clickCount:type==='mouseMoved'?0:1}
-   proof.inputEvents.push({method:'Input.dispatchMouseEvent',parameters:input,at:performance.now()});await call('Input.dispatchMouseEvent',input)
-  }
-  return row
- }
+ const coordinate=createParityCoordinate({call,evaluate,native,wait,identity:proof.identity,documentBinding:proof.documentBinding,proof,save})
  const textCoordinate=async(scope,text)=>{
   const index=await evaluate(`(()=>{const list=[...document.querySelectorAll(${JSON.stringify(scope+' button')})];return list.findIndex(e=>e.textContent.trim()===${JSON.stringify(text)})})()`)
   assert(index>=0,'missing visible business control '+text)
@@ -449,6 +487,7 @@ module.exports=async function verifyMacParity(h){
   }
   proof.complete=true;proof.finishedAt=new Date().toISOString();save()
  }catch(error){preservePrimaryFailure(proof,error,save);try{await screenshot('mac-parity-'+phase+'-failure')}catch{}throw error}
+ finally{try{proof.trustedTargetObserverRestoration=await evaluate(require('./qa-coordinate-geometry114.cjs').trustedTargetRestoreExpression());save();assert.equal(proof.trustedTargetObserverRestoration.complete,true)}catch(error){proof.complete=false;proof.trustedTargetRestorationError={name:error.name,message:error.message};save();if(!proof.error){preservePrimaryFailure(proof,error,save);throw error}}}
 }
 async function coordinatePosition(evaluate,selector){return evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!e.contains(document.elementFromPoint(x,y)))throw Error('actual queue hit target obscured');return{x,y}})()`)}
-Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertEditableNativeTextInput,nativeInputLayoutReady,nativeNavigationLayoutReady,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,readDownloadSelectionState,assertMatchingDownloadResponse,assertDownloadTargetSelection,readMountedInstallInput,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure})
+Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertEditableNativeTextInput,nativeInputLayoutReady,nativeNavigationLayoutReady,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,readDownloadSelectionState,assertMatchingDownloadResponse,assertDownloadTargetSelection,readMountedInstallInput,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure,assertParityTrustedTarget,createParityCoordinate})

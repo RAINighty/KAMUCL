@@ -1,4 +1,14 @@
-# START HERE — KAMUCL 1.1.13
+# START HERE — KAMUCL 1.1.14 Mac ARM64 接续候选
+
+2026-10-06 13:52（Asia/Hong_Kong）：用户恢复 Mac ARM64，资源占用优化仍停止。Windows x64 / Mac ARM64 继续共用 Electron 44.3.0、当前界面、素材及收藏模组安装修复；Mac 陶瓦启动修复使本批递增至 1.1.14。Intel、Linux、鸿蒙未恢复。1.1.13 Windows 已公开发布，原附件与标签保持不变。
+
+Mac 使用 ZIP 中的 KAMUCL.app，或挂载 DMG 后复制到自己的应用目录；系统要求 macOS 13 或以上、Apple Silicon。现阶段是候选，尚未满足完整放行：原生构建、启动、更新、目录和陶瓦检查通过，DMG 四主题界面通过，但最新 APP 图库及操作坐标验收须复验，1.20.1 收藏安装的游戏世界检查在虚拟图形测试机仍未通过。具体证据和历史失败见 `docs/validation-1.1.14/README.md`。ad-hoc 签名校验不等于 Developer ID 签名或 Apple 公证，人工听感尚未覆盖。
+
+接收者自行登录并选择自己的游戏目录。源码开发需要 Node.js 24、锁定依赖及 JDK 17+；使用 `npm ci`、`node scripts/build-bridge.cjs`、`npm test`、`npx tsc --noEmit`、`npm run license:check`、`npm run build`。交接包便携验证命令为 `["node", "source/scripts/check-licenses.cjs"]`，仅验证许可，不替代原生功能或游戏验收。源码、交接包不含用户凭据、图片、整合包、存档、依赖缓存或 `pelican-bicycle.html`。每份成品与真实源码身份、SHA256、最终验收和未覆盖项由对应交付清单注明，不用旧包或跨运行证据拼成通过。
+
+---
+
+# Historical START HERE — KAMUCL 1.1.13
 
 2026-10-06 11:54（Asia/Hong_Kong）：本次交付范围已按用户最新要求缩为 Windows x64，继续完成收藏模组漏装修复。Mac ARM64 制作暂停，不提供本版 Mac 附件；资源优化和完整占用对照停止，已有改动保留，不宣称整机资源收益。下方此前双平台及资源门控计划保留为历史，不能作为当前放行规则。
 

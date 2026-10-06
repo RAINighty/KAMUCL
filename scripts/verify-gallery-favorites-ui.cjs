@@ -44,6 +44,10 @@ function verifyCarouselReadiness(snapshot,state,requestStartedAt,observedAt){
  const present=new Set(snapshot.images.map(image=>image.src)),active=snapshot.images.filter(image=>image.active)
  assert.equal(active.length,1)
  state.initialSource??=active[0].src
+ // Event-driven observation must retain the original decode deadline even
+ // when no DOM event occurred at that deadline. A late load or removal cannot
+ // turn an already overdue, actually observed pending resource into success.
+ for(const bound of state.mounted.values())if(bound.decodingPending)assert(observedAt-bound.earliestMountAt<4000,'carousel resource exceeded its original readiness bound before decode or removal')
  for(const source of state.mounted.keys())if(!present.has(source))state.mounted.delete(source)
  const rows=[]
  for(const image of snapshot.images){
@@ -54,12 +58,54 @@ function verifyCarouselReadiness(snapshot,state,requestStartedAt,observedAt){
   // Once initial presentation is ready, an undecoded active layer is a failure.
   if(image.active&&!decoded&&(state.initialDecoded||image.src!==state.initialSource))assert.fail('active carousel image must decode before presentation')
   if(!decoded)assert(observedAt-bound.earliestMountAt<4000,'carousel resource did not decode within its original readiness bound: '+image.src)
+  if(!decoded)bound.decodingPending=true
+  else{if(bound.decodingPending)bound.firstDecodedAt=observedAt;bound.decodingPending=false}
   if(image.active&&decoded)state.initialDecoded=true
   rows.push({src:image.src,active:image.active,decoded,...bound,deadline:bound.earliestMountAt+4000})
  }
  state.previousRequestStartedAt=requestStartedAt
  state.previousObservedAt=observedAt
  return{ready:rows.every(row=>row.decoded),rows,classification:'Original four-second bound per actual retained-source mount; previous observation request is the conservative lower time bound, never a later first-seen grace period'}
+}
+// Capture actual presentation changes in the renderer's own event loop. CDP
+// round trips can exceed this fixture's one-second image duration on a busy
+// native runner; their arrival time must not erase an intervening real frame.
+function installCarouselPresentationObserver(banners,readSnapshot){
+ const hero=document.querySelector('.hero-card');if(!hero)throw Error('Mounted carousel missing')
+ if(window.__carouselPresentation)throw Error('Carousel observer already installed')
+ const state={timeOrigin:performance.timeOrigin,events:[],errors:[],closed:false};let lastSignature
+ const capture=reason=>{
+  if(state.closed)return
+  const at=Date.now(),monotonic=performance.now()
+  try{
+   const snapshot=readSnapshot(banners),signature=JSON.stringify({images:snapshot.images.map(image=>[image.key,image.src,image.active,image.complete,image.naturalWidth]),hidden:snapshot.documentHidden,timers:snapshot.timers})
+   if(signature===lastSignature)return
+   if(state.events.length>=2048)throw Error('Original carousel event buffer overflow')
+   lastSignature=signature;state.events.push({at,monotonic,timeOrigin:performance.timeOrigin,reason,snapshot})
+  }catch(error){state.errors.push({at,monotonic,reason,error:String(error?.stack||error)})}
+ }
+ const observer=new MutationObserver(()=>capture('actual DOM mutation'))
+ observer.observe(hero,{subtree:true,childList:true,attributes:true,attributeFilter:['class','src']})
+ const loaded=event=>{if(event.target?.classList?.contains('hero-image'))capture('actual image '+event.type)}
+ const visibility=()=>capture('actual document visibility')
+ hero.addEventListener('load',loaded,true);hero.addEventListener('error',loaded,true)
+ document.addEventListener('visibilitychange',visibility)
+ state.stop=(from=0)=>{if(!state.closed){observer.disconnect();hero.removeEventListener('load',loaded,true);hero.removeEventListener('error',loaded,true);document.removeEventListener('visibilitychange',visibility);state.closed=true}return{from,count:state.events.length,timeOrigin:state.timeOrigin,errors:[...state.errors],events:state.events.slice(from),closed:state.closed}}
+ window.__carouselPresentation=state;capture('initial actual presentation')
+ return{timeOrigin:state.timeOrigin,startedAt:Date.now(),monotonicStartedAt:performance.now(),classification:'Read-only renderer DOM mutation and image-load observations with original wall and monotonic clocks; no timers, pixels, VNodes or application state changed'}
+}
+function verifyCarouselEventBatch(batch,cursor){
+ assert.equal(batch.timeOrigin,cursor.timeOrigin,'carousel renderer must not reload during the cycle')
+ assert.deepEqual(batch.errors,[],'all original renderer observations must succeed')
+ assert.equal(batch.from,cursor.offset,'carousel event stream must not drop or repeat observations')
+ assert.equal(batch.count,batch.from+batch.events.length,'complete original event batch required')
+ for(const event of batch.events){
+  assert.equal(event.timeOrigin,cursor.timeOrigin)
+  assert(Number.isFinite(event.at)&&Number.isFinite(event.monotonic))
+  assert(event.monotonic>=cursor.monotonic,'original renderer event clocks must remain ordered')
+  cursor.monotonic=event.monotonic
+ }
+ cursor.offset=batch.count;return batch.events
 }
 module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,version})=>{
  const textClick=async(scope,text)=>evaluate(`(()=>{const b=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)});if(!b)throw Error('Missing '+${JSON.stringify(text)});b.click()})()`);
@@ -149,16 +195,22 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  }
  const cycleSettings=await settings();assert.equal(cycleSettings.launchThumbnail.randomPlayback,false);assert(expectedKeys.every(key=>cycleSettings.launchThumbnail.durations[key]===1));carouselResourceReadiness.push({cycleSettings:cycleSettings.launchThumbnail,classification:'Real duration editor change handlers and original saved settings; complete timer cycle still required within original bounds'});writeLiveProof()
  await nav('home');await activateGallery('multiple enabled images',1);assert.equal(await evaluate('window.__galleryTimers.size'),1)
- const readCarousel=()=>evaluate(`(${readMountedCarousel.toString()})(${JSON.stringify(actualPlaylist)})`)
- const rotation=[],rotationStarted=Date.now(),readiness={mounted:new Map(),previousRequestStartedAt:rotationStarted,initialSource:null,initialDecoded:false};let cycleComplete=false
+ const observerStart=await evaluate(`(${installCarouselPresentationObserver.toString()})(${JSON.stringify(actualPlaylist)},${readMountedCarousel.toString()})`);carouselResourceReadiness.push({observerStart});writeLiveProof()
+ const rotation=[],rotationStarted=Date.now(),readiness={mounted:new Map(),previousRequestStartedAt:0,initialSource:null,initialDecoded:false},eventCursor={offset:0,timeOrigin:observerStart.timeOrigin,monotonic:0};let cycleComplete=false
  while(Date.now()-rotationStarted<15000){
-  await wait(80);const requestStartedAt=Date.now(),snapshot=await readCarousel();const proof={at:Date.now(),requestStartedAt,snapshot};carouselResourceReadiness.push(proof);writeLiveProof();assert.equal(snapshot.documentHidden,false);assert.equal(snapshot.timers,1)
+  await wait(80);const batchRequestStartedAt=Date.now(),batch=await evaluate(`(()=>{const state=window.__carouselPresentation;if(!state)throw Error('Actual carousel observation stream missing');return{from:${eventCursor.offset},count:state.events.length,timeOrigin:state.timeOrigin,errors:state.errors,events:state.events.slice(${eventCursor.offset})}})()`),batchReturnedAt=Date.now();carouselResourceReadiness.push({batchRequestStartedAt,batchReturnedAt,batch});writeLiveProof()
+  for(const event of verifyCarouselEventBatch(batch,eventCursor)){
+  assert(event.monotonic-observerStart.monotonicStartedAt<15000,'complete actual carousel cycle must be captured within the original fifteen-second limit')
+  const {snapshot}=event,requestStartedAt=event.at;readiness.previousRequestStartedAt||=requestStartedAt;const proof={...event,requestStartedAt,source:'Original renderer event, not CDP response arrival'};carouselResourceReadiness.push(proof);writeLiveProof();assert.equal(snapshot.documentHidden,false);assert.equal(snapshot.timers,1)
   proof.readiness=verifyCarouselReadiness(snapshot,readiness,requestStartedAt,proof.at);writeLiveProof();if(!proof.readiness.ready)continue
   const observed=verifyRetainedCarousel(snapshot,expectedKeys)
   if(rotation.at(-1)?.current!==observed.current){if(rotation.length)assert.equal(observed.current,(rotation.at(-1).current+1)%expectedKeys.length,'real timer follows complete saved cyclic order');rotation.push(observed)}
   cycleComplete=rotation.length>=expectedKeys.length+1&&new Set(rotation.slice(0,expectedKeys.length).map(row=>row.current)).size===expectedKeys.length&&rotation.at(-1).current===rotation[0].current
   if(cycleComplete)break
+  }
+  if(cycleComplete)break
  }
+ const finalEventBatch=await evaluate(`window.__carouselPresentation.stop(${eventCursor.offset})`);verifyCarouselEventBatch(finalEventBatch,eventCursor);assert.equal(finalEventBatch.closed,true);carouselResourceReadiness.push({finalEventBatch,classification:'Atomic stop and remaining original event closure; tail is retained and never used to manufacture a completed cycle'});writeLiveProof()
  assert(cycleComplete,'all eight logical images must rotate through one complete actual timer cycle without retaining more than three DOM image layers');carouselResourceReadiness.push({complete:true,expectedKeys,rotation,fixtureDurationsSeconds:1});writeLiveProof()
  // Theme code uses bundled IDs directly, remaps managed references, and keeps disabled data.
  const code=await evaluate("window.kamucl.invoke('appearance:exportTheme')");const payload=JSON.parse(gunzipSync(Buffer.from(code.slice(8),'base64')));assert(payload.launchThumbnail.order.includes('builtin:piston'));assert(payload.launchThumbnail.disabled[0].startsWith('image-'));
@@ -185,10 +237,11 @@ module.exports=async({call,evaluate,main,click,nav,screenshot,wait,root,profile,
  await evaluate(`window.kamucl.invoke('settings:set',{launchThumbnail:${JSON.stringify(original.launchThumbnail)}})`);await nav('home');await evaluate('window.setInterval=window.__gallerySet;window.clearInterval=window.__galleryClear');
  result={version,builtins:7,mixed:true,disabledPreservesFiles:true,zeroAndSingleNoTimer:true,mixedOrder:reordered,logicalPlaylistCount:expectedKeys.length,completeRealRotation:cycleComplete,maxDecodedLayers:Math.max(...carouselResourceReadiness.filter(row=>row.snapshot).map(row=>row.snapshot.images.length)),themeRoundtrip:true,externalBothSources:true,detailAndInstallSynced:true,writeFailureRecoverable:true,serviceClassification:'Isolated synthetic search, compatibility metadata and injected write failure; no real downloads or game installation in this module.'};
  }finally{
+  const finalObserverClosure=await evaluate('window.__carouselPresentation?.stop(0)??null');if(finalObserverClosure){carouselResourceReadiness.push({finalObserverClosure,classification:'Original full observation buffer from installation through atomic disconnection, including failure paths'});writeLiveProof()}
   await call('Emulation.setEmulatedMedia',{features:[]});await wait(80);motionPreference.restored=await motionSnapshot();
   writeLiveProof();
  }
  fs.writeFileSync('out/gallery-favorites-ui-'+(process.env.KAMUCL_TEST_THEME||'black-orange')+'.json',JSON.stringify({...result,motionPreference,motionReadiness,favoriteReadiness,favoritePickerReadiness,carouselResourceReadiness},null,2));console.log('Gallery and external favorites GUI checks passed');
 };
 module.exports.verifyRetainedCarousel=verifyRetainedCarousel;
-Object.assign(module.exports,{readMountedEnabledPlaylist,readMountedCarousel,verifyCarouselReadiness});
+Object.assign(module.exports,{readMountedEnabledPlaylist,readMountedCarousel,verifyCarouselReadiness,installCarouselPresentationObserver,verifyCarouselEventBatch});
