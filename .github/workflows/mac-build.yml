@@ -2,6 +2,10 @@ name: macOS packages
 on:
   workflow_dispatch:
     inputs:
+      resume_mac_arm64:
+        description: 'Only enable after Mac ARM64 production is explicitly resumed'
+        type: boolean
+        default: false
       resource_comparison:
         description: 'Run the separately authorized native resource comparison'
         type: boolean
@@ -13,6 +17,7 @@ permissions:
   contents: read
 jobs:
   package:
+    if: github.event_name == 'workflow_dispatch' && inputs.resume_mac_arm64 == true
     strategy:
       fail-fast: false
       matrix:

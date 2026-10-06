@@ -1,5 +1,15 @@
 # START HERE — KAMUCL 1.1.13
 
+2026-10-06 11:54（Asia/Hong_Kong）：本次交付范围已按用户最新要求缩为 Windows x64，继续完成收藏模组漏装修复。Mac ARM64 制作暂停，不提供本版 Mac 附件；资源优化和完整占用对照停止，已有改动保留，不宣称整机资源收益。下方此前双平台及资源门控计划保留为历史，不能作为当前放行规则。
+
+Windows 使用 `KAMUCL-1.1.13.exe` 或紧凑 `KAMUCL-1.1.13-windows-x64.zip`；无需便携包装器时可用 `KAMUCL-1.1.13-windows-x64-unpacked.zip`。接收者自行登录并选择自己的游戏目录。原成品对应产品输入 `25eada75831eb4567ca629149d13a7c39f91e67b`，最终提交仅增加 QA、文档及暂停 Mac 自动任务的配置，不能描述为重新构建的成品。
+
+验证入口为 `npm test`、`npx tsc --noEmit`、`npm run license:check`、`npm run build`，收藏/界面/便携原生证明和独立评分见版本交付记录。交接包的便携验证命令为 `["node", "source/scripts/check-licenses.cjs"]`，成功只证明许可检查，不能替代真实游戏、原始画面或功能验收。源码开发需要 Node.js 24、锁定依赖及 JDK 17+；Electron 保持 44.3.0。源码包和交接包排除用户账号、凭据、图片、整合包、存档、依赖缓存及 `pelican-bicycle.html`。
+
+---
+
+## 此前计划（历史）
+
 2026-10-05 20:09（Asia/Hong_Kong）：当前工作为收藏模组漏装修复和资源占用优化，仅交付 Windows x64 / Mac ARM64，Electron 保持 44.3.0。实现及局部回归已完成，最终原生成品、十组基线与十组交替对照、独立三项评分正在验证；尚未发布 1.1.13。下方 1.1.12 与 1.1.11 保留为历史，不能替代本轮验收。
 
 源码验证：`npm ci`、`node scripts/build-bridge.cjs`、`npx tsc --noEmit`、`npm test`、`npm run license:check`、`npm run build`。原生收藏、资源与外观验证入口及真实服务/夹具区分见 `docs/validation-1.1.13/README.md`。原始素材、用户目录、全部历史计数及未提交文件保留；源码和交接包排除个人资料、整合包、世界及 `pelican-bicycle.html`。
