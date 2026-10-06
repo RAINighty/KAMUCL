@@ -230,13 +230,17 @@ function assertParityTrustedTarget(trace,expected){
 }
 function createParityCoordinate({call,evaluate,native,wait,identity,documentBinding,proof,save,now=()=>performance.now(),geometry=require('./qa-coordinate-geometry114.cjs')}){
  return async(selector,{expectedLayout,deadline,absentSelectors=selector.startsWith('.download-modal')?['.download-modal .files-loading']:[]}={})=>{
+  // Capture this call's document before any asynchronous operation. A later
+  // explicit reload may bind the next call, never this call or its old samples.
+  const boundDocument={...(typeof documentBinding==='function'?documentBinding():documentBinding)}
+  assert(Number.isFinite(boundDocument.timeOrigin)&&boundDocument.timeOrigin>0&&typeof boundDocument.url==='string'&&boundDocument.url.length>0,'Coordinate requires an actual bound document')
   const end=Math.min(deadline??Infinity,now()+10000),remaining=()=>Math.max(1,end-now())
-  const operation={label:'stable owned coordinate '+selector,classification:'Actual owned native/renderer geometry, two stable hits, one original input dispatch and trusted event targets; no DOM click or retry',selector,absentSelectors,deadline:end,samples:[],complete:false}
+  const operation={label:'stable owned coordinate '+selector,classification:'Actual owned native/renderer geometry, two stable hits, one original input dispatch and trusted event targets; no DOM click or retry',selector,absentSelectors,documentBinding:boundDocument,deadline:end,samples:[],complete:false}
   proof.operations.push(operation);save();let token,primaryError
   try{
    assert(now()<end,'Original coordinate deadline elapsed before observation')
    await evaluate(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`,remaining())
-   const expected={pid:identity.pid,windowId:identity.windowId,webContentsId:identity.webContentsId,...documentBinding,...(expectedLayout?{zoom:expectedLayout.zoom}:{})}
+   const expected={pid:identity.pid,windowId:identity.windowId,webContentsId:identity.webContentsId,...boundDocument,...(expectedLayout?{zoom:expectedLayout.zoom}:{})}
    const observed=await geometry.waitForStableCoordinate({expected,deadline:end,now,wait,onSample:row=>{operation.samples.push(row);save()},read:async()=>{
     const actualNative=await native(identity,remaining())
     assert(now()<end,'Original coordinate deadline elapsed before renderer observation')
@@ -257,12 +261,47 @@ function createParityCoordinate({call,evaluate,native,wait,identity,documentBind
   finally{
    if(token!==undefined)try{
     operation.trustedTargets=await evaluate(geometry.trustedTargetStopExpression(token),remaining())
-    assertParityTrustedTarget(operation.trustedTargets,{selector,token,...documentBinding})
+    assertParityTrustedTarget(operation.trustedTargets,{selector,token,...boundDocument})
     assert(now()<end,'Original coordinate deadline elapsed during trusted-target observation')
    }catch(error){operation.complete=false;operation.trustedTargetError={name:error.name,message:error.message};if(!primaryError)throw error}
    finally{save()}
    save()
   }
+ }
+}
+function parityReloadReady(row,before,theme){
+ return Number.isFinite(row?.timeOrigin)&&row.timeOrigin>0&&row.timeOrigin!==before.timeOrigin&&row.url===before.url&&row.readyState==='complete'&&row.ready===true&&row.theme===theme
+}
+function createParityReload({call,evaluate,wait,proof,save,documentBinding=()=>proof.documentBinding,now=()=>performance.now()}){
+ return async(theme,label)=>{
+  const startedAt=now(),deadline=startedAt+10000,remaining=()=>Math.max(1,deadline-now())
+  const boundBefore={...documentBinding()},lineage={label,requestedTheme:theme,classification:'Actual explicit Page.reload, original document observations and new-document binding; no old sample is rebound',boundBefore,startedAt,deadline,samples:[],complete:false}
+  ;(proof.documentLineage??=[]).push(lineage);save()
+  try{
+   assert(now()<deadline,'Original reload deadline elapsed before observing the current document')
+   lineage.before=await evaluate('({timeOrigin:performance.timeOrigin,url:location.href})',remaining());save()
+   assert(now()<deadline,'Original reload deadline elapsed while observing the current document')
+   assert.deepEqual(lineage.before,boundBefore,'Explicit reload must begin in the currently bound document')
+   assert(Number.isFinite(lineage.before.timeOrigin)&&lineage.before.timeOrigin>0&&typeof lineage.before.url==='string'&&lineage.before.url.length>0,'Explicit reload requires an actual current document')
+   await call('Page.reload',{},remaining())
+   assert(now()<deadline,'Original reload deadline elapsed during Page.reload')
+   while(now()<deadline){
+    let value
+    try{value=await evaluate(`({timeOrigin:performance.timeOrigin,url:location.href,readyState:document.readyState,theme:document.documentElement.dataset.theme,ready:!!document.querySelector('[data-nav=home]')&&!!document.querySelector('#app')?.__vue_app__?._container?._vnode})`,remaining())}
+    catch(error){value={transitionError:{name:error.name,message:error.message}}}
+    const at=now();lineage.samples.push({at,value});save()
+    if(at>=deadline)break
+    if(value.url!==undefined)assert.equal(value.url,lineage.before.url,'Reload must retain the actual owned renderer URL')
+    if(parityReloadReady(value,lineage.before,theme)){
+     const after={timeOrigin:value.timeOrigin,url:value.url}
+     assert.deepEqual(documentBinding(),boundBefore,'Document binding cannot change during an explicit reload')
+     lineage.after=after;lineage.readyObservation=value;lineage.finishedAt=at;lineage.complete=true
+     proof.documentBinding={...after};save();return value
+    }
+    const left=deadline-now();if(left<=0)break;await wait(Math.min(75,left))
+   }
+   assert.fail(label+' did not reach its required new document and actual theme within the original reload deadline')
+  }catch(error){lineage.error={name:error.name,message:error.message};lineage.finishedAt=now();save();throw error}
  }
 }
 module.exports=async function verifyMacParity(h){
@@ -286,7 +325,8 @@ module.exports=async function verifyMacParity(h){
   do{if(deadline!==undefined&&performance.now()>=deadline)break;value=await read();const at=performance.now();samples.push({at,value});if((deadline===undefined||at<deadline)&&accept(value)){proof.operations.push({label,classification:'actual observed state',samples,...(deadline===undefined?{}:{deadline})});save();return value}const remaining=deadline===undefined?75:deadline-performance.now();if(remaining<=0)break;await wait(Math.min(75,remaining))}while(performance.now()-started<maximumMs&&(deadline===undefined||performance.now()<deadline))
   proof.failure={label,samples,...(deadline===undefined?{}:{deadline,finishedAt:performance.now()})};save();assert.fail(label+' did not reach its required actual state')
  }
- const coordinate=createParityCoordinate({call,evaluate,native,wait,identity:proof.identity,documentBinding:proof.documentBinding,proof,save})
+ const coordinate=createParityCoordinate({call,evaluate,native,wait,identity:proof.identity,documentBinding:()=>proof.documentBinding,proof,save})
+ const reloadDocument=createParityReload({call,evaluate,wait,proof,save})
  const textCoordinate=async(scope,text)=>{
   const index=await evaluate(`(()=>{const list=[...document.querySelectorAll(${JSON.stringify(scope+' button')})];return list.findIndex(e=>e.textContent.trim()===${JSON.stringify(text)})})()`)
   assert(index>=0,'missing visible business control '+text)
@@ -362,8 +402,7 @@ module.exports=async function verifyMacParity(h){
    for(const theme of THEMES){
     const custom={colors:{bg:'#171520',card:'#242232',accent:'#8759cd',text:'#f6f2ff',textDim:'#bcb7cc',border:'#4a455c',sidebarBg:'#201d2b',sidebarText:'#e5dff2',bannerText:'#ffffff'}}
     await evaluate(`window.kamucl.invoke('settings:set',{theme:${JSON.stringify(theme)},${theme==='custom'?'custom:'+JSON.stringify(custom):''}})`)
-    await call('Page.reload')
-    await until('saved real theme and mounted root '+theme,()=>evaluate(`({theme:document.documentElement.dataset.theme,ready:!!document.querySelector('[data-nav=home]')&&!!document.querySelector('#app')?.__vue_app__?._container?._vnode})`).catch(error=>({ready:false,transitionError:{name:error.name,message:error.message}})),r=>r.theme===theme&&r.ready)
+    await reloadDocument(theme,'saved real theme and mounted root '+theme)
     await evaluate(`(${installMacParityObserver.toString()})()`)
     for(const[width,height,zoom]of LAYOUTS){
      const expectedLayout={width,height,zoom},layoutStartedAt=performance.now(),layoutDeadline=layoutStartedAt+10000
@@ -382,7 +421,7 @@ module.exports=async function verifyMacParity(h){
    }
    assertNavigationCoverage(proof.navigation)
    await main(`(()=>{const w=testElectron.BrowserWindow.getAllWindows()[0];w.setSize(1280,900);w.webContents.setZoomFactor(1)})()`)
-   await evaluate("window.kamucl.invoke('settings:set',{theme:'black-orange'})");await call('Page.reload');await until('return theme and mounted root for restart',()=>evaluate(`({theme:document.documentElement.dataset.theme,ready:!!document.querySelector('[data-nav=home]')&&!!document.querySelector('#app')?.__vue_app__?._container?._vnode})`).catch(error=>({ready:false,transitionError:{name:error.name,message:error.message}})),r=>r.theme==='black-orange'&&r.ready)
+   await evaluate("window.kamucl.invoke('settings:set',{theme:'black-orange'})");await reloadDocument('black-orange','return theme and mounted root for restart')
    await evaluate(`(${installMacParityObserver.toString()})()`)
    await route('settings')
    proof.settingsCategories=[]
@@ -490,4 +529,4 @@ module.exports=async function verifyMacParity(h){
  finally{try{proof.trustedTargetObserverRestoration=await evaluate(require('./qa-coordinate-geometry114.cjs').trustedTargetRestoreExpression());save();assert.equal(proof.trustedTargetObserverRestoration.complete,true)}catch(error){proof.complete=false;proof.trustedTargetRestorationError={name:error.name,message:error.message};save();if(!proof.error){preservePrimaryFailure(proof,error,save);throw error}}}
 }
 async function coordinatePosition(evaluate,selector){return evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!e.contains(document.elementFromPoint(x,y)))throw Error('actual queue hit target obscured');return{x,y}})()`)}
-Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertEditableNativeTextInput,nativeInputLayoutReady,nativeNavigationLayoutReady,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,readDownloadSelectionState,assertMatchingDownloadResponse,assertDownloadTargetSelection,readMountedInstallInput,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure,assertParityTrustedTarget,createParityCoordinate})
+Object.assign(module.exports,{ROUTES,THEMES,LAYOUTS,ROUTE_COMPONENTS,assertEditableNativeTextInput,nativeInputLayoutReady,nativeNavigationLayoutReady,assertNavigationCoverage,assertQueueLedger,publicAccount,stableHash,installMacParityObserver,readDownloadSelectionState,assertMatchingDownloadResponse,assertDownloadTargetSelection,readMountedInstallInput,createQueueClickObserver,createInstallHandlerObserver,restoreInstallHandlerObserver,preserveInstallObservation,collectAndRestoreInstallObserver,preservePrimaryFailure,assertParityTrustedTarget,createParityCoordinate,parityReloadReady,createParityReload})

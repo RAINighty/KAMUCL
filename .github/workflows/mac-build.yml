@@ -10,6 +10,11 @@ on:
         description: 'Run the separately authorized native resource comparison'
         type: boolean
         default: false
+      verification_groups:
+        description: 'All acceptance groups, or only the changed parity QA (not a full qualification)'
+        type: choice
+        options: [all, parity]
+        default: all
   push:
     branches: [master]
     paths: ['.github/workflows/mac-build.yml', 'src/**', 'tests/**', 'scripts/**', 'native/**', 'bridge/**', 'build/**', 'package.json', 'package-lock.json', 'electron.vite.config.ts', 'tsconfig*.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'licenses/**', 'docs/CORRESPONDING_SOURCE.md']
@@ -57,6 +62,7 @@ jobs:
             release/mac-package-*.json
           if-no-files-found: error
   ui:
+    if: inputs.verification_groups != 'parity'
     needs: package
     strategy:
       fail-fast: false
@@ -131,6 +137,7 @@ jobs:
             release/mac-job-*
           if-no-files-found: error
   game:
+    if: inputs.verification_groups != 'parity'
     needs: package
     strategy:
       fail-fast: false
@@ -166,6 +173,7 @@ jobs:
             release/mac-job-*
           if-no-files-found: error
   integration:
+    if: inputs.verification_groups != 'parity'
     needs: package
     strategy:
       fail-fast: false
@@ -214,6 +222,7 @@ jobs:
           if-no-files-found: error
 
   download-location:
+    if: inputs.verification_groups != 'parity'
     needs: package
     strategy:
       fail-fast: false
@@ -244,6 +253,7 @@ jobs:
           if-no-files-found: error
 
   favorites:
+    if: inputs.verification_groups != 'parity'
     needs: package
     strategy:
       fail-fast: false

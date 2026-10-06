@@ -1,5 +1,7 @@
 # START HERE — KAMUCL 1.1.14 Mac ARM64 接续候选
 
+2026-10-06 14:28（Asia/Hong_Kong）补充：第三轮原生运行 37421862931 的 DMG 四主题和实际 900 高度通过；APP 原始皮肤行走录屏为 12 FPS，收藏 APP/DMG 的世界及显示恢复仍失败。页面重载身份检查的 QA 修复单独复验，不能替代这些失败或完整放行；最终成品身份与哈希以交付清单为准。
+
 2026-10-06 13:52（Asia/Hong_Kong）：用户恢复 Mac ARM64，资源占用优化仍停止。Windows x64 / Mac ARM64 继续共用 Electron 44.3.0、当前界面、素材及收藏模组安装修复；Mac 陶瓦启动修复使本批递增至 1.1.14。Intel、Linux、鸿蒙未恢复。1.1.13 Windows 已公开发布，原附件与标签保持不变。
 
 Mac 使用 ZIP 中的 KAMUCL.app，或挂载 DMG 后复制到自己的应用目录；系统要求 macOS 13 或以上、Apple Silicon。现阶段是候选，尚未满足完整放行：原生构建、启动、更新、目录和陶瓦检查通过，DMG 四主题界面通过，但最新 APP 图库及操作坐标验收须复验，1.20.1 收藏安装的游戏世界检查在虚拟图形测试机仍未通过。具体证据和历史失败见 `docs/validation-1.1.14/README.md`。ad-hoc 签名校验不等于 Developer ID 签名或 Apple 公证，人工听感尚未覆盖。
