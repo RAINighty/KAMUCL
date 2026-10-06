@@ -4,6 +4,8 @@ import { probeImport } from './core/importProbe'
 import { registerSkinEditorIpc } from './core/skinEditorIpc'
 import { registerModFavoritesIpc } from './core/modFavorites'
 import { registerSupplementalModsIpc } from './core/supplementalMods'
+import { registerVersionCategoriesIpc } from './core/versionCategories'
+import { normalizeVersionCategoryState, renameCategoryAssignment } from '../shared/versionCategories'
 import { registerMemoryOrganizerIpc } from './core/memoryOrganizer'
 import { registerProjectionsIpc } from './core/projectionsIpc'
 import { registerMascotsIpc } from './core/mascots'
@@ -108,6 +110,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   registerSkinEditorIpc(getWin)
   registerModFavoritesIpc()
   registerSupplementalModsIpc(getWin)
+  registerVersionCategoriesIpc()
   registerMemoryOrganizerIpc()
   registerProjectionsIpc(getWin)
   registerMascotsIpc()
@@ -430,6 +433,9 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
       delete overrides[oldKey]
       settings.saveSettings({ favoriteInstanceOverrides: overrides })
     }
+    const categoryState = normalizeVersionCategoryState(s)
+    const assignments = renameCategoryAssignment(categoryState, folder || folderOfVersion(vid), vid, name, process.platform)
+    if (JSON.stringify(assignments) !== JSON.stringify(categoryState.versionCategoryAssignments)) settings.saveSettings({ versionCategoryAssignments: assignments })
     // 引用同步：服务器绑定（隔离实例的 servers.dat 随目录迁移，无需额外处理）
     servers.renameBinding(vid, name, folder || folderOfVersion(vid))
   }))

@@ -1,4 +1,55 @@
-# START HERE — KAMUCL 1.1.14 Mac ARM64 接续候选
+# START HERE — KAMUCL 1.1.15 Windows
+
+## What this package contains
+
+- Project: KAMUCL，Minecraft 启动器。
+- Deliverable: 本批 Windows x64 服务器地址隐私、版本分类、披风加载及启动合成与导航残影修复。
+- Packaged artifact: KAMUCL-1.1.15.exe、Windows 紧凑 ZIP、展开 ZIP；精确摘要见 CURRENT_STATUS.md。
+- Intended receiver: 使用者及接续开发者；用户自行提供自己的账号和游戏目录。
+
+## Prerequisites
+
+- Operating system: Windows x64；本轮实际桌面验收环境为 Windows 11 10.0.26200。
+- Runtime/tool versions: 成品包含 Electron 44.3.0；开发使用 Node.js 24、npm 锁定依赖、JDK 17+，原生 Windows 工具按构建脚本要求准备。
+- Required external services: 登录和游戏下载按所选服务联网；交接包许可检查不需要登录。
+- Secrets that the receiver must provide separately: 自己的登录授权；不包含发送者凭据、账号配置、存档或整合包。
+
+## Setup
+
+1. 核对公开 SHA256SUMS.txt；ZIP 解压至普通目录，运行 EXE。展开 ZIP 运行其中 KAMUCL.exe。
+2. 开发源码使用 `npm ci`、`node scripts/build-bridge.cjs`；生产构建为 `npm run build`。
+3. 设置自己的默认下载位置并登录自己的账号；旧实例无需迁移。
+
+## Verify
+
+交接包中精确的便携验证命令数组为 `["node", "source/scripts/check-licenses.cjs"]`：
+
+```text
+node source/scripts/check-licenses.cjs
+```
+
+Expected result: `License check passed`，退出 0。此命令仅验证许可，不能替代真实桌面、账号、游戏、动画或功能验收。本版全量1208项中1207通过、1平台专属跳过；完整源码验证入口为 `npm test`、`npx tsc --noEmit`、`npm run license:check`；成品及独立评审见 docs/validation-1.1.15/README.md。
+
+## Use the deliverable
+
+1. 服务器默认“地址已隐藏”，点击眼睛才显示；切换服务器、离开页面或失焦后重新隐藏。
+2. 游戏版本的已安装列表使用“管理分类”和各实例的归类入口；“收藏”独立显示，删除分类不删除实例。
+3. 披风失败时提供刷新/错误提示；更换后同步缩略图和预览。截图中具体账号披风未取得真实服务验证。
+
+## Important paths
+
+- Source: 交接包 source/；独立源码 ZIP 为原始 Git blob 字节，不包含工作区未提交文件。
+- Validation: source/scripts/ 及 source/docs/validation-1.1.15/。
+- Artifact: _handoff/artifacts/；外部附件 SHA256 在公开 SHA256SUMS.txt。
+- Current state: CURRENT_STATUS.md；最终提交、标签和附件身份由外部 DELIVERY-1.1.15.json 记录，避免归档自引用。
+
+## Known machine-specific assumptions
+
+最小外框配置为 960×620；本机 125% 缩放下实际最小外框为 962×623、内容区 961×622，不冒称精确 960×620 内容区已测。原灰色主题反馈没有在本机复现。Mac ARM64 1.1.14 候选的游戏/帧率失败仍保留，本批 Windows 放行不替代 Mac 验收。资源优化仍停止，Intel/Linux/鸿蒙不在本批成品范围。
+
+---
+
+# Historical START HERE — KAMUCL 1.1.14 Mac ARM64 接续候选
 
 2026-10-06 14:28（Asia/Hong_Kong）补充：第三轮原生运行 37421862931 的 DMG 四主题和实际 900 高度通过；APP 原始皮肤行走录屏为 12 FPS，收藏 APP/DMG 的世界及显示恢复仍失败。页面重载身份检查的 QA 修复单独复验，不能替代这些失败或完整放行；最终成品身份与哈希以交付清单为准。
 

@@ -5,7 +5,7 @@ import { withFileJob } from './fileJobs'
  * 存储：userData/skins/<id>.png + userData/skins.json [{id,variant,time}]（新→旧）
  * 所有 API 均以当前选中微软账号的 MC accessToken 走 Bearer 鉴权
  */
-import { app } from 'electron'
+import { app, nativeImage } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -21,6 +21,7 @@ import { accountById, getValidAccount, selectedAccount } from './accounts'
 import { gameDir } from './paths'
 import { externalProfile } from './yggdrasil'
 import { SkinProfileCache } from './skinProfileCache'
+import { downloadTexture } from './skinTexture'
 import type { Account } from '../../shared/types'
 const profileCache = new SkinProfileCache(() => path.join(app.getPath('userData'), 'skin-cache'))
 
@@ -92,31 +93,16 @@ function validateSkinPng(filePath: string): Buffer {
   return buf
 }
 
-/**
- * 下载图片并转成 data:image/png;base64 形式（30s 超时）。
- * 主进程下载纹理后随档案返回，前端不再直连 textures.minecraft.net（CORS/网络不稳）。
- * 失败返回 undefined，不阻断主流程。
- */
-/**
- * 下载纹理图片转 dataURL（主进程侧，规避 renderer 的 CORS/WebGL 跨域限制）。
- * 重试 2 次；最终失败返回 undefined 并写日志，不阻断主流程。
- */
-async function fetchDataUrl(url: string): Promise<string | undefined> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const buf = Buffer.from(await res.arrayBuffer())
-      if (!buf.length) throw new Error('空响应')
-      return `data:image/png;base64,${buf.toString('base64')}`
-    } catch (e) {
-      if (attempt === 1) {
-        console.error(`[KAMUCL] 皮肤纹理下载失败(${url}):`, e instanceof Error ? e.message : e)
-        appendLauncherLog(`皮肤纹理下载失败(${url}): ${e instanceof Error ? e.message : e}`)
-      }
-    }
+/** Main-process PNG decoding keeps corrupt responses out of the appearance cache. */
+async function fetchTexture(url: string): Promise<{ dataUrl?: string; textureError?: string }> {
+  const result = await downloadTexture(url, fetch, bytes => {
+    if (nativeImage.createFromBuffer(bytes).isEmpty()) throw new Error('材质 PNG 无法解码')
+  })
+  if (result.textureError) {
+    console.error('[KAMUCL] 皮肤纹理下载失败:', result.textureError)
+    appendLauncherLog(`皮肤纹理下载失败: ${result.textureError}`)
   }
-  return undefined
+  return result
 }
 
 /** 启动器自身诊断日志：gameDir/kamucl-logs/launcher.log */
@@ -147,7 +133,7 @@ async function fetchProfile(account: Account): Promise<ProfileSkins> {
     // 离线账号没有官方档案；复用头像服务的公开用户名皮肤接口给首页 3D 预览。
     // 请求失败时返回空皮肤列表，由渲染器显示本地生成的可动画角色，不阻断首页。
     const url = `https://minotar.net/skin/${encodeURIComponent(account.username)}`
-    const dataUrl = await fetchDataUrl(url)
+    const { dataUrl } = await fetchTexture(url)
     return {
       username: account.username,
       skins: dataUrl ? [{ variant: 'classic', url, dataUrl, state: 'ACTIVE' }] : [],
@@ -159,10 +145,10 @@ async function fetchProfile(account: Account): Promise<ProfileSkins> {
     const profile = await externalProfile(valid)
     await Promise.all([
       ...profile.skins.map(async (skin) => {
-        skin.dataUrl = await fetchDataUrl(skin.url)
+        Object.assign(skin, await fetchTexture(skin.url))
       }),
       ...profile.capes.map(async (cape) => {
-        if (cape.url) cape.dataUrl = await fetchDataUrl(cape.url)
+        if (cape.url) Object.assign(cape, await fetchTexture(cape.url))
       })
     ])
     return profile
@@ -197,10 +183,10 @@ async function fetchProfile(account: Account): Promise<ProfileSkins> {
   // 主进程并发下载纹理转 dataURL 随档案返回；失败跳过该项的 dataUrl
   await Promise.all([
     ...skins.map(async (s) => {
-      s.dataUrl = await fetchDataUrl(s.url)
+      Object.assign(s, await fetchTexture(s.url))
     }),
     ...capes.map(async (c) => {
-      if (c.url) c.dataUrl = await fetchDataUrl(c.url)
+      if (c.url) Object.assign(c, await fetchTexture(c.url))
     })
   ])
   return { username: data.name ?? '', skins, capes }

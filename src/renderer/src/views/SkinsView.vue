@@ -36,18 +36,19 @@ const currentVariant = computed<SkinVariant>(() =>
 const capes = computed(() => profile.value?.capes ?? [])
 /** 使用中的披风直接传给 3D 人偶渲染 */
 const activeCape = computed(() => capes.value.find((c) => c.active)?.dataUrl ?? '')
+const capeViewerError = ref('')
+watch(activeCape, () => { capeViewerError.value = '' })
 
 let profileRequest = 0, historyRequest = 0
 const profileError = ref(''), historyError = ref('')
 onUnmounted(() => { profileRequest++; historyRequest++ })
-async function loadProfile() {
+async function loadProfile(refresh = false) {
   const request = ++profileRequest; profileError.value = ''
   loadingProfile.value = true
   try {
-    const next = await getSkinProfile()
+    const next = await getSkinProfile(refresh)
     if (request !== profileRequest) return
     profile.value = next
-    void renderCapes()
   } catch (e) {
     if (request === profileRequest) profileError.value = errText(e)
   } finally {
@@ -90,29 +91,42 @@ const animSegBlobStyle = computed(() => ({
 
 // ---------------- 披风 ----------------
 const capeRenders = ref<Record<string, string>>({})
+const capeErrors = ref<Record<string, string>>({})
 const capeBusy = ref<string | null>(null)
+let capeRenderRequest = 0
+onUnmounted(() => { capeRenderRequest++ })
 
 async function renderCapes() {
-  const request = profileRequest
-  const map: Record<string, string> = {}
-  for (const c of capes.value) {
-    if (c.dataUrl) map[c.id] = await renderCape(c.dataUrl, 100, 160)
+  const request = ++capeRenderRequest, profileToken = profileRequest
+  const map: Record<string, string> = {}, errors: Record<string, string> = {}
+  for (const c of [...capes.value]) {
+    if (c.dataUrl) {
+      const rendered = await renderCape(c.dataUrl, 100, 160)
+      if (rendered) { map[c.id] = rendered; if (c.textureError) errors[c.id] = c.textureError }
+      else errors[c.id] = '披风材质无法加载或尺寸不受支持，请刷新重试'
+    } else errors[c.id] = c.textureError || '披风材质尚未下载，请刷新重试'
   }
-  if (request === profileRequest) capeRenders.value = map
+  if (request === capeRenderRequest && profileToken === profileRequest) {
+    capeRenders.value = map; capeErrors.value = errors
+  }
 }
+watch(() => profile.value?.capes, () => { void renderCapes() })
 
 /** 点击披风：使用中 → 卸下；其他 → 激活 */
 async function onCapeClick(c: CapeInfo) {
   if (!isMs.value) return
   if (capeBusy.value) return
+  const request = profileRequest
   capeBusy.value = c.id
   try {
-    profile.value = await changeCape(c.active ? null : c.id)
+    const next = await changeCape(c.active ? null : c.id)
+    if (request !== profileRequest) return
+    profile.value = next
     toast(c.active ? '已卸下披风' : `已换上披风「${c.alias}」`, 'success')
   } catch (e) {
-    toast('披风更换失败：' + errText(e), 'error')
+    if (request === profileRequest) toast('披风更换失败：' + errText(e), 'error')
   } finally {
-    capeBusy.value = null
+    if (request === profileRequest) capeBusy.value = null
   }
 }
 
@@ -334,7 +348,7 @@ watch(
     profile.value = null
     historyList.value = []
     historyRenders.value = {}
-    capeRenders.value = {}
+    capeRenders.value = {}; capeErrors.value = {}; capeViewerError.value = ''; capeBusy.value = null
     clearPending()
     if (canViewProfile.value) loadAll()
   }
@@ -411,7 +425,9 @@ watch(
                 :variant="currentVariant"
                 :animation="previewAnim"
                 :cape="activeCape"
+                @cape-error="capeViewerError = $event"
               />
+              <p v-if="capeViewerError" class="muted" role="alert">{{ capeViewerError }}</p>
               <p data-ui="SkinsView:50827644b628" class="muted viewer-tip">拖动旋转 · 滚轮缩放 · 双击回正</p>
             </template>
             <div data-ui="SkinsView:e868aac3a5b8" v-else class="preview-3d-empty">
@@ -430,7 +446,7 @@ watch(
         <!-- 右：当前皮肤信息与上传 -->
         <div class="skin-operation-panel">
         <section data-ui="SkinsView:8be659224d2f" class="card pane pane-info">
-          <div data-ui="SkinsView:36f73e18abbe" v-if="profileError" class="status-strip error" role="alert">读取皮肤失败：{{ profileError }}<button data-ui="SkinsView:73348961dd1a" class="btn btn-ghost" @click="loadProfile">重试</button></div>
+          <div data-ui="SkinsView:36f73e18abbe" v-if="profileError" class="status-strip error" role="alert">读取皮肤失败：{{ profileError }}<button data-ui="SkinsView:73348961dd1a" class="btn btn-ghost" @click="loadProfile(true)">重试</button></div>
           <header class="pane-head">
             <h3 class="pane-title">当前皮肤</h3>
             <span data-ui="SkinsView:636efe9c920f" class="tag" :class="currentVariant === 'slim' ? 'tag-cyan' : 'tag-gold'">
@@ -498,6 +514,7 @@ watch(
         <section data-ui="SkinsView:b5f0f1bd543a" class="card pane pane-capes">
           <header class="pane-head">
             <h3 class="pane-title">披风（{{ capes.length }}）</h3>
+            <button class="btn btn-ghost" :disabled="loadingProfile || capeBusy !== null" @click="loadProfile(true)">刷新材质</button>
           </header>
           <div data-ui="SkinsView:0f570e391601" v-if="loadingProfile" class="empty pane-empty"><span class="spin"></span></div>
           <div data-ui="SkinsView:23e5aa429fa5" v-else-if="!capes.length" class="empty pane-empty">
@@ -521,6 +538,7 @@ watch(
               <span data-ui="SkinsView:d40a5d07ca29" class="cape-state">
                 <span data-ui="SkinsView:1816d05e22d8" v-if="capeBusy === c.id" class="spin"></span>
                 <span data-ui="SkinsView:b5509fdec2ff" v-else-if="c.active" class="tag tag-gold">使用中</span>
+                <span v-if="capeErrors[c.id]" class="muted" role="status">{{ capeErrors[c.id] }}</span>
               </span>
             </button>
           </div>

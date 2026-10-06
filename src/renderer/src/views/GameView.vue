@@ -31,7 +31,8 @@ import {
   setDownloadFolder,
   setVersionIsolation,
   setVersionJava,
-  setVersionResolution
+  setVersionResolution,
+  updateVersionCategories
 } from '../api'
 import { selectInstance, applyLaunchState, displayVersionName, displayVersionSub, fmtLastPlayed, isFavorite, progressMono, refreshInstalled, renameLastPlayed, sortWithFavorite, store, toast, toggleFavorite, versionIconUrl } from '../store'
 import { instanceLaunchBusy } from '@shared/launchTracking'
@@ -41,6 +42,8 @@ import SelectMenu from '../components/SelectMenu.vue'
 import RecordingModPicker from '../components/RecordingModPicker.vue'
 import FavoriteModsPicker from '../components/FavoriteModsPicker.vue'
 import UiGlyph from '../components/UiGlyph.vue'
+import VersionCategoriesPanel from '../components/VersionCategoriesPanel.vue'
+import { VERSION_CATEGORY_ALL, VERSION_CATEGORY_FAVORITES, VERSION_CATEGORY_UNCLASSIFIED, versionCategoryOf, versionMatchesCategory } from '@shared/versionCategories'
 const favoritesReady = ref(true)
 import ThumbnailPickerModal from '../components/ThumbnailPickerModal.vue'
 import type {
@@ -54,7 +57,8 @@ import type {
   ImageFit,
   IsolationMigrationPlan,
   LoaderName,
-  RemoteVersion
+  RemoteVersion,
+  VersionCategoryAction
 } from '@shared/types'
 
 // 列表范围独立于安装目标，保留其他页面的当前目录语义。
@@ -64,6 +68,28 @@ const installedError = ref('')
 const installedLoading = ref(false)
 const folderToolsOpen = ref(false)
 const installedSearch = ref('')
+const installedCategory = ref(VERSION_CATEGORY_ALL), categoryManagerOpen = ref(false), categoryBusy = ref(false), categoryError = ref('')
+const categories = computed(() => store.settings?.versionCategories ?? [])
+const categoryOf = (v: InstalledVersion) => versionCategoryOf(store.settings, v.folder, v.id, window.kamucl.platform)
+const categoryLabel = (v: InstalledVersion) => categories.value.find(c => c.id === categoryOf(v))?.name ?? ''
+const categoryCounts = computed(() => Object.fromEntries(categories.value.map(c => [c.id, allInstalled.value.filter(v => categoryOf(v) === c.id).length])))
+watch(categories, list => { if (![VERSION_CATEGORY_ALL, VERSION_CATEGORY_FAVORITES, VERSION_CATEGORY_UNCLASSIFIED, ...list.map(c => c.id)].includes(installedCategory.value)) installedCategory.value = VERSION_CATEGORY_ALL })
+async function onCategoryAction(action: VersionCategoryAction): Promise<boolean> {
+  if (categoryBusy.value) return false
+  categoryBusy.value = true; categoryError.value = ''
+  try {
+    store.settings = await updateVersionCategories(action)
+    if (action.type === 'remove' && installedCategory.value === action.id) installedCategory.value = VERSION_CATEGORY_UNCLASSIFIED
+    return true
+  } catch (error) { categoryError.value = '保存分类失败：' + errText(error); return false }
+  finally { categoryBusy.value = false }
+}
+async function assignCategory(v: InstalledVersion, event: Event) {
+  const field = event.target as HTMLSelectElement, categoryId = field.value
+  await onCategoryAction({ type: 'assign', target: { id: v.id, folder: v.folder }, categoryId })
+  // Retain the last confirmed value on IPC/write failure, with a visible error.
+  field.value = categoryOf(v)
+}
 let installedGeneration = 0
 async function refreshAllInstalled() {
   const generation = ++installedGeneration
@@ -640,7 +666,7 @@ let menuTrigger: HTMLElement | null = null
 function closeManageMenu() { manageMenu.id = ''; menuTrigger?.focus() }
 function trapMenuFocus(event: KeyboardEvent) {
   if (event.key !== 'Tab') return
-  const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]')]
+  const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')]
   const edge = event.shiftKey ? items[0] : items[items.length - 1]
   if (document.activeElement === edge) { event.preventDefault(); (event.shiftKey ? items[items.length - 1] : items[0])?.focus() }
 }
@@ -682,7 +708,14 @@ const folderShortName = (p: string): string => {
 }
 
 /** 收藏置顶 + 组内最近游玩倒序 */
-const sortedInstalled = computed(() => sortWithFavorite(allInstalled.value.filter(v => !installedFolder.value || folderKey(v.folder) === folderKey(installedFolder.value === '@current' ? activeFolder.value : installedFolder.value)).filter(v => `${displayVersionName(v)} ${v.mcVersion || ''} ${v.loader || ''} ${folderShortName(v.folder)}`.toLowerCase().includes(installedSearch.value.trim().toLowerCase()))))
+const scopedInstalled = computed(() => allInstalled.value.filter(v => !installedFolder.value || folderKey(v.folder) === folderKey(installedFolder.value === '@current' ? activeFolder.value : installedFolder.value)).filter(v => `${displayVersionName(v)} ${v.mcVersion || ''} ${v.loader || ''} ${folderShortName(v.folder)}`.toLowerCase().includes(installedSearch.value.trim().toLowerCase())))
+const sortedInstalled = computed(() => sortWithFavorite(scopedInstalled.value.filter(v => versionMatchesCategory(installedCategory.value, categoryOf(v), isFavorite(v.id, v.folder)))))
+const categoryFilters = computed(() => [
+  { id: VERSION_CATEGORY_ALL, name: '全部', count: scopedInstalled.value.length },
+  { id: VERSION_CATEGORY_FAVORITES, name: '收藏', count: scopedInstalled.value.filter(v => isFavorite(v.id, v.folder)).length },
+  { id: VERSION_CATEGORY_UNCLASSIFIED, name: '未分类', count: scopedInstalled.value.filter(v => !categoryOf(v)).length },
+  ...categories.value.map(c => ({ ...c, count: scopedInstalled.value.filter(v => categoryOf(v) === c.id).length }))
+])
 /** 已收藏分组（不含残缺/失败版本） */
 const favoriteInstalled = computed(() =>
   store.installed.filter((v) => isFavorite(v.id, v.folder) && !v.incomplete && !v.failed)
@@ -864,6 +897,7 @@ async function onConfirmRename() {
   const newId = renameModal.name.trim()
   try {
     await renameVersion(oldId, newId, renameModal.folder)
+    store.settings = await getSettings()
     // 引用同步（渲染端）：最近游玩记录以版本 id 为键（收藏/服务器绑定由主进程同步）
     renameLastPlayed(oldId, newId)
     await refreshInstalled()
@@ -1146,9 +1180,15 @@ async function confirmIsolation() {
         <button class="btn btn-ghost btn-sm" :disabled="installedLoading" @click="refreshAllInstalled">{{ installedLoading ? '刷新中…' : '刷新列表' }}</button>
       </div>
       <p v-if="installedError" class="error" role="alert">{{ installedError }}</p>
+      <div class="version-category-bar" data-ui="games:category-filters">
+        <div class="version-category-filters" role="group" aria-label="版本分类筛选"><button v-for="category in categoryFilters" :key="category.id" class="btn btn-ghost btn-sm" :class="{ active: installedCategory === category.id }" :aria-pressed="installedCategory === category.id" :data-category="category.id" @click="installedCategory = category.id">{{ category.name }} <span class="category-count">{{ category.count }}</span></button></div>
+        <button class="btn btn-ghost btn-sm" data-ui="games:categories-manage" :disabled="categoryBusy" @click="categoryError = ''; categoryManagerOpen = true">管理分类</button>
+      </div>
+      <p v-if="categoryError && !categoryManagerOpen" class="error" role="alert">{{ categoryError }}</p>
       <div v-if="!sortedInstalled.length && !installingVersions.length" class="empty installed-empty">
-        <span>{{ installedLoading ? '正在读取已安装实例…' : installedSearch ? '没有匹配的实例，请调整搜索条件' : '当前范围没有已安装版本' }}</span>
-        <button class="btn btn-gold btn-sm" @click="tab = 'download'">去版本下载看看</button>
+        <span>{{ installedLoading ? '正在读取已安装实例…' : installedCategory === VERSION_CATEGORY_FAVORITES ? '此范围还没有收藏版本，点击实例旁的星标即可收藏' : installedCategory !== VERSION_CATEGORY_ALL ? '此分类暂无匹配实例，可在实例的更多操作中设置分类' : installedSearch ? '没有匹配的实例，请调整搜索条件' : '当前范围没有已安装版本' }}</span>
+        <button v-if="installedCategory !== VERSION_CATEGORY_ALL" class="btn btn-ghost btn-sm" @click="installedCategory = VERSION_CATEGORY_ALL">查看全部版本</button>
+        <button v-else class="btn btn-gold btn-sm" @click="tab = 'download'">去版本下载看看</button>
       </div>
       <div v-else class="installed-list">
         <!-- 同一实例仅渲染一次；sortWithFavorite 已负责收藏置顶。 -->
@@ -1172,6 +1212,7 @@ async function confirmIsolation() {
             <div class="instance-meta">
               <span>{{ v.mcVersion || '版本未知' }}</span><span>{{ loaderLabel(v) }}</span>
               <span class="instance-directory" :title="v.folder">{{ folderShortName(v.folder) }}</span>
+              <span v-if="categoryLabel(v)" class="instance-category" :title="categoryLabel(v)">{{ categoryLabel(v) }}</span>
               <span :title="v.gameDirectory || v.folder">{{ v.isolated ? '已隔离' : '共享目录' }}</span>
               <span v-if="v.incomplete" class="error">下载未完成</span><span v-else-if="v.failed" class="error">安装失败</span>
               <span v-else-if="v.modpackName" :title="v.modpackName">整合包</span>
@@ -1201,6 +1242,8 @@ async function confirmIsolation() {
         <div v-if="menuVersion" class="instance-technical" tabindex="0"><strong>{{ displayVersionName(menuVersion) }}</strong><span>实例 ID：{{ menuVersion.id }}</span><span>绑定目录：{{ menuVersion.folder }}</span><span>游戏目录：{{ menuVersion.gameDirectory || menuVersion.folder }}</span></div>
         <button v-if="menuVersion" class="menu-item" @click="openVersionFolder(menuVersion); closeManageMenu()">打开实例文件夹</button>
         <button v-if="menuVersion" class="menu-item" @click="openInstanceCenter(menuVersion); closeManageMenu()">实例设置与详情</button>
+        <label v-if="menuVersion" class="instance-category-field">所属分类<select class="select" data-ui="games:instance-category" :aria-label="displayVersionName(menuVersion) + '的所属分类'" :value="categoryOf(menuVersion)" :disabled="categoryBusy" @change="assignCategory(menuVersion, $event)"><option value="">未分类</option><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }}</option></select></label>
+        <p v-if="categoryError" class="error instance-category-error" role="alert">{{ categoryError }}</p>
         <label v-if="menuVersion && !menuVersion.modpackName && !menuVersion.incomplete && !menuVersion.failed" class="menu-item"><input type="checkbox" :checked="!!menuVersion.isolated" :disabled="isoBusy === menuVersion.id" @change="onToggleIsolation(menuVersion, $event)" />实例隔离</label>
         <button class="menu-item" @click="goManage('mods')">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/></svg>
@@ -1240,6 +1283,8 @@ async function confirmIsolation() {
         </div>
       </div>
     </Teleport>
+
+    <VersionCategoriesPanel :open="categoryManagerOpen" :categories="categories" :counts="categoryCounts" :busy="categoryBusy" :error="categoryError" @close="categoryManagerOpen = false" @action="onCategoryAction" />
 
     <!-- 实例窗口设置；未覆盖时始终跟随全局配置。 -->
     <Teleport to="body">
@@ -1506,6 +1551,7 @@ async function confirmIsolation() {
 </template>
 
 <style scoped>
+.version-category-bar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}.version-category-filters{display:flex;flex-wrap:wrap;gap:6px;min-width:0}.version-category-filters button{max-width:100%;overflow-wrap:anywhere;white-space:normal}.version-category-filters button.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}.category-count{opacity:.75;margin-left:3px}.instance-category{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}.instance-category-field{display:flex;flex-direction:column;gap:6px;padding:10px 12px;font-size:13px}.instance-category-field select{width:100%;min-width:0}.instance-category-error{padding:0 12px;line-height:1.6;overflow-wrap:anywhere}@media(max-width:600px){.version-category-bar{flex-wrap:wrap}.version-category-bar>button{margin-left:auto}}
 .install-location { margin: 0; padding: 4px 24px 10px; overflow-wrap: anywhere; flex-shrink: 0; font-size: var(--text-sm); }
 .folder-location-hint { margin: var(--space-2) 0 0; line-height: 1.6; }
 .folder-managed-path { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; font-size: var(--text-sm); }

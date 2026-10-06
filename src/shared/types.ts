@@ -361,6 +361,13 @@ export function normalizeThemeName(value: unknown): ThemeName {
   return 'transparent'
 }
 
+export interface VersionCategory { id: string; name: string }
+export type VersionCategoryAction =
+  | { type: 'create'; name: string }
+  | { type: 'rename'; id: string; name: string }
+  | { type: 'remove'; id: string }
+  | { type: 'assign'; target: { id: string; folder: string }; categoryId: string }
+
 export interface Settings {
   /** Explicit reduction is additive to the operating system preference; absent means follow system. */
   reduceMotion?: boolean
@@ -402,6 +409,9 @@ export interface Settings {
   /** 收藏的版本 id 列表（各列表置顶） */
   favoriteVersions: string[]
   favoriteInstanceOverrides?: Record<string, boolean>
+  /** User labels only; no instance directory is moved or removed. */
+  versionCategories?: VersionCategory[]
+  versionCategoryAssignments?: Record<string, string>
   /** 首页布局：模块顺序与显隐（main=主列，side=右栏，数组顺序即渲染顺序） */
   homeLayout: HomeLayout
   /** 背景自定义 */
@@ -599,6 +609,8 @@ export interface SkinInfo {
   state?: string
   /** 主进程下载纹理转的 dataURL（前端渲染更稳，不受 CORS 影响） */
   dataUrl?: string
+  /** Public texture download/decoding failure, without credentials or URL details. */
+  textureError?: string
 }
 
 export interface CapeInfo {
@@ -608,6 +620,7 @@ export interface CapeInfo {
   url?: string
   /** 披风纹理 dataURL */
   dataUrl?: string
+  textureError?: string
 }
 
 /** 当前微软账号的皮肤档案 */
@@ -745,6 +758,7 @@ export const IPC = {
   versionsInstall: 'versions:install', // (versionId: string, opts?: InstallOptions) => void
   versionsRemove: 'versions:remove', // (versionId: string) => void
   versionsRename: 'versions:rename', // (id: string, newName: string) => void  重命名实例（目录+json id 同步改）
+  versionCategoriesUpdate: 'versions:categoriesUpdate', // (VersionCategoryAction) => Settings
   versionsCleanup: 'versions:cleanup', // (id: string) => boolean  清理安装失败残留目录
 
   // 游戏文件夹管理

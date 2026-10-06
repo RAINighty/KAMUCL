@@ -42,6 +42,7 @@ import type {
   ServerPingResult,
   ServerSyncResult,
   Settings,
+  VersionCategoryAction,
   SkinHistoryEntry,
   SkinVariant,
   SystemInfo,
@@ -134,6 +135,7 @@ export const refreshAccount = (id: string) => invoke<Account>(IPC.accountsRefres
 export const getVersionCatalog = (refresh = false) => invoke<{ versions: RemoteVersion[]; checkedAt: number; stale: boolean }>(IPC.versionsCatalog, refresh)
 export const getManifest = (refresh = false) => invoke<RemoteVersion[]>(IPC.versionsManifest, refresh)
 export const getInstalled = (all = false) => invoke<InstalledVersion[]>(IPC.versionsInstalled, all)
+export const updateVersionCategories = (action: VersionCategoryAction) => invoke<Settings>(IPC.versionCategoriesUpdate, action)
 export const installVersion = (id: string, opts?: InstallOptions, folder?: string) =>
   invoke<void>(IPC.versionsInstall, id, opts, folder)
 export const requestFavoriteVersions = (source: string, projectId: string, mc: string, loader: string, ticket: string) =>
@@ -242,7 +244,7 @@ export const getSkinProfile = (refresh = false) => {
 export const uploadSkin = (filePath: string, variant: SkinVariant) =>
   refreshSkinAfter(invoke<ProfileSkins>(IPC.skinUpload, filePath, variant))
 /** 激活披风（传 id）/ 卸下披风（传 null），返回最新档案 */
-export const changeCape = (capeId: string | null) => invoke<ProfileSkins>(IPC.skinCape, capeId)
+export const changeCape = (capeId: string | null) => refreshSkinAfter(invoke<ProfileSkins>(IPC.skinCape, capeId))
 /** 历史皮肤（含 dataUrl 缩略图，新→旧） */
 export const getSkinHistory = () => invoke<SkinHistoryEntry[]>(IPC.skinHistory)
 /** 删除一条历史，返回最新列表 */

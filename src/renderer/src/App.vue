@@ -1779,10 +1779,10 @@ onUnmounted(() => {
   flex-direction: column;
   background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   border-right: 1px solid var(--border);
-  /* Keep the translucent navigation in its own composited surface across
-     window resize and submenu layout changes, including software rendering. */
-  transform: translateZ(0);
-  backface-visibility: hidden;
+  /* Let Chromium compose the sidebar normally. Forcing a translated,
+     backface-hidden surface retains stale navigation pixels after scrolling
+     and minimum-window layout changes. The moving highlight keeps its own
+     transform and transition below. */
 }
 
 .logo-area {

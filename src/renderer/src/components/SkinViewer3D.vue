@@ -7,13 +7,13 @@ import { AmbientLight, DirectionalLight, Mesh, NearestFilter, PerspectiveCamera,
 import type { SkinFace } from '@shared/skinPixels'
 import { useMotion } from '../motion'
 import { PreviewPlayer } from '../skinModel'
-import { loadImage, migrateLegacySkin, detectSkinVariant } from '../skin-render'
+import { loadImage, migrateLegacySkin, detectSkinVariant, normalizeCape } from '../skin-render'
 import { beginBootTask } from '../bootTasks'
 import { createFallbackSkin } from '../fallbackSkin'
 import { SkinGestureOwner } from '../skinEditorInteraction'
 import { MascotFrameDriver } from '../mascotFrameDriver'
 const props = withDefaults(defineProps<{ src?: string; cape?: string; variant?: 'classic' | 'slim'; animation?: 'walk' | 'idle'; paused?: boolean; editCanvas?: HTMLCanvasElement; revision?: number; editMode?: 'draw' | 'rotate'; editDisabled?: boolean; layer?: 'inner' | 'outer'; hiddenParts?: string[] }>(), { src:'', cape:'', variant:'classic', animation:'walk', paused:false })
-const emit = defineEmits<{ stroke: [active: boolean]; pixel: [x: number, y: number, face: SkinFace]; gap: []; rotate: [] }>()
+const emit = defineEmits<{ stroke: [active: boolean]; pixel: [x: number, y: number, face: SkinFace]; gap: []; rotate: []; capeError: [message: string] }>()
 const interactive = inject(MASCOT_INTERACTIVE, undefined)
 // Editing and camera gestures continue; only decorative walking yields priority.
 const effectivePaused = computed(() => props.paused || (!!interactive?.value && !props.editCanvas))
@@ -79,11 +79,12 @@ function paintAt(event: PointerEvent) {
 async function updateCape(): Promise<void> {
   if (!gl) return
   const request = ++capeRequest
-  let image: HTMLImageElement | undefined
-  try { if (props.cape) image = await loadImage(props.cape) } catch { /* Hide a failed cape, never reuse a stale texture. */ }
+  let image: HTMLCanvasElement | undefined, error = ''
+  try { if (props.cape) image = normalizeCape(await loadImage(props.cape)) }
+  catch { error = '披风材质无法加载或尺寸不受支持，请刷新重试' }
   if (closed || request !== capeRequest) return
   const next = image ? texture(image) : null, old = cape
-  cape = next; player.setCape(next); old?.dispose(); wake()
+  cape = next; player.setCape(next); old?.dispose(); emit('capeError', error); wake()
 }
 function fit(): void {
   const el = container.value

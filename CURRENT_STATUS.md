@@ -1,4 +1,59 @@
-# CURRENT STATUS — KAMUCL 1.1.14 Mac ARM64 接续候选
+# CURRENT STATUS — KAMUCL 1.1.15 Windows
+
+## Identity
+
+- Project: KAMUCL。
+- Version or revision: 1.1.15；最终master/main独立提交与v1.1.15标签由归档外部DELIVERY-1.1.15.json及Release回执记录。
+- Status timestamp: 2026-10-06 18:18（Asia/Hong_Kong）。
+- Prepared by: 本批实施与独立评审agent；Windows x64四项修改，未继承全平台合格结论。
+
+## Last verified state
+
+- Build command: npm run build；npx electron-builder --win portable --x64 --config.electronDist=node_modules/electron/dist --publish never；node scripts/pack-windows-zip.cjs。
+- Build result: 17:34香港时间冻结497项工作输入后构建，Electron44.3.0，最终三包如下。原有图标另作构建后Git字节核对；构建后的QA、文档和证据不冒称产品重新构建。源码ZIP保留Git blob字节，CRLF/LF及原生编译时间差异单列。
+- Test/validation commands: npm test、npx tsc --noEmit、npm run license:check；本批真实坐标、原生合成、编译工具与干净包脚本见 docs/validation-1.1.15/README.md。
+- Validation results: 最终全量1208项：1207通过、0失败、1 Linux专属跳过；类型、许可、生产构建、四主题隐私／分类／披风、重启持久化、30个三主题初次窗口状态、7项编译工具保护、3包干净验证均通过。独立评审结论与分项≥8.5门槛见INDEPENDENT_REVIEW.md；真实服务／夹具／原始失败分别保留。
+- Finished artifact / Artifact SHA256:
+
+| Windows成品 | 字节 | SHA256 |
+| --- | ---: | --- |
+| KAMUCL-1.1.15.exe | 97289152 | `4822890c6cc94353a16687d812fdfb0be9379dad1c0258ef4b1a35c14d686df9` |
+| KAMUCL-1.1.15-windows-x64.zip | 97320724 | `9f7f6de1a92b4e8a2d9f09bb24140082040a80ae8e9d9def58765212b4df6d0f` |
+| KAMUCL-1.1.15-windows-x64-unpacked.zip | 142949477 | `bafb95956a15dd428fd93938f348de77e5ff6b331adb4acd95d5ee867c3c164f` |
+
+源码与交接ZIP的摘要在归档外部清单中，避免自引用。交接包显式包含源码和上述三包，记录命令["node","source/scripts/check-licenses.cjs"]仅验证许可。运输复制、干净解压和命令再执行由交付回执记录，功能证据不由许可命令替代。
+
+## Completed
+
+- 服务器地址默认隐藏；点击显示，选择／导航／失焦／隐藏后清除；服务器名称、公告、玩家、版本和提示脱敏。
+- 自建版本分类增删改、归类及独立收藏过滤；跨游戏文件夹稳定实例键，分类删除不改实例／收藏。88个合成实例文件字节保持不变。
+- 披风失败补载、真实错误和刷新入口、同URL旧像素保留、切换账户的迟到响应隔离、标准／紧凑／高清纹理；20活动缩略图和20清晰背面复评，四轮自有进程身份在自然退出后全结束。
+- Windows淡入完成后的原生样式缓存刷新，七项保护；撤销侧栏两项强制合成声明，四主题全历史无注入新成品16张原生侧栏图均清晰，保留GPU及动效。
+
+## Remaining
+
+- 发布附件、源码／交接归档与master/main/tag远端核对按已授权流程完成，精确回执位于归档外部；不把此文档自引用为发布证明。
+- 原用户灰屏和原披风账号服务未复现／未取得；Mac ARM64 1.1.14历史失败未解决，不纳入本版Windows放行。
+
+## Changed or important files
+
+src/shared/serverPrivacy.ts、connection/ServerAddress.vue与服务器页面；shared/core/versionCategories.ts、VersionCategoriesPanel.vue及GameView；skinTexture.ts、skinProfileCache.ts、skins.ts与SkinViewer3D；native/WindowMaterial.cs、App.vue；本批QA和docs/validation-1.1.15证据。
+
+## Decisions and constraints
+
+资源优化停止；保留用户数据、历史人物计数、旧实例及pelican-bicycle.html。不操作wuhui、不强推，main只cherry-pick保留独立历史和既有文档差异。Collector的visualPending字段保持原样，独立评审另行结论。公开截图仅去隐私合成页面与原生侧栏，不包含外部置顶窗口裁图。
+
+## Known issues and risks
+
+原首次灰色全窗口未复现，不把原生刷新机制当成用户设备因果证明；Aurora/Hero/Twisted原账号真实服务未覆盖；本批合成服务器专项未验证真实剪贴板／公开连接／实际游戏。最小配置960×620，本机125%实测外框962×623、内容961×622。Windows发行者未签名（NotSigned），真人听感无本批结论；Mac14世界／恢复／帧率门槛仍失败，未正式发布；Intel/Linux/鸿蒙不在本批成品范围。全部历史无效截图、前台变化、QA桥绑定、进程复用与纹理失败均保留，不回填为通过。
+
+## Recommended next action
+
+用户下载本版Windows并核对SHA256，使用自己的账号与游戏目录；接续开发者从最终标签源码及本批证据继续真实服务／其他平台验收。先读本版README与独立评审，不继承历史失败成品资格。
+
+---
+
+# Historical CURRENT STATUS — KAMUCL 1.1.14 Mac ARM64 接续候选
 
 2026-10-06 14:28（Asia/Hong_Kong）补充：第三轮原生运行 37421862931，源 `4b43130cfb5ac9a44c10c21570b9c79bdc4cca54`，13 项任务为 8 成功、4 失败、1 撤回跳过；纯测试 1147 项中 1142 通过、0 失败、5 平台跳过。DMG 四主题实际 1280×900 与 960×620、125% 缩放通过。APP 皮肤行走原始 22 完整帧跨度 1.75 秒，12 FPS，原门槛 30 FPS，保持失败；收藏 APP/DMG 的 1.20.1 世界 240 秒失败和显示恢复失败保持。parity 的主题重载后旧文档身份错误只修 QA，后续精确重构建的专项不算完整功能通过。独立最终评分仍未满足，不发布正式 v1.1.14。下方成品表保持为原 298 构建的历史原件，最新成品以外部交付清单为准。
 

@@ -1,4 +1,5 @@
 import { cleanDesign } from '../../shared/visualDesign'
+import { normalizeVersionCategoryState } from '../../shared/versionCategories'
 import { ensureDefaultGameFolder } from './defaultGameFolder'
 /**
  * 设置持久化：userData/settings.json
@@ -58,6 +59,8 @@ function defaults(): Settings {
     custom: structuredClone(DEFAULT_CUSTOM_THEME),
     disabledFeatures: [],
     favoriteVersions: [],
+    versionCategories: [],
+    versionCategoryAssignments: {},
     homeLayout: structuredClone(DEFAULT_HOME_LAYOUT),
     background: structuredClone(DEFAULT_BACKGROUND),
     launchThumbnail: structuredClone(DEFAULT_LAUNCH_THUMBNAIL),
@@ -92,6 +95,7 @@ export function getSettings(): Settings {
     cached = {
       ...def,
       ...raw,
+      ...normalizeVersionCategoryState(raw),
       visualDesign: cleanDesign(raw.visualDesign),
       resolution: { ...def.resolution, ...(raw.resolution ?? {}) },
       custom: {
