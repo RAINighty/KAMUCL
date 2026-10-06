@@ -90,7 +90,7 @@ function verifyInstalledSummary(result,expected){
  return files
 }
 async function run(){
- const [application,arch=process.arch,stage=process.platform==='darwin'?'app':'portable']=process.argv.slice(2);assert(application);assert.equal(process.arch,arch);assert(['win32','darwin'].includes(process.platform));assert.equal(pkg.version,'1.1.13')
+ const [application,arch=process.arch,stage=process.platform==='darwin'?'app':'portable']=process.argv.slice(2);assert(application);assert.equal(process.arch,arch);assert(['win32','darwin'].includes(process.platform));assert.equal(require('./ui-capabilities.cjs').favoriteInstallIntent,true,'current favorite installation contract must be tested regardless of patch version')
  const transport=qaProxyTransport()
  const threads=qaDownloadThreads()
  const mirror=qaDownloadMirror();if(mirror!==null)assert.equal(threads,4,'Explicit BMCLAPI QA requires KAMUCL_QA_DOWNLOAD_THREADS=4 and its actual native Settings UI change')

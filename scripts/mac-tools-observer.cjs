@@ -33,13 +33,18 @@ function createMacToolsObserver(proof,identity,now=()=>Date.now(),writer=(file,t
   const declared=[...new Set([...text.matchAll(/Logs will be saved to ([^\r\n]*application\.log)/g)].map(match=>match[1]))]
   for(const source of declared){
    const row={reportedPath:source,at:now()};trace.applicationLogs.push(row)
-   try{const resolved=path.resolve(source);assert(resolved.startsWith(canonical+path.sep),'reported log outside owned tool root');assert.equal(path.basename(resolved),'application.log')
+   try{let resolved=path.resolve(source);assert(resolved.startsWith(canonical+path.sep),'reported log outside owned tool root');assert.equal(path.basename(resolved),'application.log')
+    if(!fs.existsSync(resolved)){
+     const relative=path.relative(path.join(canonical,'terracotta'),resolved),parts=relative.split(path.sep)
+     assert(/^mac-session-[A-Za-z0-9]+$/.test(parts[0])&&parts.length>1&&!parts.includes('..'),'missing log must belong to an owned Mac session')
+     resolved=path.join(canonical,'terracotta','session-history',...parts);row.archivedPath=resolved
+    }
     let ancestor=canonical;for(const part of path.relative(canonical,resolved).split(path.sep)){ancestor=path.join(ancestor,part);assert(!fs.lstatSync(ancestor).isSymbolicLink(),'reported log path cannot contain a link')}
     const stat=fs.lstatSync(resolved);assert(stat.isFile()&&stat.size<=8*1024*1024,'reported application log must be a bounded regular file');assert.equal(fs.realpathSync.native(resolved),resolved)
     const name=`application-${trace.applicationLogs.length}.log`,target=path.join(proof,name);fs.copyFileSync(resolved,target,fs.constants.COPYFILE_EXCL)
     const copied=fs.lstatSync(target);assert(copied.isFile()&&!copied.isSymbolicLink()&&copied.size<=8*1024*1024,'copied application log must be a bounded regular snapshot')
     Object.assign(row,{file:name,observedSourceBytes:stat.size,bytes:copied.size,sha256:crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')})
-   }catch(error){row.diagnosticError=errorValue(error)}save()
+   }catch(error){row.diagnosticError=errorValue(error);trace.diagnosticErrors.push({at:now(),operation:'collect-application-log',reportedPath:source,error:row.diagnosticError})}save()
   }
  }
  if(!save())throw Error('Initial owned diagnostics could not be saved; no product operation started')

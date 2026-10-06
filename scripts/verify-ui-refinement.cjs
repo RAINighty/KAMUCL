@@ -1,4 +1,49 @@
 // Actual portable EXE GUI, with an isolated profile and loopback-only inspection.
+function classifyThemeReadiness(sample, expected) {
+  const check=require('node:assert/strict'), main=sample.main, renderer=sample.renderer
+  check(main&&Number.isInteger(main.pid),'owned theme main observation missing')
+  check(main.pid===expected.childPid||main.ppid===expected.childPid,'theme inspector belongs to another process')
+  check.equal(main.profile,expected.profile,'theme profile must be the actual owned profile')
+  check.equal(main.persistedReadError,null,'owned settings file could not be read')
+  check.equal(main.persistedTheme,expected.theme,'persisted theme must match the requested theme')
+  if(!renderer)return false
+  check.equal(renderer.timeOrigin,renderer.before.timeOrigin,'theme observation changed document during settings read')
+  check.equal(renderer.url,expected.url,'theme observation left the actual renderer document')
+  if(renderer.timeOrigin===expected.beforeTimeOrigin||renderer.readyState!=='complete')return false
+  check.equal(renderer.settingsTheme,expected.theme,'real settings:get must preserve the requested theme')
+  check.equal(renderer.storeFound,true,'actual App store must be observable')
+  if(renderer.initialized!==true)return false
+  check.equal(renderer.storeTheme,expected.theme,'initialized App store must preserve the requested theme')
+  check.equal(renderer.domTheme,expected.theme,'requested theme must actually apply after initialization')
+  return true
+}
+async function waitForThemeReadiness({observe,expected,now=()=>performance.now(),sleep=ms=>new Promise(r=>setTimeout(r,ms)),onSample=()=>{},maximumMs=12000}) {
+  const started=now()
+  while(now()-started<maximumMs){
+    let sample
+    try{sample=await observe(()=>Math.max(1,maximumMs-(now()-started)))}
+    catch(error){onSample({elapsedMs:now()-started,error:{name:error.name,message:error.message}});throw error}
+    const row={elapsedMs:now()-started,sample};onSample(row)
+    if(now()-started>=maximumMs)throw Error('Actual theme readiness exceeded the existing 12-second inspection budget')
+    if(classifyThemeReadiness(sample,expected))return row
+    await sleep(Math.min(80,Math.max(0,maximumMs-(now()-started))))
+  }
+  throw Error('Actual new-document theme did not become ready within the existing 12-second inspection budget')
+}
+async function readActualRendererTheme(beforeTimeOrigin) {
+  const before={timeOrigin:performance.timeOrigin,url:document.URL,readyState:document.readyState}
+  if(before.timeOrigin===beforeTimeOrigin||before.readyState!=='complete')return{before,...before}
+  const settings=await window.kamucl.invoke('settings:get')
+  // Production inline templates do not expose setupState. Import the document's
+  // already-loaded entry module and identify its actual exported reactive store.
+  const scripts=[...document.querySelectorAll('script[type="module"][src]')],moduleURL=scripts.length===1?scripts[0].src:null
+  const namespace=moduleURL?await import(moduleURL):{},candidates=Object.entries(namespace).filter(([,value])=>value&&typeof value==='object'&&typeof value.initialized==='boolean'&&typeof value.currentView==='string'&&Array.isArray(value.accounts)&&Array.isArray(value.installed)&&Array.isArray(value.tasks))
+  const store=candidates.length===1?candidates[0][1]:null
+  return{before,timeOrigin:performance.timeOrigin,url:document.URL,readyState:document.readyState,settingsTheme:settings.theme,moduleURL,storeExportKey:store?candidates[0][0]:null,storeCandidates:candidates.length,storeFound:!!store,initialized:store?.initialized,storeTheme:store?.settings?.theme,domTheme:document.documentElement.dataset.theme}
+}
+module.exports={classifyThemeReadiness,waitForThemeReadiness,readActualRendererTheme}
+// The established skin-surface CLI intentionally imports this runner.
+if(require.main===module||module.parent?.filename===require.resolve('./verify-skin-surfaces-ui.cjs')){
 if (process.argv[2]) {
   if (!['transparent', 'black-orange', 'blue-white', 'custom'].includes(process.argv[2])) throw new Error('Unknown GUI theme argument')
   process.env.KAMUCL_TEST_THEME = process.argv[2]
@@ -35,8 +80,8 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
  try {
   let page;for(let i=0;i<90;i++){assert(child.exitCode===null,'portable exited before UI');try{page=(await(await fetch(`http://127.0.0.1:${port}/json`)).json()).find(p=>p.url.includes('/renderer/index.html'));if(page)break}catch{}await wait(1000)}assert(page,'renderer unavailable');
   diagnosticRendererURL=page.webSocketDebuggerUrl;ws=new WebSocket(page.webSocketDebuggerUrl);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true})});let id=0;const pending=new Map();ws.addEventListener('message',e=>{const m=JSON.parse(e.data);pending.get(m.id)?.(m);if(m.method==='Runtime.exceptionThrown'||m.method==='Runtime.consoleAPICalled'&&m.params.type==='error'){if(originalConsoleErrors.length<128)originalConsoleErrors.push({method:m.method,...m.params});console.error(JSON.stringify(m.params))}});
-  const call=(method,params={})=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>{pending.delete(n);reject(Error(method+' timed out: '+(params.expression||'').slice(0,180)))},12000);pending.set(n,m=>{clearTimeout(t);pending.delete(n);m.error?reject(Error(JSON.stringify(m.error))):resolve(m.result)});ws.send(JSON.stringify({id:n,method,params}))});
-  const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value};
+  const call=(method,params={},timeoutMs=12000)=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>{pending.delete(n);reject(Error(method+' timed out: '+(params.expression||'').slice(0,180)))},timeoutMs);pending.set(n,m=>{clearTimeout(t);pending.delete(n);m.error?reject(Error(JSON.stringify(m.error))):resolve(m.result)});ws.send(JSON.stringify({id:n,method,params}))});
+  const evaluate=async (expression,timeoutMs=12000)=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},timeoutMs);if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value};
   await call('Runtime.enable');await call('Emulation.setFocusEmulationEnabled',{enabled:true});await call('Page.bringToFront');
   let text='';for(let i=0;i<30;i++){text=await evaluate("document.body?.innerText || ''");if(text?.includes(version)&&text.includes('开始游戏')&&(macParity||await evaluate("!!document.querySelector('.viewer3d canvas')")))break;await wait(1000)}
   assert(text.includes(version)&&text.includes('开始游戏'));if(!macParity)assert(await evaluate("!!document.querySelector('.viewer3d canvas')"),'skin canvas missing');await wait(6500);
@@ -49,7 +94,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   }
   assert(mainPage,'main inspector did not become available within 6 seconds: '+JSON.stringify(mainReadiness.samples.at(-1)));
   mainWs=new WebSocket(mainPage.webSocketDebuggerUrl);await new Promise(r=>mainWs.addEventListener('open',r,{once:true}));let mid=0;const mp=new Map();mainWs.addEventListener('message',e=>{const m=JSON.parse(e.data);mp.get(m.id)?.(m)});
-  const main=expression=>new Promise((resolve,reject)=>{const n=++mid,t=setTimeout(()=>reject(Error('Main inspection timeout')),10000);mp.set(n,m=>{clearTimeout(t);mp.delete(n);m.result?.exceptionDetails?reject(Error(JSON.stringify(m.result.exceptionDetails))):resolve(m.result?.result?.value)});mainWs.send(JSON.stringify({id:n,method:'Runtime.evaluate',params:{expression,returnByValue:true,awaitPromise:true}}))});
+  const main=(expression,timeoutMs=10000)=>new Promise((resolve,reject)=>{const n=++mid,t=setTimeout(()=>{mp.delete(n);reject(Error('Main inspection timeout'))},timeoutMs);mp.set(n,m=>{clearTimeout(t);mp.delete(n);m.error?reject(Error(JSON.stringify(m.error))):m.result?.exceptionDetails?reject(Error(JSON.stringify(m.result.exceptionDetails))):resolve(m.result?.result?.value)});mainWs.send(JSON.stringify({id:n,method:'Runtime.evaluate',params:{expression,returnByValue:true,awaitPromise:true}}))});
 
   const shotDir=path.resolve('release/ui-refinement-'+(process.env.KAMUCL_TEST_THEME||'black-orange'));fs.mkdirSync(shotDir,{recursive:true});
   fs.writeFileSync('out/ui-live.json',JSON.stringify({root,port,mainPort,pid:child.pid,shotDir}));
@@ -58,7 +103,37 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   const skinFixture = await evaluate("(()=>{const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');g.fillStyle='#49a595';g.fillRect(0,0,64,64);g.fillStyle='#a07856';g.fillRect(8,8,8,8);return c.toDataURL()})()");
   await main(`globalThis.testElectron=process.mainModule.require('electron');globalThis.uiSkin=${JSON.stringify(skinFixture)};globalThis.uiAccount={id:'ui-fixture',type:'microsoft',username:'界面验证账户',uuid:'00000000000000000000000000000001'};for(const [channel,handler] of [['accounts:selected',()=>uiAccount],['accounts:list',()=>[uiAccount]],['skin:profile',()=>({username:uiAccount.username,skins:[{id:'fixture',variant:'classic',dataUrl:uiSkin,url:''}],capes:[]})],['skin:history',()=>[]],['skin:avatar',()=>uiSkin]]){testElectron.ipcMain.removeHandler(channel);testElectron.ipcMain.handle(channel,handler)}`);
   }
-  await call('Page.reload'); await wait(2200);
+  const reloadThemeReady=async label=>{
+    const requestedTheme=process.env.KAMUCL_TEST_THEME||'black-orange',expectedProfile=fs.realpathSync.native(profile)
+    const stage=process.env.KAMUCL_NATIVE_RECORDER_STAGE119||(exe.split(path.sep).includes('dmg-mount')?'dmg':'app')
+    const directory=macParity?path.resolve('release','mac-parity-proof-'+process.arch+'-app'):process.platform==='darwin'?path.resolve('release','mac-proof-'+process.arch+'-'+stage,'theme-readiness'):path.resolve('out','theme-readiness')
+    fs.mkdirSync(directory,{recursive:true})
+    const name='theme-reload-'+(parityPhase||'gui')+'-'+label+'-'+randomUUID(),receiptFile=path.join(directory,name+'.json'),captureFile=path.join(directory,name+'.png')
+    const receipt={version,classification:'Read-only actual owned profile/settings and new renderer document; no theme setter or fabricated state',label,requestedTheme,expectedProfile,childPid:child.pid,startedAt:new Date().toISOString(),maximumMs:12000,complete:false,samples:[]}
+    fs.writeFileSync(receiptFile,JSON.stringify(receipt,null,2),{flag:'wx'})
+    const save=()=>fs.writeFileSync(receiptFile,JSON.stringify(receipt,null,2))
+    try{
+      receipt.before=await evaluate('({timeOrigin:performance.timeOrigin,url:document.URL,readyState:document.readyState,domTheme:document.documentElement.dataset.theme})');save()
+      await call('Page.reload')
+      const expected={childPid:child.pid,profile:expectedProfile,theme:requestedTheme,url:receipt.before.url,beforeTimeOrigin:receipt.before.timeOrigin}
+      await waitForThemeReadiness({expected,onSample:row=>{receipt.samples.push(row);save()},observe:async remaining=>{
+        const mainState=await main(`(()=>{const e=globalThis.testElectron||process.mainModule.require('electron'),f=process.mainModule.require('node:fs'),p=process.mainModule.require('node:path');const raw=e.app.getPath('userData'),actual=f.realpathSync.native(raw);let persistedTheme=null,persistedReadError=null;if(actual===${JSON.stringify(expectedProfile)})try{persistedTheme=JSON.parse(f.readFileSync(p.join(actual,'settings.json'),'utf8')).theme}catch(error){persistedReadError={name:error.name,message:error.message}};return{pid:process.pid,ppid:process.ppid,profile:actual,profileAsReported:raw,persistedTheme,persistedReadError}})()`,Math.min(10000,remaining()))
+        // Validate ownership before reading any renderer settings, and retain the
+        // main sample even when the current renderer execution context is gone.
+        try{classifyThemeReadiness({main:mainState},expected)}catch(error){receipt.samples.push({elapsedMs:null,sample:{main:mainState},classificationError:{name:error.name,message:error.message}});save();throw error}
+        let renderer
+        try{renderer=await evaluate(`(${readActualRendererTheme.toString()})(${JSON.stringify(receipt.before.timeOrigin)})`,Math.min(12000,remaining()))}
+        catch(error){receipt.samples.push({elapsedMs:null,sample:{main:mainState},rendererReadError:{name:error.name,message:error.message}});save();if(/Cannot find (?:default )?execution context|Execution context was destroyed|Inspected target navigated|Cannot find context with specified id/.test(error.message))return{main:mainState};throw error}
+        return{main:mainState,renderer}
+      }})
+      receipt.complete=true
+    }catch(error){receipt.error={name:error.name,message:error.message};throw error}
+    finally{
+      try{const image=await call('Page.captureScreenshot',{format:'png'});const bytes=Buffer.from(image.data,'base64');fs.writeFileSync(captureFile,bytes,{flag:'wx'});receipt.capture={file:path.basename(captureFile),bytes:bytes.length,sha256:require('node:crypto').createHash('sha256').update(bytes).digest('hex'),classification:receipt.complete?'Actual ready-state capture':'Original failure-state capture; no ready-state success inferred'}}catch(error){receipt.captureError={name:error.name,message:error.message}}
+      receipt.finishedAt=new Date().toISOString();save()
+    }
+  }
+  await reloadThemeReady('initial')
   if(process.platform==='darwin'){
     // CDP focus emulation does not activate NSApp. The disposable native QA
     // window must be genuinely foreground before trusted coordinate gestures.
@@ -143,7 +218,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   const closeApp=async()=>{if(process.platform==='darwin')await main('setTimeout(()=>testElectron.app.quit(),500)');mainWs.close();await wait(100);if(process.platform!=='darwin')await evaluate("setTimeout(()=>window.kamucl.send('window:close'),100); true");for(let i=0;i<100&&child.exitCode===null;i++)await wait(100);assert.equal(child.exitCode,0)};
   if(process.env.KAMUCL_EXTENSION_ONLY){await closeApp();return}
   // Reset renderer caches populated by extension fixtures before the original regression.
-  if(process.env.KAMUCL_EXTENSION_GUI){await call('Page.reload');await wait(2200)}
+  if(process.env.KAMUCL_EXTENSION_GUI)await reloadThemeReady('after-extensions')
   const issues=[];const checkLayout=async name=>{
     const result=await evaluate('(()=>{const c=document.querySelector(".content");return {width:innerWidth,scroll:c.scrollWidth,client:c.clientWidth,over:[...c.querySelectorAll("button,input,select,h1,h3,.fm-row,.result-card")].filter(e=>e.getClientRects().length&&e.getBoundingClientRect().right>innerWidth+3).map(e=>e.className).slice(0,8)}})()');
     if(result.scroll>result.client+3||result.over.length)issues.push({name,...result});
@@ -256,3 +331,4 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
   if(closeError)throw closeError
  })}
 })().catch(e=>{console.error(e);process.exitCode=1});
+}

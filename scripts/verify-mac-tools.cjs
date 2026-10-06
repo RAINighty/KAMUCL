@@ -27,10 +27,11 @@ app.whenReady().then(async()=>{
   await handlers['tc:install']();observer.assertOpen();const status=await handlers['tc:status']();observer.assertOpen();assert(status.binaryReady)
   observer.stage('public tool downloads verified',{frpVersion,status})
   const portFile=path.join(root,'port.json'),log=fs.openSync(path.join(proof,'terracotta-output.txt'),'w')
-  const env={...process.env,HOME:path.join(root,'terracotta')}
+  const rawHome=path.join(root,'raw-native-home');fs.mkdirSync(rawHome,{mode:0o700})
+  const env={...process.env,HOME:rawHome}
   observer.assertOpen();try{tc=observer.childProcesses(require('child_process'),'raw-native-daemon').spawn(status.binaryPath,['--daemon'],{env,stdio:['ignore',log,log]})}finally{fs.closeSync(log)}
   observer.stage('raw owned daemon spawned',{pid:tc.pid,executable:status.binaryPath})
-  let port;for(let n=0;n<120;n++){observer.assertOpen();assert.equal(tc.exitCode,null,'Terracotta exited early');await wait(500);observer.assertOpen();try{execFileSync(status.binaryPath,['--hmcl',portFile],{env,timeout:5000});port=JSON.parse(fs.readFileSync(portFile,'utf8')).port;if(port)break}catch{}}
+  let port;for(let n=0;n<120;n++){observer.assertOpen();assert.equal(tc.exitCode,null,'Terracotta exited early');await wait(500);observer.assertOpen();try{const bytes=fs.readFileSync(path.join(rawHome,'terracotta','terracotta.lock'));if(bytes.length===2){port=bytes.readUInt16BE(0);if(port)break}}catch{}}
   assert(port,'Terracotta did not initialize its HTTP API');const state=await get(port,'/state');observer.assertOpen();assert.doesNotThrow(()=>JSON.parse(state))
   observer.stage('raw owned daemon HTTP state',{port,state:JSON.parse(state)})
   // The daemon closes its listener before this shutdown request always receives
@@ -50,13 +51,26 @@ app.whenReady().then(async()=>{
   assert(['hosting','ready'].includes(started.phase),'product Terracotta daemon did not reach its API')
   const own=observer.trace.processes.filter(row=>row.origin==='product'&&row.executable===status.binaryPath&&JSON.stringify(row.argv)==='["--daemon"]');assert.equal(own.length,1,'one original product-owned daemon spawn required')
   const pid=own[0].pid;assert(Number.isInteger(pid)&&pid>0)
+  const productHome=own[0].ownedEnv.HOME;assert.equal(path.dirname(productHome),path.join(root,'terracotta'));assert.match(path.basename(productHome),/^mac-session-/);assert.notEqual(productHome,env.HOME)
+  assert.equal(observer.trace.clients.filter(row=>row.origin==='product').length,0,'product must never race --hmcl or invoke a system service')
+  const persistentIdentity=fs.readFileSync(path.join(root,'terracotta','terracotta','machine-id'));assert.equal(persistentIdentity.length,16);assert.deepEqual(fs.readFileSync(path.join(productHome,'terracotta','machine-id')),persistentIdentity)
   const row=execFileSync('/bin/ps',['-p',String(pid),'-o','pid=,pgid='],{encoding:'utf8'}).trim()
   const [observedPid,group]=row.split(/\s+/).map(Number);assert.equal(observedPid,pid);assert.equal(pid,group,'daemon group must be isolated')
   await handlers['tc:stop']();observer.assertOpen();await starting;observer.assertOpen()
   let groupStopped=false
   for(let n=0;n<40;n++){observer.assertOpen();try{process.kill(-group,0)}catch{groupStopped=true;break}await wait(100);observer.assertOpen()}
   assert(groupStopped,'owned Terracotta process group did not stop')
+  assert(!fs.existsSync(productHome),'closed session must leave active directory');const archived=path.join(root,'terracotta','session-history',path.basename(productHome));assert(fs.statSync(archived).isDirectory());assert.deepEqual(fs.readFileSync(path.join(archived,'terracotta','machine-id')),persistentIdentity)
   observer.stage('product owned group cleanup verified',{pid,group,groupStopped})
+  // Restart through the same unmodified IPC: identity is durable, the new HOME
+  // must be distinct, and stopping it must retain the earlier diagnostic archive.
+  const restarting=handlers['tc:start'](null,{mode:'host',playerName:'NativeMacTest'});void restarting.catch(()=>{})
+  for(let n=0;n<60;n++){observer.assertOpen();started=await handlers['tc:status']();observer.status(started);if(['hosting','ready'].includes(started.phase))break;await wait(250)}
+  assert(['hosting','ready'].includes(started.phase),'restarted original product must reach its API')
+  const second=observer.trace.processes.filter(row=>row.origin==='product'&&row.executable===status.binaryPath&&JSON.stringify(row.argv)==='["--daemon"]');assert.equal(second.length,2);assert.notEqual(second[1].ownedEnv.HOME,productHome);assert.deepEqual(fs.readFileSync(path.join(second[1].ownedEnv.HOME,'terracotta','machine-id')),persistentIdentity)
+  await handlers['tc:stop']();await restarting;assert(!fs.existsSync(second[1].ownedEnv.HOME));assert(fs.statSync(archived).isDirectory());assert.deepEqual(fs.readFileSync(path.join(root,'terracotta','terracotta','machine-id')),persistentIdentity)
+  assert.equal(observer.trace.clients.filter(row=>row.origin==='product').length,0)
+  observer.stage('product isolated restart and durable identity verified',{firstHome:productHome,secondHome:second[1].ownedEnv.HOME,archived,identityBytes:persistentIdentity.length})
   fs.writeFileSync(path.join(proof,'verification.json'),JSON.stringify({arch:process.arch,frpVersion,terracotta:status,apiState:JSON.parse(state),privateDaemonIpc:true,groupStopped},null,2))
   console.log('PASS native Mac FRP and Terracotta download, hashes, permissions and execution')
 }).then(()=>finish(0)).catch(error=>finish(1,error))

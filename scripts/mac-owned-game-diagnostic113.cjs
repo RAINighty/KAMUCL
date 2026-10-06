@@ -91,7 +91,7 @@ function rawRunner({directory,execute=execFile}){
   // close avoids a wedged sample/jcmd keeping failure cleanup pending forever;
   // the observed Java game is never signalled by this helper.
   const result=await new Promise(resolve=>{const child=execute(exe,args,{encoding:null,timeout:timeoutMs,killSignal:'SIGKILL',maxBuffer,windowsHide:true},(error,stdout,stderr)=>resolve({error,stdout:Buffer.from(stdout??''),stderr:Buffer.from(stderr??'')}));receipt.toolPID=Number.isSafeInteger(child?.pid)&&child.pid>0?child.pid:null})
-  receipt.finishedAt=new Date().toISOString();receipt.exit={code:result.error?.code??0,signal:result.error?.signal??null,killed:!!result.error?.killed};receipt.complete=!result.error
+  receipt.finishedAt=new Date().toISOString();receipt.exit={code:result.error?(result.error.code??null):0,signal:result.error?.signal??null,killed:!!result.error?.killed};receipt.complete=!result.error
   if(result.error)receipt.error={name:result.error.name,code:result.error.code??null,message:result.error.message}
   for(const kind of ['stdout','stderr']){const file=prefix+'.'+kind+'.log',bytes=result[kind];fs.writeFileSync(path.join(directory,file),bytes,{flag:'wx'});receipt[kind]={file,bytes:bytes.length,sha256:sha(bytes)}}
   fs.writeFileSync(path.join(directory,prefix+'.receipt.json'),JSON.stringify(receipt,null,2)+'\n',{flag:'wx'})

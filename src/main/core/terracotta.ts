@@ -12,7 +12,7 @@ import { promisify } from 'node:util'
  *
  * IPC：invoke 'tc:start'|'tc:stop'|'tc:status'；push 'tc:event' {type:'log'|'ready'|'error'|'stopped', data}
  */
-import { spawn, execFile, ChildProcess } from 'node:child_process'
+import { spawn, ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import https from 'node:https'
@@ -86,8 +86,8 @@ export interface TerracottaState {
 let proc: ChildProcess | null = null
 let httpPort = 0
 let portFile = ''
-type LinuxSession = { directory: string; child: ChildProcess; closed: Promise<void>; cleanup?: Promise<void> }
-let linuxSession: LinuxSession | null = null
+type UnixSession = { directory: string; child: ChildProcess; closed: Promise<void>; cleanup?: Promise<void>; mac?: boolean }
+let unixSession: UnixSession | null = null
 let state: TerracottaState = { phase: 'idle' }
 let stateTimer: ReturnType<typeof setInterval> | undefined
 let disposedByUser = false
@@ -214,27 +214,28 @@ async function verifySha256(file: string, expected: string): Promise<boolean> {
 async function startProcess(): Promise<number> {
   const exe = binaryPath()
   const linux = process.platform === 'linux'
-  if (linux) {
+  const mac = process.platform === 'darwin'
+  if (linux || mac) {
     fs.mkdirSync(tcDir(), { recursive: true })
     if (!fs.lstatSync(tcDir()).isDirectory() || fs.lstatSync(tcDir()).isSymbolicLink()) throw new Error('陶瓦工具目录不是独立目录')
   }
   // v0.4.2 uses temp_dir()/terracotta for its Unix lock, logs and service.
   // A unique TMPDIR prevents --hmcl from attaching to or replacing another
   // launcher's service, including another KAMUCL process using this profile.
-  const dir = fs.mkdtempSync(path.join(linux ? tcDir() : os.tmpdir(), linux ? 'linux-session-' : 'kamucl-tc-'))
+  const dir = fs.mkdtempSync(path.join(linux || mac ? tcDir() : os.tmpdir(), linux ? 'linux-session-' : mac ? 'mac-session-' : 'kamucl-tc-'))
   portFile = path.join(dir, 'http')
   fs.rmSync(portFile, { force: true })
   disposedByUser = false
   // macOS --hmcl is a short-lived client of the daemon, not the server. Own an
   // isolated daemon directly; do not install/stop the player's global HMCL service.
-  const mac = process.platform === 'darwin'
-  const env = mac ? { ...process.env, HOME: tcDir() } : linux ? { ...process.env, TMPDIR: dir } : process.env
+  if (mac) prepareMacIdentity(dir)
+  const env = mac ? { ...process.env, HOME: dir } : linux ? { ...process.env, TMPDIR: dir } : process.env
   proc = spawn(exe, mac ? ['--daemon'] : [process.platform === 'win32' ? '--hmcl2' : '--hmcl', portFile], { windowsHide: true, env, detached: process.platform !== 'win32' })
   const child = proc
-  const session: LinuxSession | null = linux ? { directory: dir, child, closed: new Promise(resolve => child.once('close', () => resolve())) } : null
+  const session: UnixSession | null = linux || mac ? { directory: dir, child, mac, closed: new Promise(resolve => child.once('close', () => resolve())) } : null
   if (session) {
-    linuxSession = session
-    child.once('close', () => { void cleanLinuxSession(session).catch(error => emit('log', { level: 'warn', msg: (error as Error).message })) })
+    unixSession = session
+    child.once('close', () => { void cleanUnixSession(session).catch(error => emit('log', { level: 'warn', msg: (error as Error).message })) })
   }
   child.on('error', e => { if (proc === child) { proc = null; setState({phase: 'idle', error: e.message}); emit('error', e.message) } })
   proc.stdout?.on('data', (d: Buffer) => emit('log', { level: 'info', msg: d.toString().trim() }))
@@ -256,7 +257,22 @@ async function startProcess(): Promise<number> {
   while (Date.now() - t0 < START_TOTAL_TIMEOUT_MS) {
     if (!proc || proc.exitCode !== null) throw new Error('陶瓦进程在启动期间退出，请查看日志')
     if (mac) {
-      await new Promise<void>(resolve => execFile(exe, ['--hmcl', portFile], { env, timeout: 5000 }, () => resolve()))
+      // Official v0.4.2 publishes a two-byte big-endian port only after Rocket
+      // binds. Never invoke --hmcl: it can win the startup lock and bootstrap
+      // a system service. Both the lock and HTTP readiness belong to this HOME.
+      const port = readMacPort(path.join(dir, 'terracotta', 'terracotta.lock'))
+      if (port) {
+        httpPort = port
+        try {
+          const observed = JSON.parse(await tcGet('/state')) as TcStateJson
+          if (typeof observed.state === 'string' && proc === child && child.exitCode === null) {
+            emit('log', { level: 'info', msg: `陶瓦 HTTP 端口 ${httpPort}` })
+            return httpPort
+          }
+        } catch { /* listener not ready yet; retain the original startup deadline */ }
+      }
+      await sleep(PORT_POLL_MS)
+      continue
     }
     try {
       const content = fs.readFileSync(portFile, 'utf8').trim()
@@ -272,7 +288,39 @@ async function startProcess(): Promise<number> {
   throw new Error('陶瓦启动超时（120s）未写出端口文件')
 }
 
-function cleanLinuxSession(session: LinuxSession): Promise<void> {
+function prepareMacIdentity(directory: string): void {
+  const persistent = path.join(tcDir(), 'terracotta')
+  fs.mkdirSync(persistent, { recursive: true, mode: 0o700 })
+  if (!fs.lstatSync(persistent).isDirectory() || fs.lstatSync(persistent).isSymbolicLink()) throw new Error('陶瓦身份目录不是独立目录')
+  const identity = path.join(persistent, 'machine-id')
+  try { fs.writeFileSync(identity, crypto.randomBytes(16), { flag: 'wx', mode: 0o600 }) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
+  const stat = fs.lstatSync(identity)
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== 16) throw new Error('陶瓦身份文件损坏，已保留原文件；请备份后修复 machine-id')
+  const service = path.join(directory, 'terracotta')
+  fs.mkdirSync(service, { mode: 0o700 })
+  fs.writeFileSync(path.join(service, 'machine-id'), fs.readFileSync(identity), { flag: 'wx', mode: 0o600 })
+}
+
+function readMacPort(lock: string): number | null {
+  let stat: fs.Stats
+  try { stat = fs.lstatSync(lock) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('陶瓦端口文件不是普通文件')
+  if (stat.size < 2) return null
+  if (stat.size !== 2) throw new Error('陶瓦端口文件格式错误')
+  const raw = fs.readFileSync(lock)
+  if (raw.length < 2) return null
+  if (raw.length !== 2) throw new Error('陶瓦端口文件格式错误')
+  const port = raw.readUInt16BE(0)
+  if (!port) throw new Error('陶瓦端口无效')
+  return port
+}
+
+function cleanUnixSession(session: UnixSession): Promise<void> {
   if (session.cleanup) return session.cleanup
   session.cleanup = (async () => {
     const deadline = Date.now() + 5000
@@ -287,17 +335,26 @@ function cleanLinuxSession(session: LinuxSession): Promise<void> {
       if (Date.now() >= deadline) throw new Error('陶瓦独立会话尚未完全退出，已保留临时目录；不会删除运行中的服务文件')
       await sleep(50)
     }
-    await fs.promises.rm(session.directory, { recursive: true, force: true })
-    if (linuxSession === session) linuxSession = null
+    if (session.mac) {
+      // Preserve diagnostic logs and identity; move only the private session
+      // after its owned child and process group are gone. No shared service is
+      // stopped or deleted, and an uncertain cleanup leaves files in place.
+      const history = path.join(tcDir(), 'session-history')
+      await fs.promises.mkdir(history, { recursive: true, mode: 0o700 })
+      const stat = await fs.promises.lstat(history)
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('陶瓦历史目录不是独立目录，已保留会话文件')
+      await fs.promises.rename(session.directory, path.join(history, path.basename(session.directory)))
+    } else await fs.promises.rm(session.directory, { recursive: true, force: true })
+    if (unixSession === session) unixSession = null
   })()
   return session.cleanup
 }
 
-async function finishLinuxSession(session: LinuxSession): Promise<void> {
+async function finishUnixSession(session: UnixSession): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([session.closed, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('陶瓦独立进程退出超时，已保留会话文件')), 5000) })])
-    await cleanLinuxSession(session)
+    await cleanUnixSession(session)
   } finally { clearTimeout(timer) }
 }
 
@@ -354,11 +411,11 @@ function stopPolling(): void {
 
 async function killTree(): Promise<void> {
   const p = proc
-  const session = linuxSession && (linuxSession.child === p || !p) ? linuxSession : null
+  const session = unixSession && (unixSession.child === p || !p) ? unixSession : null
   proc = null
   httpPort = 0
   stopPolling()
-  if (!p || p.exitCode !== null) { if (session) await finishLinuxSession(session); return }
+  if (!p || p.exitCode !== null) { if (session) await finishUnixSession(session); return }
   if (process.platform === 'win32' && p.pid) {
     await new Promise<void>((resolve) => {
       execFileAsync('taskkill', ['/T', '/F', '/PID', String(p.pid)]).catch(() => {})
@@ -368,7 +425,7 @@ async function killTree(): Promise<void> {
     // The Mac daemon and its EasyTier children share the private process group
     // created above. Never target a global service or the game's process group.
     try { process.kill(-p.pid, 'SIGTERM') } catch { /* already stopped */ }
-    if (session) await finishLinuxSession(session)
+    if (session) await finishUnixSession(session)
   } else {
     p.kill('SIGKILL')
   }
