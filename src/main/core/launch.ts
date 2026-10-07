@@ -24,7 +24,7 @@ import type { GameResolution, LaunchState, ProgressEvent } from '../../shared/ty
 import { getSettings, saveSettings } from './settings'
 import { getValidAccount, selectedAccount } from './accounts'
 import { validateJavaRuntime } from './javaRuntimeHealth'
-import { ensureJava, requiredMajor, scanJavaForLaunch, resolveJavaExecutable, selectHealthyJava, probeJavaAsync } from './java'
+import { ensureJava, resolveJavaRequirement, javaCompatibilityError, scanJavaForLaunch, resolveJavaExecutable, selectHealthyJava, probeJavaAsync } from './java'
 import { gameJavaArchitecture } from './javaArchitecture'
 import { requireDesktopGamePlatform } from '../../shared/platform'
 import { assertNativeElf, resolveNativeIntegrity } from './platformNatives'
@@ -64,6 +64,7 @@ import { buildGameWindowArguments, resolveGameResolution } from './gameWindow'
 import { rememberedWindowResolution, watchGameWindowSize } from './gameWindowSize'
 import { supportsQuickPlayMultiplayer } from './serverUtils'
 import * as yggdrasil from './yggdrasil'
+import { prepareOfflineSkinLaunch, type OfflineSkinLaunch } from './offlineSkinLaunch'
 import { serializeYggdrasilUserProperties } from './yggdrasilProvider'
 
 export type ProgressEmit = (e: ProgressEvent) => void
@@ -325,6 +326,7 @@ async function launchOwned(
   }
 
   let spawned = false
+  const appearance: { offlineSkin: OfflineSkinLaunch | null } = { offlineSkin: null }
   const pipelineStarted = Date.now()
   try {
   launchLog.debug(`启动管线开始：实例 ${versionId}`)
@@ -393,6 +395,8 @@ async function launchOwned(
   // a0.1) 启动与管理页面共用同一个目录判定，避免配置路径、整合包和已存在
   // 独立内容在 UI 与最终 --gameDir 之间出现分歧；assets 仍使用全局共享目录。
   const effectiveGameDir = instanceDirectoryState(versionId, readVersionJson(versionId)).path
+  let resourcePacksConfigured = false
+  try { resourcePacksConfigured = /^\uFEFF?resourcePacks:/m.test(fs.readFileSync(path.join(effectiveGameDir, 'options.txt'), 'utf8')) } catch { /* a fresh instance */ }
   launchLog.debug(`实例 ${versionId} 游戏目录：${effectiveGameDir}`)
   fs.mkdirSync(effectiveGameDir, { recursive: true })
 
@@ -444,7 +448,7 @@ async function launchOwned(
       if (gameOptionsResult.unsupported.length) log(`[KAMUCL] 当前版本不支持：${gameOptionsResult.unsupported.join('、')}`)
       if (settings.resourcePackSync) {
         const { syncDefaultResourcePacks } = await import('./defaultResourcePacks')
-        const count = syncDefaultResourcePacks(effectiveGameDir, instanceMcVersion, clientJarPath(baseId))
+        const count = syncDefaultResourcePacks(effectiveGameDir, instanceMcVersion, clientJarPath(baseId), { resourcePacksConfigured })
         if (count) log(`[KAMUCL] 已装载 ${count} 个默认材质包`)
       }
       if (settings.keySync) {
@@ -535,16 +539,24 @@ async function launchOwned(
       return { classpath, nativesPath, launchAssets }
     }),
     () => timed('账号验证', () => waitForPreparation([
-      () => getValidAccount(account), () => yggdrasil.launchArguments(account)
+      () => getValidAccount(account), async () => {
+        appearance.offlineSkin = await prepareOfflineSkinLaunch(account, deadline.signal)
+        if (appearance.offlineSkin) log('[KAMUCL] 已准备当前离线账号的本地皮肤；仅在本机游戏显示，下次启动应用新选择')
+        return appearance.offlineSkin?.args ?? yggdrasil.launchArguments(account)
+      }
     ])),
     () => timed('Java 环境', async () => {
       await prepareClient()
       // c) Java：版本独立指定 > 手动指定 > 自动管理
       emit({ stage: 'java', progress: 0, text: '检查 Java 环境' })
+      const requirement = await resolveJavaRequirement(merged, instanceMcVersion, { signal: deadline.signal, modsDirectory: path.join(effectiveGameDir, 'mods') })
+      const need = requirement.recommendedMajor
+      const requiredArch = gameJavaArchitecture(merged)
       let javaPath: string
       const versionJava = instanceConfig._javaPath
+      const automatic = instanceConfig._javaAuto === true || !versionJava && (settings.javaAuto || !settings.javaPath)
       if (instanceConfig._javaAuto === true) {
-        javaPath = await ensureJava(merged, emit, instanceMcVersion)
+        javaPath = await ensureJava(merged, emit, instanceMcVersion, { requirement, signal: deadline.signal })
       } else if (versionJava) {
         if (!fs.existsSync(versionJava)) {
           throw new Error(`该版本指定的 Java 不存在（${versionJava}），请在版本设置中重新选择`)
@@ -552,7 +564,7 @@ async function launchOwned(
         javaPath = versionJava
         emit({ stage: 'java', progress: 1, text: '使用该版本指定的 Java' })
       } else if (settings.javaAuto) {
-        javaPath = await ensureJava(merged, emit, instanceMcVersion)
+        javaPath = await ensureJava(merged, emit, instanceMcVersion, { requirement, signal: deadline.signal })
       } else if (settings.javaPath) {
         if (!fs.existsSync(settings.javaPath)) {
           throw new Error('手动指定的 Java 路径不存在，请在设置中重新选择')
@@ -560,8 +572,7 @@ async function launchOwned(
         javaPath = settings.javaPath
         emit({ stage: 'java', progress: 1, text: '使用手动指定的 Java' })
       } else {
-        const need = requiredMajor(merged, instanceMcVersion)
-        const found = await selectHealthyJava(await scanJavaForLaunch(), need, gameJavaArchitecture(merged))
+        const found = await selectHealthyJava(await scanJavaForLaunch(emit, deadline.signal), need, requiredArch, deadline.signal, requirement)
         if (!found) {
           throw new Error(
             `该版本需要 Java ${need} (64位)，但未找到（Java 自动管理已关闭）。请在设置中选择 Java 或开启自动管理`
@@ -570,17 +581,15 @@ async function launchOwned(
         javaPath = found.path
         emit({ stage: 'java', progress: 1, text: `使用本机 Java ${found.version}` })
       }
-      launchLog.info(`选定 Java（需要 major ${requiredMajor(merged, instanceMcVersion)}）：${javaPath}`)
+      launchLog.info(`选定 Java（推荐 Java ${need}，来源 ${requirement.source}）：${javaPath}`)
 
       const selectedJavaPath = javaPath
-      javaPath = await resolveJavaExecutable(javaPath)
+      javaPath = await resolveJavaExecutable(javaPath, deadline.signal)
       if (selectedJavaPath !== javaPath) log(`[KAMUCL] Java 转发入口已解析到真实运行时: ${javaPath}`)
-      const javaInfo = await probeJavaAsync(javaPath)
-      const need = requiredMajor(merged, instanceMcVersion)
-      const requiredArch = gameJavaArchitecture(merged)
-      if (!javaInfo || !javaInfo.is64Bit || javaInfo.major < need || (requiredArch && javaInfo.architecture !== requiredArch)) {
-        throw new Error('所选 Java 版本或架构不适配：需要 Java ' + need + '+（64 位' + (requiredArch ? '，' + requiredArch : '') + '），请修改实例设置或开启自动管理')
-      }
+      const javaInfo = await probeJavaAsync(javaPath, deadline.signal)
+      const incompatibility = javaInfo ? javaCompatibilityError(javaInfo, requirement, requiredArch, automatic) : 'Java 无法正常运行'
+      if (incompatibility) throw new Error('所选 Java 不适配：' + incompatibility + '；请修改实例设置或开启自动管理')
+      if (!javaInfo) throw new Error('Java 无法正常运行')
       await validateJavaRuntime(javaPath, javaInfo.major)
       return javaPath
     })
@@ -728,6 +737,7 @@ async function launchOwned(
     if (argument.startsWith('-Dauthlibinjector.yggdrasil.prefetched=')) {
       return '-Dauthlibinjector.yggdrasil.prefetched=<metadata>'
     }
+    if (argument.startsWith('-javaagent:') && (argument.includes('kamucl-offline-skin.jar=') || (appearance.offlineSkin && argument.includes('authlib-injector')))) return argument.split('=')[0] + '=<local appearance>'
     if (privateLaunchValues.has(argument)) return '***'
     if (validAccount.accessToken && argument.includes(validAccount.accessToken)) {
       return argument.replaceAll(validAccount.accessToken, '***')
@@ -752,6 +762,7 @@ async function launchOwned(
   for (const message of await upgradeInstalledBridge(effectiveGameDir, path.join(__dirname, 'kamucl-bridge.jar').replace('app.asar', 'app.asar.unpacked'))) log('[KAMUCL] ' + message)
   deadline.signal.throwIfAborted()
   deadline.dispose()
+  await appearance.offlineSkin?.releasePort()
   const proc = await withDeadline(signal => spawnGameProcess(javaPath, args, { cwd: effectiveGameDir, signal }), 15000, '游戏进程创建超时，请检查 Java 与系统权限')
   gameSession.attach(token, proc)
   spawned = true
@@ -832,6 +843,7 @@ async function launchOwned(
     onState({ status: 'error', text: `进程启动失败: ${err.message}` })
   })
   proc.on('close', (code) => {
+    void appearance.offlineSkin?.dispose().catch(error => launchLog.warn('离线皮肤临时配置清理失败：' + String(error)))
     if (!gameSession.release(token)) return
     windowSizeCapture.finish(code === 0)
     const runS = spawnedAt ? Math.round((Date.now() - spawnedAt) / 1000) : null
@@ -854,6 +866,7 @@ async function launchOwned(
   })
   } finally {
     deadline.dispose()
+    if (!spawned) await appearance.offlineSkin?.dispose()
     if (!spawned) { logStream?.end(); stdoutStream?.end(); stderrStream?.end() }
   }
 }

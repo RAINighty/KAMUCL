@@ -1,56 +1,55 @@
-# CURRENT STATUS — KAMUCL 1.1.17 Windows
+# CURRENT STATUS — KAMUCL 1.1.18 Windows
 
-香港本地分钟日志：2026-10-07 01:36。交付Windows x64，Electron44.3.0。用户数据、历史人物计数、旧实例和未提交pelican-bicycle.html均保留；不操作wuhui，不强推，main仅cherry-pick保留独立历史。优化需求已撤回，Mac暂停。
+香港更新日志：2026-10-07 14:54。最终验证状态时间：2026-10-07 15:16。Windows x64，Electron 44.3.0。用户图片、收藏、设置、历史计数、旧实例及未提交文件保留；不操作 wuhui，不强推。资源占用优化暂停，本批没有 Mac 成品。
 
 - Project: KAMUCL
-- Version or revision: 1.1.17；最终源码提交由归档外DELIVERY和版本标签精确绑定
-- Status timestamp: 2026-10-07 02:03 Asia/Hong_Kong
-- Build command: npm run build；Windows便携打包与node scripts/pack-windows-zip.cjs
-- Build result: 成功，最终EXE为4517摘要；文档补齐不改变已测程序
-- Test/validation commands: npm test；npx tsc --noEmit；npm run license:check；node scripts/verify-windows-package.cjs；真实界面专项
-- Validation results: 1284项中1283通过、0失败、1Linux专属跳过；四主题及包通过；分项独立复评均≥8.5，范围和未覆盖另列
-- Finished artifact: KAMUCL-1.1.17.exe、Windows紧凑ZIP及展开ZIP
-- Artifact SHA256: 4517bdbb98b180c797f4e800a0d5c6d24b055db125876a3d27bf1b175332de2e；另两包摘要见下表
+- Version or revision: 1.1.18；最终 master 提交由标签及外部 DELIVERY 精确绑定
+- Status timestamp: 2026-10-07 15:16 Asia/Hong_Kong
+- Build command: npm run build；electron-builder --win portable --x64 --config.electronDist=node_modules/electron/dist --publish never；node scripts/pack-windows-zip.cjs
+- Build result: 成功；516 项生产输入在构建前冻结，构建/验收后复核不变
+- Test/validation commands: npm test；npx tsc --noEmit；npm run license:check；node scripts/verify-windows-package.cjs；独立实例的真实界面及游戏专项
+- Validation results: 1343 项中 1342 通过、0 失败、1 Linux 专属跳过；四主题、原生游戏、构建及包通过；独立分项评分见本版验证目录
+- Finished artifact: Windows EXE、紧凑 ZIP、展开 ZIP
+- Artifact SHA256: 下表；源/交接 ZIP 在外部 DELIVERY、公开 SHA256SUMS.txt
 
 ## Last verified state
 
 | 文件 | 字节 | SHA256 |
 | --- | ---: | --- |
-| KAMUCL-1.1.17.exe | 97299290 | `4517bdbb98b180c797f4e800a0d5c6d24b055db125876a3d27bf1b175332de2e` |
-| KAMUCL-1.1.17-windows-x64.zip | 97330862 | `b5ea1b46a4882ea93664eadac44a4534486bf829809a089572f86496f7783777` |
-| KAMUCL-1.1.17-windows-x64-unpacked.zip | 142966591 | `264385d1f763521edeacada38d4df6fa823cb586f1df1b7325b19e5e9921057a` |
-
-源码及交接ZIP摘要和最终master提交记录在归档外部DELIVERY-1.1.17.json及公开SHA256SUMS.txt，交接包根状态会追加已冻结源码ZIP摘要；不将包含自身的归档SHA写入归档内部。
+| KAMUCL-1.1.18.exe | 97323101 | a0427950efe94c5ffc5f05cca9dcc33b79bab96293cfde7e0c89a2f7198be887 |
+| KAMUCL-1.1.18-windows-x64.zip | 97355100 | 630e48cace25ef98a81b7241bd8e38105b2dc281a11089986a9c98c5c5c5c0cc |
+| KAMUCL-1.1.18-windows-x64-unpacked.zip | 142987727 | 1ed6eee0cc6ff0d94fd94ff5eda14cadcb9dcb58bf86fe012608fd51fc2732b2 |
 
 ## Completed
 
-- MC百科公开中文关联查询：有界请求、可信来源、来源项目身份核对、过滤条件及原中文结果保留，失败提示和重试不缓存成无结果。
-- 下拉按视口定位，键盘/滚动/重新点击可用；修复实际成品发现的Esc收起后同焦点输入框点击不能重开。标题X与拖动区分离，真实Win32点击关闭。
-- 下蹲、飞行、本地未使用历史皮肤预览，离线预览不上传；经典/纤细模型和编辑器纹理行为保持。
-- 游戏版本从可信元数据/客户端清单恢复，0.0.0不作可靠版本；Java、启动兼容与路径显示使用实际信息，无法证明时不猜测。
-- 新配置.minecraft默认目录，旧.kamucl/自定义目录不变。MOD/材质/光影显示实际原生后端路径。
-- 游戏窗口尺寸记忆默认关闭，所属进程正常窗口只读采样；仅正常退出写入原目标，保护用户期间的新设置，原子写入失败保持原数据。
-- 第三方许可呈现Markdown标题、强调和安全链接；许可证全文保留。
-- MOD预下载/校验和实际安装任务显示独立进度、实际字节或未知大小，取消/错误/重试保留原事务和哈希检查；下载中心可核对实际任务。
+- 自动 Java 按可信游戏要求选择版本；检查 MOD Java 约束、架构和旧 Forge。诊断与启动使用相同客户端证据；取消不会误杀其他消费者的共享扫描。
+- 默认材质包首次初始化后保留游戏内选择、关闭和排序，旧配置不覆盖显式选择。手动目标实例应用带备份、并发保护和失败回滚。
+- 离线账号本地 PNG/绘制/历史/重置、Classic/Slim 与账号隔离；原创 Java 8 字节码提供器在游戏 JVM 持有不可变快照并签名纹理，限定本机路由。首次校验下载 authlib-injector，缓存后离线。
+- 社区必要前置和项目关联保留；修复 pinned 文件被其他已装版本静默替代。精确哈希不一致或确认期间变化停止写入，保留原文件。
+- 1.1.18/根锁/香港分钟日志、原创提供器源码构建脚本与许可说明同步。
 
 ## 当前验证
 
-最终1284项测试为1283通过、0失败、1Linux专属跳过；类型、许可、生产构建及完整Windows包验证通过。最终EXE上述4517摘要固定；507项产品输入构建前冻结并复核，后补QA/文档/证据单列，不冒称由它们重建成品。源码ZIP为最终Git blob原始字节，CRLF/LF等价性另核对。
+最终 EXE a0427950…be887；证据绑定见 docs/validation-1.1.18。真实界面使用专属配置及前台 HWND/PID 检查，不向其他程序输入。最小窗口请求与 Windows 125% 后的实际 DIP、CSS 小数尺寸分别记录，不伪称严格物理 960×620。
 
-四类主题、100%/125%、最小外框、真实前台坐标/键盘、原生X点击、关闭意图/保存失败/导出重读、后台暂停和真实MOD夹具落盘由本版证据及独立评审逐项核对。原始录屏、帧时间和失败不插帧、不改门槛。只控制专属测试PID/创建时间，不控制其他游戏。
+官方元数据/认证库/Java 下载带校验；四 JVM 探针实际解码 PNG。原生游戏为最终 EXE 的 26.3/Fabric 演示世界：实际 GPU 哈希、Slim、存档、两次正常退出和关闭 pack 后再启动保留。社区事务及故障注入使用合成夹具，不冒称两服务的完整真实 MOD 游戏验证。
+
+原始录屏是未经插帧的 compositor JPEG 帧与时间戳，另存原分辨率 PNG；不把采集帧率当成完整动效性能放行。所属启动器主进程退出由实际 child close 记录核对；通用 ownedInventory 的 Windows 清单不可用，不能当作后台进程全清零。
 
 ## Remaining
 
-真实Minecraft完整运行/退出、玩家原问题实例、物理1366×768屏幕、完整动效基准及人工听感继续待验证；不把本版夹具或评分当作这些项目完成。归档解压和公开发布身份由外部交付回执核对。
+用户原问题实例、完整旧 Forge、所有加载器/MOD 组合、每个 Java 全新网络重下、两服务完整 MOD 安装进入世界、多人显示、物理 1366×768、完整动效性能和人工听感未覆盖。其他平台不在本批。运输和公开身份由外部交付回执核对。
 
 ## Known issues and risks
 
-本批真实官方查询不是真实服务MOD安装/游戏启动；本地合成MOD文件经真实生产下载/哈希/事务落盘。实际Minecraft进入世界、用户原0.0.0实例、实际Minecraft窗口尺寸退出链、物理1366×768主机、完整模型动效基准与人工听感未覆盖。Windows发行者签名未完成。Mac历史失败仍保留，不以本版Windows通过替代Mac/Intel/Linux/鸿蒙验收。
+离线皮肤只承诺自己本机，首次网络准备第三方 authlib-injector；加载器/服务器插件可能改变行为。不可变历史纹理暂保留以保护已接受/运行快照，本轮不恢复优化或删除这些文件。EXE 未做发行者签名。
 
-最终完整证据、历史失败及非自实现独立分项评分见docs/validation-1.1.17/；公开发布、远端提交、标签和附件身份由交付回执独立核对。
+独立评分全部达到 8.5，最低外观 8.6。蓝白主题窄窗待应用卡的选中 Classic 标签对比偏弱，作为非阻断外观问题保留；未宣称零缺陷。
 
-历史通用源码工具仍有限制：committed-source.cjs 的96MiB读取上限不足以读取本仓库；verify-source-archive.cjs 假定特定清单并拒绝已提交的嵌套out。它们未作为本版通过证据。本版源码保留全部获准Git原始blob，逐成员隐私与SHA复核，交接包另用原技能创建和运输解压验证；不遗漏历史已提交资料，也不加入用户未提交文件。
+保留历史失败：测试报告半截读取、旧 CSS/共享扫描断言、整数视口误判、过期文案断言、前台窗口干扰、初次游戏 ID 误作 PNG 哈希，以及真实 pinned 错误复用。修复后通过另列；d0dad965 旧候选保存在本地历史，不发布。
+
+通用源归档旧工具仍有 96MiB buffer 与嵌套 out 限制，未作为通过证据。源码使用 Git 原始 blob、逐成员 Git 对象/路径/大小/SHA/隐私检查；交接工具未经修改，明确包含已提交公开夹具，排除实时目录和用户资料。
 
 ## Recommended next action
 
-先按START_HERE完整解压并校验成品SHA，使用自己的账号和目录。开发者运行记录的许可命令，再按验证文档执行平台相关功能测试；后续实机验证单独补证，不能自行把未覆盖项改为通过。
+按 START_HERE 干净解压核对 SHA。用自己的账号/目录复验；开发者执行记录的许可命令及相关专项。新增实机覆盖单独补证，不将未测改为通过。

@@ -45,7 +45,7 @@ function installedMods(target: InstalledVersion): ModInfo[] {
 
 /** Required transitive graph; pinned version IDs stay pinned, optional edges never download.
  * This phase reads repository metadata only, not dependency JARs. */
-export async function dependencyGraph(roots: CommunityFile[], target: InstalledVersion, repo: DependencyRepository): Promise<CommunityFile[]> {
+export async function dependencyGraph(roots: CommunityFile[], target: InstalledVersion, repo: DependencyRepository, pinnedFiles?: Map<string, CommunityFile>): Promise<CommunityFile[]> {
   const result: CommunityFile[] = [], seen = new Set<string>(), projects = new Map<string, string>()
   async function visit(file: CommunityFile) {
     const key = `${file.source}:${file.fileId}`
@@ -63,6 +63,10 @@ export async function dependencyGraph(roots: CommunityFile[], target: InstalledV
       if (selected && dep.fileId && selected.fileId !== dep.fileId) throw new Error(`前置版本冲突：${dep.projectId || dep.fileId}`)
       const next = selected || (dep.fileId ? await repo.exact(file.source, dep.projectId, dep.fileId) : (await repo.files(file.source, dep.projectId!, target))[0])
       if (!next) throw new Error(`前置 ${dep.projectId} 没有兼容版本`)
+      if (dep.fileId) {
+        if (next.fileId !== dep.fileId) throw new Error(`前置版本冲突：${dep.projectId || dep.fileId}`)
+        pinnedFiles?.set(`${next.source}:${next.fileId}`, next)
+      }
       await visit(next)
     }
     result.push(file)
@@ -72,7 +76,7 @@ export async function dependencyGraph(roots: CommunityFile[], target: InstalledV
 }
 
 interface PrivatePlan {
-  view: ModInstallPlan; directory: string; roots: string[]; downloads: CommunityFile[]; expires: number
+  view: ModInstallPlan; directory: string; roots: string[]; rootFiles: Map<string, string>; downloads: CommunityFile[]; pinnedFiles: Map<string, CommunityFile>; expires: number
 }
 const plans = new Map<string, PrivatePlan>()
 const clean = (plan: PrivatePlan) => { fs.rmSync(plan.directory, { recursive: true, force: true }); plans.delete(plan.view.id) }
@@ -82,7 +86,7 @@ export async function prepareModInstall(target: InstalledVersion, input: { paths
   if (plans.size >= 8) throw new Error('待确认安装过多，请取消已有安装计划')
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'kamucl-mod-plan-'))
   const id = crypto.randomUUID()
-  const plan: PrivatePlan = { directory, roots: [], downloads: [], expires: Date.now() + 20 * 60_000, view: { id, target, files: [], missing: [], warnings: [] } }
+  const plan: PrivatePlan = { directory, roots: [], rootFiles: new Map(), downloads: [], pinnedFiles: new Map(), expires: Date.now() + 20 * 60_000, view: { id, target, files: [], missing: [], warnings: [] } }
   try {
     const roots: CommunityFile[] = []
     if (input.file) {
@@ -93,7 +97,7 @@ export async function prepareModInstall(target: InstalledVersion, input: { paths
       const dest = path.join(directory, path.basename(file.fileName))
       emit({ stage: 'download', progress: 0, overall: 0, indeterminate: true, text: '读取所选 MOD，解析内置前置要求…' })
       await downloadAll([{ url:file.url, dest, sha1:file.sha1, size:file.size || undefined }], (_d,_t,speed,detail) => emit({stage:'download', progress:detail.fraction ?? 0, overall:(detail.fraction ?? 0) * 0.85, indeterminate:detail.indeterminate, text:`下载所选 MOD：${file.fileName}`, speed, bytesDone:detail.bytesDone, bytesTotal:detail.bytesTotal ?? undefined, etaSeconds:detail.etaSeconds ?? undefined}), 8, 'official', signal)
-      plan.roots.push(dest); roots.push(file)
+      plan.roots.push(dest); plan.rootFiles.set(`${file.source}:${file.fileId}`, dest); roots.push(file)
     } else {
       for (const [index, file] of (input.paths ?? []).entries()) {
         signal?.throwIfAborted()
@@ -108,7 +112,7 @@ export async function prepareModInstall(target: InstalledVersion, input: { paths
     for (const mod of mods) if (!modMatchesInstance(mod, target)) throw new Error(`${mod.name || mod.fileName}：${mod.error || '与目标实例的 MC / Loader 版本不兼容'}`)
     const installed = installedMods(target)
     const missing = missingRequirements(mods, target, [...installed, ...mods])
-    const graph = await dependencyGraph(roots, target, repository)
+    const graph = await dependencyGraph(roots, target, repository, plan.pinnedFiles)
     signal?.throwIfAborted()
     const rootKeys = new Set(roots.map(f => `${f.source}:${f.fileId}`))
     plan.downloads = graph.filter(f => !rootKeys.has(`${f.source}:${f.fileId}`))
@@ -118,7 +122,7 @@ export async function prepareModInstall(target: InstalledVersion, input: { paths
       if (plan.downloads.some(f => f.projectId && f.projectId.replace(/[-_]/g, '') === req.id.replace(/[-_]/g, ''))) continue
       const candidate = await repository.find(req.id, target)
       signal?.throwIfAborted()
-      if (candidate) plan.downloads.push(...await dependencyGraph([candidate], target, repository))
+      if (candidate) plan.downloads.push(...await dependencyGraph([candidate], target, repository, plan.pinnedFiles))
       else if (!plan.downloads.length) plan.view.warnings.push(`无法自动定位前置 ${req.id} ${req.range}，请手动补齐后重试`)
     }
     const installedHashes = new Map<string, string>(), uniqueDownloads = [...new Map(plan.downloads.map(f => [`${f.source}:${f.fileId}`, f])).values()]
@@ -156,6 +160,7 @@ export async function executeModPlan(id: string, includeDependencies: boolean, r
     let installed = installedMods(target)
     const rootMods = plan.roots.map(parseModFile)
     const staged = [...rootMods]
+    const pinnedPaths = new Map<string, CommunityFile>()
     const dependencies = includeDependencies ? plan.downloads.map((file,index) => ({ ...file, dest:path.join(plan.directory, 'dep-'+index, path.basename(file.fileName)) })) : []
     emit({ stage: dependencies.length ? 'download' : 'mod-verify', progress: 0, overall: 0, indeterminate: true, text: dependencies.length ? `准备下载 ${dependencies.length} 个必要前置…` : '正在校验已准备的 MOD…' })
     await downloadAll(dependencies.map(f => ({url:f.url,dest:f.dest,sha1:f.sha1,size:f.size || undefined})), (_d,_t,speed,detail) => emit({stage:'download',progress:detail.fraction ?? 0,overall:(detail.fraction ?? 0)*0.85,indeterminate:detail.indeterminate,text:`下载 ${dependencies.length} 个必要前置`,speed,bytesDone:detail.bytesDone,bytesTotal:detail.bytesTotal ?? undefined,etaSeconds:detail.etaSeconds ?? undefined}), 8, 'official', signal)
@@ -164,8 +169,11 @@ export async function executeModPlan(id: string, includeDependencies: boolean, r
       signal?.throwIfAborted()
       const mod = parseModFile(file.dest)
       if (!modMatchesInstance(mod, target)) throw new Error(`${file.fileName} 的 JAR 元数据不兼容目标实例：${mod.error ?? ''}`)
-      // Keep an installed compatible provider; never install a second copy by filename.
-      if (!installed.some(m => provided(m).some(p => p.id === mod.id))) staged.push(mod)
+      const pinned = plan.pinnedFiles.get(`${file.source}:${file.fileId}`)
+      if (pinned) pinnedPaths.set(mod.filePath, pinned)
+      // A pinned repository edge requires that exact file. An existing provider
+      // with the same mod ID may only satisfy an unpinned compatible dependency.
+      if (pinned || !installed.some(m => provided(m).some(p => p.id === mod.id))) staged.push(mod)
     }
     const current = revalidate(plan.view.target)
     if (current.gameDirectory !== target.gameDirectory) throw new Error('下载期间实例目录发生变化，未安装任何 MOD')
@@ -173,12 +181,27 @@ export async function executeModPlan(id: string, includeDependencies: boolean, r
     for (const mod of staged) if (!modMatchesInstance(mod, current)) throw new Error(`${mod.name} 的兼容性已变化，请重新解析`)
     const missing = missingRequirements(staged, target, [...staged, ...installed])
     if (missing.length) throw new Error(`未写入任何 MOD；仍缺少或版本不满足：${missing.map(d => `${d.id} ${d.range}`).join('、')}。请补齐前置或处理旧版冲突后重试`)
+    const hashes = new Map<string, Promise<string>>()
+    const hash = (file: string) => { let pending = hashes.get(file); if (!pending) { pending = fileHash(file, 'sha1', signal); hashes.set(file, pending) }; return pending }
+    // Preparation may omit a pinned file already present by hash. Recheck that
+    // exact constraint after download, so changing it while confirming cannot
+    // turn a pinned requirement into the JAR's broader version range.
+    for (const pinned of plan.pinnedFiles.values()) {
+      const downloaded = dependencies.find(file => file.source === pinned.source && file.fileId === pinned.fileId)
+      const prepared = downloaded?.dest || plan.rootFiles.get(`${pinned.source}:${pinned.fileId}`)
+      const expectedHash = pinned.sha1?.toLowerCase() || (prepared ? await hash(prepared) : undefined)
+      let present = false
+      if (expectedHash) for (const mod of [...staged, ...installed]) if (await hash(mod.filePath) === expectedHash) { present = true; break }
+      if (!present) throw new Error(`未写入任何 MOD；必要前置 ${pinned.projectId || pinned.fileName} 要求精确版本 ${pinned.fileId}，已准备或已安装的文件已变化，请重新检测`)
+    }
     const accepted: ModInfo[] = []
     for (const mod of staged) {
       const existing = [...installed, ...accepted].find(m => provided(m).some(p => p.id === mod.id))
       if (existing) {
-        const [existingHash, stagedHash] = await Promise.all([fileHash(existing.filePath, 'sha1', signal), fileHash(mod.filePath, 'sha1', signal)])
+        const [existingHash, stagedHash] = await Promise.all([hash(existing.filePath), hash(mod.filePath)])
         if (existingHash === stagedHash) continue
+        const pinned = pinnedPaths.get(mod.filePath)
+        if (pinned) throw new Error(`前置版本冲突：${mod.id} 要求精确版本 ${pinned.fileId}，已有 ${existing.version || '其他版本'}；未写入任何 MOD，请先处理旧文件后重新检测`)
         throw new Error(`已存在 ${mod.id}，未覆盖或重复安装；请先处理旧文件`)
       }
       accepted.push(mod)

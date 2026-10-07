@@ -882,6 +882,7 @@ export const IPC = {
   defaultPacksRemove: 'defaultPacks:remove',
   defaultPacksMove: 'defaultPacks:move',
   defaultPacksSetEnabled: 'defaultPacks:setEnabled',
+  defaultPacksApply: 'defaultPacks:apply',
   // 桥接 MOD 实时配置面板（游戏目录 .kamucl-bridge.json 发现 + token 校验，仅本机）
   bridgeStatus: 'bridge:status', // (versionId: string) => BridgeStatus
   bridgeManifest: 'bridge:manifest', // (versionId: string) => { protocol, params: BridgeParam[] }
@@ -911,9 +912,11 @@ export const IPC = {
   tasksPause: 'tasks:pause', // (taskId: string) => boolean
   tasksResume: 'tasks:resume', // (taskId: string) => boolean
 
-  // 皮肤/披风（均需当前选中账号为微软正版账号）
+  // 皮肤/披风；离线 PNG 仅保存到当前本机账号
   skinProfile: 'skin:profile', // () => ProfileSkins  拉取当前账号皮肤/披风档案
   skinUpload: 'skin:upload', // (filePath: string, variant: SkinVariant) => ProfileSkins  上传并返回最新档案
+  skinOfflineApply: 'skin:offlineApply', // (filePath, variant, capturedAccountId) => ProfileSkins
+  skinOfflineReset: 'skin:offlineReset', // (capturedAccountId) => ProfileSkins
   skinCape: 'skin:cape', // (capeId: string | null) => ProfileSkins  激活/卸下披风
   skinHistory: 'skin:history', // () => SkinHistoryEntry[]  历史皮肤（含 dataUrl 缩略）
   skinHistoryDelete: 'skin:historyDelete', // (id: string) => SkinHistoryEntry[]
@@ -1230,6 +1233,8 @@ export interface ModInfo {
   /** 前置依赖 mod id 列表 */
   dependencies: string[]
   requirements?: ModRequirement[]
+  /** Actual JVM dependency/features from enabled JARs, including bundled mods. */
+  javaRequirements?: Array<{ loader: LoaderName; range: string; source: string; exclude?: boolean }>
   /** Multi-loader jars may contain several independent metadata descriptors. */
   variants?: Array<{ loader: LoaderName; mcRange: string; loaderRange?: string; requirements?: ModRequirement[] }>
   provides?: Array<{ id: string; version: string }>

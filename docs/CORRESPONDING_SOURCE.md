@@ -11,10 +11,13 @@
 4. 修改 src/main/core/voxlink 或其他源码，运行 npm run build。
    Windows 原生程序由系统 .NET Framework csc.exe 编译；Mac 不需要它。
 5. npm start 启动修改版。Windows 用 npm run dist:win；本批 Windows 使用 Electron 44.3.0。
-   Mac 在原生机器使用 npx electron-builder --mac dir --arm64 --config.electronVersion=33.4.11 --publish never
-   （Intel 将 --arm64 替换为 --x64），与本批原生验证和发行运行库保持一致。
+   Mac 构建使用 package.json 固定的 Electron 版本及 npm run dist:mac，
+   与 Windows 共用界面与业务代码。本批仅交付 Windows，不宣称新的 Mac 原生验收。
 6. .github/workflows/mac-build.yml 描述原生构建、签名、APP ZIP 与 DMG 验证。
    npm test、npx tsc --noEmit 与 npm run license:check 提供本地检查。
+7. scripts/build-offline-skin-agent.cjs 使用 javac --release 8 构建原创
+   GPL-3.0-or-later 离线皮肤提供器；npm run build 自动构建并复制该 JAR。
+   authlib-injector 由游戏首次使用时从官方来源校验下载，不包含在成品中。
 
 LGPL 部分提供完整源码，可修改并重新编译组合应用，无需 KAMUCL 私有签名密钥。
 不禁止为调试修改进行逆向工程。Mac 修改版可自行 ad-hoc codesign。

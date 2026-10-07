@@ -1,38 +1,44 @@
-# START HERE — KAMUCL 1.1.17 Windows
+# START HERE — KAMUCL 1.1.18 Windows
 
-本批完成用户文档中的11项界面与功能修正，发布Windows x64。Mac不在本批范围；资源占用优化已撤回。Electron仍为44.3.0，素材、GPU和现有功能保留。
+本批修复自动 Java 选择、默认材质包选择保存及社区精确前置版本，并增加离线账号本地皮肤应用。仅交付 Windows x64；资源占用优化继续暂停。Electron 保持 44.3.0。
 
 - Project: KAMUCL
-- Deliverable: 1.1.17 Windows x64、完整源码及交接包
-- Packaged artifact: artifacts/KAMUCL-1.1.17.exe、紧凑ZIP、展开ZIP
-- Intended receiver: 使用自己的账号和游戏目录的玩家，以及后续开发维护者
-- Operating system: Windows 10/11 x64；本批不包含Mac成品
-- Runtime/tool versions: Electron 44.3.0、Node.js 24、npm锁定依赖、JDK 17+
+- Deliverable: 1.1.18 Windows x64、源码、交接包
+- Packaged artifact: _handoff/artifacts/KAMUCL-1.1.18.exe、Windows 紧凑 ZIP、展开 ZIP
+- Intended receiver: 使用自己账号和游戏目录的玩家、维护者
+- Operating system: Windows 10/11 x64；实际验收 Windows 11 26200、125% 显示缩放
+- Runtime/tool versions: Electron 44.3.0、Node.js 24、锁定 npm 依赖、JDK 17+
 
 ## Prerequisites
 
-运行成品不需要安装Node.js；游戏需要相应Java运行环境和自己的账号。源码开发需要上述Node.js、JDK及Windows构建工具，具体依赖以锁文件为准。
+成品运行不需要 Node.js。游戏需要适配 Java 和自己的账号；自动管理按版本下载。离线皮肤首次启动从作者官方来源下载并校验 authlib-injector，已有缓存可断网使用。只承诺自己的本机游戏显示，其他玩家看到的皮肤由服务器决定。
 
 ## Setup
 
-交接包完整解压后，在source目录执行npm ci、node scripts/build-bridge.cjs；源码ZIP直接在解压项目目录执行。不能把账号、私钥或个人存档加入源码。
+源码 ZIP 解压后在项目根执行 npm ci、node scripts/build-bridge.cjs。交接包在 source 目录执行。源码构建需 JDK 17+；本批使用 JDK 25.0.2，并以 --release 8 编译原创离线皮肤提供器。
 
 ## Use the deliverable
 
-下载本版EXE或紧凑ZIP，解压后运行KAMUCL-1.1.17.exe；展开ZIP运行KAMUCL.exe。用公开SHA256SUMS.txt核对附件，使用自己的账号和游戏目录。成品及源码不包含发送者账号、登录凭据、用户图片、存档、整合包或反馈文档。
+下载 EXE，或解压紧凑 ZIP 后运行 KAMUCL-1.1.18.exe。展开 ZIP 运行 KAMUCL.exe。用公开 SHA256SUMS.txt 核对文件。成品没有作者账号、登录凭据、个人皮肤、存档或整合包。Windows 发行者签名尚未完成。
 
-全新配置默认使用AppData/Roaming/.minecraft；现有.kamucl和自定义目录保留，不迁移或删除旧实例。“设置 → 游戏设置 → 游戏窗口 → 退出游戏自动保存窗口化大小”默认关闭，开启后从下一次启动起记录该游戏的正常窗口尺寸，仅正常退出提交；实例已有分配规则继续生效。
+社区 MOD 下载确认页检测必要前置、显示关联项目，默认勾选一起下载。来源要求精确前置文件时，不再用其他版本冒充；冲突保持原文件并提示处理。缺少可靠前置信息时不能保证自动定位所有依赖。
 
-皮肤页新增下蹲/飞行，历史皮肤可直接预览；预览不会上传，也可在未登录状态使用。社区中文MOD查询会核对MC百科公开关联的来源项目；未关联或接口受限不会猜测下载项目。MOD预下载/校验与安装分别显示任务进度和取消、重试，不把准备完成描述为已安装。
+“默认配置 → 默认材质包”提供目标实例和“重新应用到此实例”。默认包只用于首次初始化，之后保留游戏内保存的启用、关闭和排序；手动重新应用才覆盖受管理的默认项。旧配置不静默重置。
+
+选择离线账号后在皮肤页选择 64×64 PNG 并应用，或绘制后应用到离线账号；下次启动生效。Classic/Slim、历史恢复、恢复游戏默认皮肤均支持。正在运行的游戏保持启动时快照。
 
 ## Verify
 
-开发需要Node.js24、锁定npm依赖及JDK17+；执行npm ci、node scripts/build-bridge.cjs、npm test、npx tsc --noEmit、npm run license:check、npm run build。Windows打包脚本和精确界面验证入口见source/docs/validation-1.1.17/README.md（独立源码ZIP为docs/validation-1.1.17/）。
+开发检查：npm test、npx tsc --noEmit、npm run license:check、npm run build。成品及真实界面命令见 docs/validation-1.1.18/README.md。
 
-交接包可携带验证命令数组为 ["node","source/scripts/check-licenses.cjs"]；在交接根目录运行 node source/scripts/check-licenses.cjs，应输出License check passed并退出0。此命令只验证许可，不能代替真实游戏、账号、网络或动效验收。
+交接包记录的验证命令数组是 ["node","source/scripts/check-licenses.cjs"]。在交接根运行 node source/scripts/check-licenses.cjs，应输出 License check passed 并退出 0。此命令只验证许可，不能代替游戏、服务或界面验收。
 
 ## 验证范围
 
-全量1284项：1283通过、0失败、1Linux专属跳过；类型、许可、生产构建及Windows包验证通过。最终四主题实际界面、原始帧/操作、落盘和独立评分见本版验证文档。真实官方服务证据仅中文查询元数据；MOD文件下载、必要前置、哈希、取消、失败恢复和事务落盘采用本地合成夹具配合原生产管线。
+1343 项测试：1342 通过、0 失败、1 Linux 专属跳过。类型、许可、构建、包内文件一致性、ZIP 干净解压及冷暖启动通过；四类主题、最小窗口约束和 100%/125% 缩放真实操作通过。
 
-本批未实际运行Minecraft进入世界，未取得用户原0.0.0实例或真人窗口退出复现；窗口读取用真实专属Win32子进程验证，产品会话/提交采用夹具。物理1366×768主机、完整动效性能基准和人工听感未覆盖。Windows未做发行者签名。历史失败原件保留，不回填通过；以前各版记录见docs/validation-1.1.16及更早目录。最终远端提交、标签和源码/交接身份由外部DELIVERY-1.1.17.json及Release回执记录，避免归档自引用。
+最终 EXE 在 Windows 原生 26.3/Fabric 演示世界显示离线 Slim 皮肤，GPU 纹理对应 PNG 的哈希一致，保存正常退出；游戏内关闭默认材质包后再启动保持关闭。另有 Java 8/17/21/25 官方 authlib 安全纹理解码探针，不能当成四版本完整游戏。
+
+社区依赖和回滚使用合成文件配合生产管线。本批未从两平台真实服务完整安装 MOD 后进入世界；用户原问题实例、完整旧 Forge、全部加载器/MOD 组合、物理 1366×768 主机、完整动效性能及人工听感未覆盖。其他平台未构建。历史失败不改写为通过。
+
+源码来自最终 Git 原始 blob；外部 DELIVERY-1.1.18.json 与 SHA256SUMS.txt 绑定提交、标签及源/交接 ZIP，避免归档自引用。用户数据及未提交 pelican-bicycle.html 不进入归档。

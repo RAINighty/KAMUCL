@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
+  applyOfflineSkin,
   changeCape,
   deleteSkinHistory,
   errText,
   getSkinHistory,
   getSkinProfile,
   renameSkinHistory,
+  resetOfflineSkin,
   uploadSkin,
   uploadSkinFromHistory
 } from '../api'
@@ -16,13 +18,18 @@ import SkinViewer3D from '../components/SkinViewer3D.vue'
 import SkinEditor from '../components/SkinEditor.vue'
 import type { SkinPreviewAnimation } from '../skinModel'
 import { resolveSkinPreview } from '../skinPreviewSelection'
+import { createFallbackSkin } from '../fallbackSkin'
 const editorOpen = ref(false)
 import type { CapeInfo, ProfileSkins, SkinHistoryEntry, SkinVariant } from '@shared/types'
 
 /** 仅微软正版账号可用 */
 const isMs = computed(() => store.selectedAccount?.type === 'microsoft')
 const isExternal = computed(() => store.selectedAccount?.type === 'yggdrasil')
-const canViewProfile = computed(() => isMs.value || isExternal.value)
+const isOffline = computed(() => store.selectedAccount?.type === 'offline')
+const defaultSkin = computed(() => isOffline.value ? createFallbackSkin().toDataURL('image/png') : '')
+const canApplySkin = computed(() => isMs.value || isOffline.value)
+const canViewProfile = computed(() => canApplySkin.value || isExternal.value)
+const historyAccountId = () => isOffline.value ? store.selectedAccount?.id : undefined
 
 /** 历史皮肤重命名输入框自动聚焦 */
 const vFocus = { mounted: (el: HTMLElement) => el.focus() }
@@ -48,7 +55,7 @@ async function loadProfile(refresh = false) {
   const request = ++profileRequest; profileError.value = ''
   loadingProfile.value = true
   try {
-    const next = await getSkinProfile(refresh)
+    const next = await getSkinProfile(refresh, store.selectedAccount?.id)
     if (request !== profileRequest) return
     profile.value = next
   } catch (e) {
@@ -146,7 +153,7 @@ const historyBusy = ref<string | null>(null)
 const previewHistoryId = ref('')
 const previewSelection = computed(() => resolveSkinPreview(currentSkin.value, historyList.value, previewHistoryId.value, activeCape.value))
 const previewHistory = computed(() => previewSelection.value.history)
-const previewSource = computed(() => previewSelection.value.source)
+const previewSource = computed(() => previewSelection.value.source || defaultSkin.value)
 const previewVariant = computed(() => previewSelection.value.variant)
 const previewReady = computed(() => !!previewSource.value && (!!previewHistory.value || !loadingProfile.value))
 function previewSavedSkin(item: SkinHistoryEntry) {
@@ -184,8 +191,11 @@ async function commitHistoryRename(item: SkinHistoryEntry) {
   const old = item.name || ''
   cancelHistoryRename()
   if (name === old) return
+  const request = historyRequest, accountId = store.selectedAccount?.id, scopeId = historyAccountId()
   try {
-    historyList.value = await renameSkinHistory(item.id, name)
+    const next = await renameSkinHistory(item.id, name, scopeId)
+    if (request !== historyRequest || accountId !== store.selectedAccount?.id) return
+    historyList.value = next
     toast(name ? `已重命名为「${name}」` : '已恢复默认名称', 'success')
   } catch (e) {
     toast('重命名失败：' + errText(e), 'error')
@@ -201,7 +211,7 @@ async function loadHistory() {
   const request = ++historyRequest; historyError.value = ''
   loadingHistory.value = true
   try {
-    const next = await getSkinHistory()
+    const next = await getSkinHistory(historyAccountId())
     if (request !== historyRequest) return
     historyList.value = next
     const map: Record<string, string> = {}
@@ -218,12 +228,13 @@ async function loadHistory() {
 
 /** 换回历史皮肤：主进程走标准上传流程并返回最新档案 */
 async function onRestore(item: SkinHistoryEntry) {
-  if (!isMs.value || historyBusy.value) return
+  if (!canApplySkin.value || historyBusy.value) return
   const request = profileRequest, accountId = store.selectedAccount?.id
+  const local = isOffline.value
   const accountName = store.selectedAccount?.username || '此前账号', selectedPreview = previewHistoryId.value
   historyBusy.value = item.id
   try {
-    const next = await uploadSkinFromHistory(item.id)
+    const next = local ? await uploadSkinFromHistory(item.id, accountId) : await uploadSkinFromHistory(item.id)
     if (request !== profileRequest || accountId !== store.selectedAccount?.id) {
       toast(`「${accountName}」已换回历史皮肤；当前预览保持不变`, 'success')
       return
@@ -232,7 +243,7 @@ async function onRestore(item: SkinHistoryEntry) {
     profileRequest++; loadingProfile.value = false; profileError.value = ''
     profile.value = next
     if (previewHistoryId.value === selectedPreview) previewHistoryId.value = ''
-    toast('已换回历史皮肤', 'success')
+    toast(local ? '已应用历史皮肤，下次启动游戏生效' : '已换回历史皮肤', 'success')
     void loadHistory()
   } catch (e) {
     const context = accountId === store.selectedAccount?.id ? '' : `「${accountName}」`
@@ -244,14 +255,17 @@ async function onRestore(item: SkinHistoryEntry) {
 
 async function onDeleteHistory(item: SkinHistoryEntry) {
   if (historyBusy.value) return
+  const request = historyRequest, accountId = store.selectedAccount?.id, scopeId = historyAccountId(), local = isOffline.value
   historyBusy.value = item.id
   try {
-    historyList.value = await deleteSkinHistory(item.id)
+    const next = await deleteSkinHistory(item.id, scopeId)
+    if (request !== historyRequest || accountId !== store.selectedAccount?.id) return
+    historyList.value = next
     const map = { ...historyRenders.value }
     delete map[item.id]
     historyRenders.value = map
     if (previewHistoryId.value === item.id) previewHistoryId.value = ''
-    toast('历史皮肤已移入回收站', 'success')
+    toast(local ? '已删除本地历史记录，当前应用的皮肤保留' : '历史皮肤已移入回收站', 'success')
   } catch (e) {
     toast('删除失败：' + errText(e), 'error')
   } finally {
@@ -277,7 +291,7 @@ function fileToDataUrl(f: File): Promise<string> {
 
 /** 统一入口：文件选择框与拖拽都来此 */
 async function pickFile(f: File | undefined | null) {
-  if (!isMs.value) return
+  if (!canApplySkin.value) return
   if (!f) return
   if (!/\.png$/i.test(f.name)) {
     toast('请选择 PNG 格式的皮肤文件', 'error')
@@ -310,24 +324,25 @@ function clearPending() {
 }
 
 async function doUpload() {
-  if (!isMs.value || !pending.value || uploading.value) return
+  if (!canApplySkin.value || !pending.value || uploading.value) return
   const request = profileRequest, accountId = store.selectedAccount?.id
   const accountName = store.selectedAccount?.username || '此前账号', selectedFile = pending.value
+  const local = isOffline.value
   uploading.value = true
   try {
-    const next = await uploadSkin(selectedFile.path, variant.value)
+    const next = local ? await applyOfflineSkin(selectedFile.path, variant.value, accountId!) : await uploadSkin(selectedFile.path, variant.value)
     if (request !== profileRequest || accountId !== store.selectedAccount?.id) {
-      toast(`「${accountName}」的皮肤上传成功；当前预览保持不变`, 'success')
+      toast(`「${accountName}」的皮肤${local ? '已应用' : '上传成功'}；当前预览保持不变`, 'success')
       return
     }
     profileRequest++; loadingProfile.value = false; profileError.value = ''
     profile.value = next
-    toast('皮肤上传成功', 'success')
+    toast(local ? '已应用到离线账号，下次启动游戏生效' : '皮肤上传成功', 'success')
     if (pending.value === selectedFile) clearPending()
     void loadHistory()
   } catch (e) {
     const context = accountId === store.selectedAccount?.id ? '' : `「${accountName}」`
-    toast(context + '皮肤上传失败：' + errText(e), 'error')
+    toast(context + (local ? '本地皮肤应用失败：' : '皮肤上传失败：') + errText(e), 'error')
   } finally {
     uploading.value = false
   }
@@ -377,6 +392,21 @@ function loadAll() {
   void loadHistory()
 }
 
+async function onResetOffline() {
+  const account = store.selectedAccount
+  if (account?.type !== 'offline' || uploading.value) return
+  const request = profileRequest
+  uploading.value = true
+  try {
+    const next = await resetOfflineSkin(account.id)
+    if (request !== profileRequest || account.id !== store.selectedAccount?.id) return
+    profileRequest++; loadingProfile.value = false; profileError.value = ''
+    profile.value = next; previewHistoryId.value = ''
+    toast('已恢复游戏默认皮肤，下次启动游戏生效', 'success')
+  } catch (error) { toast('恢复默认皮肤失败：' + errText(error), 'error') }
+  finally { uploading.value = false }
+}
+
 onMounted(() => {
   loadAll()
 })
@@ -391,6 +421,7 @@ watch(
     historyRenders.value = {}
     previewHistoryId.value = ''
     capeRenders.value = {}; capeErrors.value = {}; capeViewerError.value = ''; capeBusy.value = null
+    cancelHistoryRename()
     clearPending()
     loadAll()
   }
@@ -403,7 +434,7 @@ watch(
     <div data-ui="SkinsView:483ce0fd91a6" class="page-head">
       <div class="skin-page-heading"><h1 data-ui="SkinsView:b30aa0d910d4" class="page-title">皮肤与披风</h1>
       <p data-ui="SkinsView:dc0d51be1910" class="page-sub">
-        {{ isExternal ? `查看 ${store.selectedAccount?.providerName ?? '外置皮肤站'} 的角色材质` : isMs ? '管理微软正版账号的皮肤与披风' : '预览本地皮肤；上传和披风管理需要登录' }}
+        {{ isExternal ? `查看 ${store.selectedAccount?.providerName ?? '外置皮肤站'} 的角色材质` : isMs ? '管理微软正版账号的皮肤与披风' : isOffline ? '本地 PNG 皮肤 · 在本机游戏中显示' : '预览本地皮肤；选择账号后可应用' }}
       </p></div>
       <button class="btn btn-gold skin-editor-entry" @click="editorOpen=true">绘制皮肤</button>
     </div>
@@ -500,7 +531,7 @@ watch(
           </div>
 
           <!-- 待上传文件 -->
-          <div data-ui="SkinsView:9ae4ea0309a4" v-if="isMs && pending" class="pending-box">
+          <div data-ui="SkinsView:9ae4ea0309a4" v-if="canApplySkin && pending" class="pending-box">
             <div data-ui="SkinsView:15c4e36a7b28" class="pending-viewer">
               <SkinViewer3D v-if="pendingDataUrl" :src="pendingDataUrl" :variant="variant" />
             </div>
@@ -530,17 +561,20 @@ watch(
             </button>
           </div>
 
-          <div data-ui="SkinsView:2ce0dc456e94" v-if="isMs" class="skin-actions">
+          <div data-ui="SkinsView:2ce0dc456e94" v-if="canApplySkin" class="skin-actions">
             <button data-ui="SkinsView:45688b94a733" class="btn btn-ghost" @click="fileInput?.click()">选择皮肤文件…</button>
             <button data-ui="SkinsView:18b48238d441" class="btn btn-gold" :disabled="!pending || uploading" @click="doUpload">
-              {{ uploading ? '上传中…' : '上传' }}
+              {{ uploading ? (isOffline ? '应用中…' : '上传中…') : isOffline ? '应用到离线账号' : '上传' }}
             </button>
+            <button v-if="isOffline" class="btn btn-ghost" :disabled="uploading || !currentSkin" @click="onResetOffline">恢复游戏默认皮肤</button>
           </div>
-          <p data-ui="SkinsView:aa2915a1b866" v-if="isMs" class="muted skin-hint">支持 64×64 的 PNG 皮肤文件</p>
+          <p data-ui="SkinsView:aa2915a1b866" v-if="canApplySkin" class="muted skin-hint">支持 64×64 的 PNG 皮肤文件</p>
           <div data-ui="SkinsView:252d1a5f5b2f" v-else class="external-skin-note">
             <span data-ui="SkinsView:d35771891dd7" class="tag tag-cyan">{{ store.selectedAccount?.providerName }}</span>
             <p data-ui="SkinsView:d7b70906b3c5" class="muted skin-hint">外置账号的皮肤与披风由所属皮肤站管理；KAMUCL 会读取并在启动时加载当前材质。</p>
           </div>
+          <p v-if="isOffline" class="muted skin-hint offline-skin-hint">离线账号皮肤仅在本机游戏显示，修改从下次启动生效；其他玩家看到的皮肤由服务器决定。首次启动会从作者官方来源下载并校验 authlib-injector 皮肤加载组件，之后可在断网时使用缓存。</p>
+          <p v-if="isOffline && !currentSkin" class="muted skin-hint">尚未应用本地皮肤。此处显示 KAMUCL 默认预览，游戏使用自身默认皮肤。</p>
 
           <input data-ui="SkinsView:e63f2137c12b"
             ref="fileInput"
@@ -552,7 +586,7 @@ watch(
         </section>
 
         <div data-ui="SkinsView:de1900d63ab5" v-if="dragOver" class="drag-hint">松开以选择皮肤文件</div>
-        <section data-ui="SkinsView:b5f0f1bd543a" class="card pane pane-capes">
+        <section data-ui="SkinsView:b5f0f1bd543a" v-if="!isOffline" class="card pane pane-capes">
           <header class="pane-head">
             <h3 class="pane-title">披风（{{ capes.length }}）</h3>
             <button class="btn btn-ghost" :disabled="loadingProfile || capeBusy !== null" @click="loadProfile(true)">刷新材质</button>
@@ -618,8 +652,8 @@ watch(
                 <div data-ui="SkinsView:e8374fa9d9a7" class="history-actions">
                   <button data-ui="SkinsView:96c3c4ae26c7"
                     class="btn btn-gold btn-sm"
-                    :disabled="!isMs || historyBusy !== null"
-                    :title="isMs ? '上传并换回此皮肤' : '更换皮肤需要微软正版账号'"
+                    :disabled="!canApplySkin || historyBusy !== null"
+                    :title="isOffline ? '应用到此离线账号，下次启动游戏生效' : isMs ? '上传并换回此皮肤' : '请先选择可应用皮肤的账号'"
                     @click="onRestore(item)"
                   >
                     {{ historyBusy === item.id ? '处理中…' : '换回' }}

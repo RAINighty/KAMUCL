@@ -142,9 +142,9 @@ export async function listLoaderVersions(
 // ---------------- 安装 ----------------
 
 /** 选一个可用 java 运行安装器：优先本机扫描，实在不行用 ensureJava 下载 */
-async function pickJavaForInstaller(mcVersion: string, emit: ProgressEmit): Promise<string> {
+async function pickJavaForInstaller(mcVersion: string, emit: ProgressEmit, signal?: AbortSignal): Promise<string> {
   const vj = readVersionJson(mcVersion)
-  return await ensureJava(vj, emit)
+  return await ensureJava(vj, emit, mcVersion, { signal })
 }
 
 /** 运行 forge/neoforge 安装器：全量输出落盘 installer.log；失败带最后 30 行；--mirror= 等号形式，失败降级去 mirror 重试；signal 取消时杀掉安装器进程 */
@@ -265,7 +265,7 @@ export async function repairNeoRuntime(json: VersionJson, clientJar: string, bas
     const repairEmit:ProgressEmit=event=>emit({...event,stage:'repair',text:`修复 NeoForge：${event.text}`})
     await downloadLoaderInstaller(`https://maven.neoforged.net/releases/net/neoforged/neoforge/${neo}/neoforge-${neo}-installer.jar`, jar, mirror,
       (done,total)=>repairEmit({stage:'repair',progress:total?done/total:0,text:'下载安装器 '+(done/1024/1024).toFixed(1)+'MB',bytesDone:done,bytesTotal:total||undefined}))
-    const java = await ensureJava(baseJson, emit)
+    const java = await ensureJava(baseJson, emit, mc)
     await prepareInstallerDependencies(jar, staging, mirror, repairEmit)
     await runInstaller(java, jar, repairEmit, undefined, staging)
     reuseExternalRuntimeLibraries(json, [staging], librariesDir(), tasks.map(t => t.dest))
@@ -439,7 +439,7 @@ async function installLoaderInternal(
             signal.throwIfAborted()
             const processorEmit: ProgressEmit = e => parallel.update('processor', e)
             processorEmit({ stage: 'java', progress: 0, indeterminate: true, text: '正在检查加载器所需的 Java 环境…' })
-            const javaPath = await pickJavaForInstaller(mcVersion, e => processorEmit({ ...e, progress: 0, overall: undefined, indeterminate: true }))
+            const javaPath = await pickJavaForInstaller(mcVersion, e => processorEmit({ ...e, progress: 0, overall: undefined, indeterminate: true }), signal)
             // Forge/NeoForge 安装器要求目标目录存在 launcher_profiles.json，否则报错退出
             const lp = path.join(gameDir(), 'launcher_profiles.json')
             if (!fs.existsSync(lp)) {

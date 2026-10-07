@@ -12,7 +12,7 @@ import type { ProfileSkins, SkinHistoryEntry } from '../src/shared/types'
 // service responses and browser-only rendering/lifecycle hooks are fixtures.
 const compiled = build({ entryPoints: ['src/renderer/src/views/SkinsView.vue'], bundle: true, write: false,
   platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent', plugins: [{ name: 'skin-account-services', setup(builder) {
-    builder.onResolve({ filter: /^\.\.\/(api|store|skin-render)$/ }, args => ({ path: args.path.split('/').at(-1)!, external: true }))
+    builder.onResolve({ filter: /^\.\.\/(api|store|skin-render|fallbackSkin)$/ }, args => ({ path: args.path.split('/').at(-1)!, external: true }))
     builder.onLoad({ filter: /\.vue$/ }, args => {
       if (!args.path.endsWith('SkinsView.vue')) return { contents: 'export default {}', loader: 'js' }
       const { descriptor } = parse(fs.readFileSync(args.path, 'utf8'))
@@ -29,8 +29,8 @@ const deferred = <T>() => {
 }
 const flush = async () => { for (let i = 0; i < 4; i++) { await vue.nextTick(); await Promise.resolve() } }
 
-async function fixture(overrides: Record<string, unknown>) {
-  const store = vue.reactive({ selectedAccount: { id: 'A', type: 'microsoft', username: 'Player A' }, settings: { theme: 'black' } })
+async function fixture(overrides: Record<string, unknown>, accountType = 'microsoft') {
+  const store = vue.reactive({ selectedAccount: { id: 'A', type: accountType, username: 'Player A' }, settings: { theme: 'black' } })
   const notices: { message: string; kind: string }[] = [], unmounted: (() => void)[] = []
   const reads: { file: any; reader: any }[] = []
   class FileReaderFixture {
@@ -43,11 +43,42 @@ async function fixture(overrides: Record<string, unknown>) {
     ? { ...vue, onMounted() {}, onUnmounted(fn: () => void) { unmounted.push(fn) } }
     : name === 'store' ? { store, toast: (message: string, kind: string) => notices.push({ message, kind }) }
     : name === 'api' ? api : name === 'skin-render' ? { renderCape: async () => '', renderSkinFront: async (url: string) => 'thumbnail:' + url }
+    : name === 'fallbackSkin' ? { createFallbackSkin: () => ({ toDataURL: () => 'data:default-local' }) }
     : require(name), mod, mod.exports, { kamucl: { getFilePath: (file: any) => file.path } }, FileReaderFixture)
   const scope = vue.effectScope(), state = scope.run(() => mod.exports.default.setup({}, { expose() {} }))
-  const switchAccount = async (id: string) => { store.selectedAccount = { id, type: 'microsoft', username: 'Player ' + id }; await flush() }
+  const switchAccount = async (id: string) => { store.selectedAccount = { id, type: accountType, username: 'Player ' + id }; await flush() }
   return { state, store, notices, reads, switchAccount, close: () => { for (const fn of unmounted) fn(); scope.stop() } }
 }
+
+test('offline UI applies with captured account ID and a late A result cannot replace B preview, pending file, or history', async () => {
+  const reply = deferred<ProfileSkins>(), args: unknown[][] = []
+  const f = await fixture({ applyOfflineSkin: (...a: unknown[]) => { args.push(a); return reply.promise } }, 'offline')
+  try {
+    f.state.pending.value = { path: 'offline-A.png', name: 'offline-A.png' }; f.state.variant.value = 'slim'
+    const apply = f.state.doUpload()
+    await f.switchAccount('B')
+    f.state.previewHistoryId.value = history.id; f.state.pending.value = { path: 'offline-B.png', name: 'offline-B.png' }
+    reply.resolve(profile('applied-A')); await apply; await flush()
+    assert.deepEqual(args, [['offline-A.png', 'slim', 'A']])
+    assert.equal(f.state.profile.value.username, 'B'); assert.equal(f.state.previewSource.value, 'data:saved')
+    assert.equal(f.state.pending.value.path, 'offline-B.png'); assert.equal(f.state.uploading.value, false)
+    assert(f.notices.some(row => row.message.includes('Player A') && row.message.includes('已应用')))
+  } finally { f.close() }
+})
+
+test('offline reset captures account ID and a deferred reset cannot clear the new account appearance', async () => {
+  const reply = deferred<ProfileSkins>(), args: unknown[][] = []
+  const f = await fixture({ resetOfflineSkin: (...a: unknown[]) => { args.push(a); return reply.promise } }, 'offline')
+  try {
+    f.state.profile.value = profile('A')
+    const reset = f.state.onResetOffline()
+    await f.switchAccount('B')
+    f.state.previewHistoryId.value = history.id
+    reply.resolve({ username: 'A', skins: [], capes: [] }); await reset; await flush()
+    assert.deepEqual(args, [['A']]); assert.equal(f.state.profile.value.username, 'B')
+    assert.equal(f.state.previewHistoryId.value, history.id); assert.equal(f.state.uploading.value, false)
+  } finally { f.close() }
+})
 
 test('actual skin upload retains the accepted request but cannot replace a later account or clear its pending file', async () => {
   const reply = deferred<ProfileSkins>(), args: unknown[][] = []

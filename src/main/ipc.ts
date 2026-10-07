@@ -33,6 +33,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import * as defaultPacks from './core/defaultResourcePacks'
+import { applyDefaultResourcePacksToInstance } from './core/defaultResourcePackApply'
 import { DEFAULT_BACKGROUND, DEFAULT_LAUNCH_THUMBNAIL, IPC, IPC_EVENT } from '../shared/types'
 import type {
   CommunityFile,
@@ -766,20 +767,23 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   )
 
   // ---------------- 皮肤/披风（同步 await 返回，错误经 invoke reject 给前端） ----------------
-  ipcMain.handle(IPC.skinProfile, (_event, refresh?: boolean) => skins.getProfile(refresh === true))
+  ipcMain.handle(IPC.skinProfile, (_event, refresh?: boolean, accountId?: string) => skins.getProfile(refresh === true, accountId))
   ipcMain.handle(IPC.skinUpload, (_e, filePath: string, variant: SkinVariant) =>
     skins.uploadSkin(String(filePath ?? ''), variant)
   )
   ipcMain.handle(IPC.skinCape, (_e, capeId: string | null) => skins.changeCape(capeId ?? null))
-  ipcMain.handle(IPC.skinHistory, () => skins.history())
-  ipcMain.handle(IPC.skinHistoryDelete, (_e, id: string) =>
-    skins.historyDelete(String(id ?? ''))
+  ipcMain.handle(IPC.skinOfflineApply, (_e, filePath: string, variant: SkinVariant, accountId: string) =>
+    skins.applyOfflineSkin(String(filePath ?? ''), variant, String(accountId ?? '')))
+  ipcMain.handle(IPC.skinOfflineReset, (_e, accountId: string) => skins.resetOfflineSkin(String(accountId ?? '')))
+  ipcMain.handle(IPC.skinHistory, (_e, accountId?: string) => skins.history(accountId))
+  ipcMain.handle(IPC.skinHistoryDelete, (_e, id: string, accountId?: string) =>
+    skins.historyDelete(String(id ?? ''), accountId)
   )
-  ipcMain.handle(IPC.skinHistoryRename, (_e, id: string, name: string) =>
-    skins.historyRename(String(id ?? ''), String(name ?? ''))
+  ipcMain.handle(IPC.skinHistoryRename, (_e, id: string, name: string, accountId?: string) =>
+    skins.historyRename(String(id ?? ''), String(name ?? ''), accountId)
   )
-  ipcMain.handle(IPC.skinUploadHistory, (_e, id: string) =>
-    skins.uploadHistory(String(id ?? ''))
+  ipcMain.handle(IPC.skinUploadHistory, (_e, id: string, accountId?: string) =>
+    skins.uploadHistory(String(id ?? ''), accountId)
   )
   ipcMain.handle(IPC.skinAvatar, (_e, accountId?: string) => skins.getAvatar(accountId ? String(accountId) : undefined))
 
@@ -970,6 +974,7 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.defaultPacksRemove, (_e, id: string) => defaultPacks.removeDefaultResourcePack(id))
   ipcMain.handle(IPC.defaultPacksMove, (_e, id: string, direction: number) => defaultPacks.moveDefaultResourcePack(id, direction))
   ipcMain.handle(IPC.defaultPacksSetEnabled, (_e, id: string, enabled: boolean) => defaultPacks.setDefaultResourcePackEnabled(id, enabled))
+  ipcMain.handle(IPC.defaultPacksApply, (_e, folder: string, id: string) => applyDefaultResourcePacksToInstance({ folder, id }))
 
   // ---------------- 启动器自更新与版本回退 ----------------
   applyUpdate.setUpdateEmitter(send)
