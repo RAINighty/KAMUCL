@@ -436,7 +436,11 @@ function onDragLeave(e: DragEvent) {
 
 function onDrop(e: DragEvent) {
   if(store.editMode){e.preventDefault();e.stopImmediatePropagation();endDrag();return}
-  if (resourceDropPage()) {
+  // MRPACK is unambiguously a whole pack, even on a local resource page.
+  // Ordinary ZIP/JAR drops retain that page's existing batch import behavior.
+  const mrpackDrop = dragHasFiles(e) && Array.from(e.dataTransfer?.files ?? []).some(file => /\.mrpack$/i.test(file.name))
+  if (mrpackDrop) e.stopPropagation()
+  if (resourceDropPage() && !mrpackDrop) {
     endDrag(); e.preventDefault(); e.stopPropagation()
     if (dragHasFiles(e)) {
       if (store.resourceDropHandler) store.resourceDropHandler(e)
@@ -478,7 +482,7 @@ function onDrop(e: DragEvent) {
     modDrop.open = true
     return
   }
-  toast('不能混合拖入整合包与其他文件，请分开拖入', 'error')
+  toast('压缩包请一次导入一个文件；混合文件请分开拖入', 'error')
 }
 
 function routeYggdrasilImport(input: YggdrasilProviderInput) {
@@ -519,7 +523,7 @@ async function routeSingleImport(filePath: string, _displayName: string) {
 
 // ---------------- 整合包导入确认弹窗 ----------------
 const FORMAT_LABEL: Record<ModpackInfo['format'], string> = {
-  mrpack: 'Modrinth',
+  mrpack: 'Modrinth (.mrpack)',
   curseforge: 'CurseForge',
   fullpack: '完整客户端包'
 }

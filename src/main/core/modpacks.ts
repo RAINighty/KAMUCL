@@ -147,7 +147,9 @@ function uniqueInstanceId(name: string, reserved?: ReadonlySet<string>): string 
 async function readEntryJson(zip: PackZip, name: string): Promise<unknown> {
   const entry = zip.getEntry(name) ?? zip.getEntry('./' + name)
   if (!entry) return null
-  return JSON.parse((await entry.getData()).toString('utf8'))
+  // Some Windows exporters/editors write a UTF-8 BOM before otherwise valid
+  // JSON. Ignore only that leading marker; keep every other parse check intact.
+  return JSON.parse((await entry.getData()).toString('utf8').replace(/^\uFEFF/, ''))
 }
 
 // ---------------- 压缩包打开与格式探测（install / probe 共用） ----------------
@@ -336,10 +338,13 @@ async function parseMrpack(zip: PackZip): Promise<Parsed> {
     // 客户端明确 unsupported 即服务端专用；optional / required 均可装入客户端。
     if (f.env?.client === 'unsupported') continue
     const rel = f.path.replace(/\\/g, '/').replace(/^\.\//, '')
-    if (!safeJoin(path.join(process.cwd(), '.mrpack-path-check'), rel)) {
+    const destination = safeJoin(path.join(process.cwd(), '.mrpack-path-check'), rel)
+    if (!destination) {
       throw new Error(`Modrinth 文件路径不安全：${f.path}`)
     }
-    const identity = process.platform === 'win32' ? rel.toLowerCase() : rel
+    // Deduplicate the same normalized destination used during installation:
+    // repeated/mixed separators must not bypass the Windows case-fold check.
+    const identity = process.platform === 'win32' ? destination.toLowerCase() : destination
     if (seenPaths.has(identity)) throw new Error(`Modrinth 清单包含重复目标路径：${rel}`)
     seenPaths.add(identity)
     const urls = (f.downloads ?? []).filter((value) => {

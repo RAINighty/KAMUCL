@@ -1,55 +1,49 @@
-# CURRENT STATUS — KAMUCL 1.1.18 Windows
+# CURRENT STATUS — KAMUCL 1.1.19 Windows
 
-香港更新日志：2026-10-07 14:54。最终验证状态时间：2026-10-07 15:16。Windows x64，Electron 44.3.0。用户图片、收藏、设置、历史计数、旧实例及未提交文件保留；不操作 wuhui，不强推。资源占用优化暂停，本批没有 Mac 成品。
+香港更新日志：2026-10-07 16:08。Windows x64，Electron 44.3.0。保留用户图片、收藏、设置、历史计数、旧实例及未提交文件。不操作 wuhui、不强推；资源优化暂停，本批没有 Mac 成品。
 
 - Project: KAMUCL
-- Version or revision: 1.1.18；最终 master 提交由标签及外部 DELIVERY 精确绑定
-- Status timestamp: 2026-10-07 15:16 Asia/Hong_Kong
+- Version or revision: 1.1.19；最终 master 提交由标签和外部 DELIVERY 精确绑定
+- Status timestamp: 2026-10-07 16:49 Asia/Hong_Kong
 - Build command: npm run build；electron-builder --win portable --x64 --config.electronDist=node_modules/electron/dist --publish never；node scripts/pack-windows-zip.cjs
-- Build result: 成功；516 项生产输入在构建前冻结，构建/验收后复核不变
-- Test/validation commands: npm test；npx tsc --noEmit；npm run license:check；node scripts/verify-windows-package.cjs；独立实例的真实界面及游戏专项
-- Validation results: 1343 项中 1342 通过、0 失败、1 Linux 专属跳过；四主题、原生游戏、构建及包通过；独立分项评分见本版验证目录
+- Build result: 成功；516 项生产输入构建前冻结、验收后重算无差异
+- Test/validation commands: npm test；npx --no-install tsc --noEmit；npm run license:check；node scripts/verify-windows-package.cjs；专属配置的真实界面专项
+- Validation results: 1356 项中 1355 通过、0 失败、1 Linux 专属跳过；四主题及缩放、PNG 解码和 MRPACK 路由通过；独立评分见本版验证目录
 - Finished artifact: Windows EXE、紧凑 ZIP、展开 ZIP
-- Artifact SHA256: 下表；源/交接 ZIP 在外部 DELIVERY、公开 SHA256SUMS.txt
+- Artifact SHA256: 下表；源码/交接 ZIP 的最终外部哈希见 DELIVERY 和公开 SHA256SUMS.txt
 
-## Last verified state
+## Last verified artifacts
 
 | 文件 | 字节 | SHA256 |
 | --- | ---: | --- |
-| KAMUCL-1.1.18.exe | 97323101 | a0427950efe94c5ffc5f05cca9dcc33b79bab96293cfde7e0c89a2f7198be887 |
-| KAMUCL-1.1.18-windows-x64.zip | 97355100 | 630e48cace25ef98a81b7241bd8e38105b2dc281a11089986a9c98c5c5c5c0cc |
-| KAMUCL-1.1.18-windows-x64-unpacked.zip | 142987727 | 1ed6eee0cc6ff0d94fd94ff5eda14cadcb9dcb58bf86fe012608fd51fc2732b2 |
+| KAMUCL-1.1.19.exe | 97323050 | 7b11d4979f1d3afc72397b501770130e3c5e23e2e246deaa70a06276f6a61a65 |
+| KAMUCL-1.1.19-windows-x64.zip | 97355049 | 9cae56424bdc95b309a7aab937c673bd2c407801a17dce339bd516c2cfc3bcc4 |
+| KAMUCL-1.1.19-windows-x64-unpacked.zip | 142990165 | 6bc7a4ef2da326e01915559abf77480754722a291dfab233b37cb9e2e5948dde |
 
 ## Completed
 
-- 自动 Java 按可信游戏要求选择版本；检查 MOD Java 约束、架构和旧 Forge。诊断与启动使用相同客户端证据；取消不会误杀其他消费者的共享扫描。
-- 默认材质包首次初始化后保留游戏内选择、关闭和排序，旧配置不覆盖显式选择。手动目标实例应用带备份、并发保护和失败回滚。
-- 离线账号本地 PNG/绘制/历史/重置、Classic/Slim 与账号隔离；原创 Java 8 字节码提供器在游戏 JVM 持有不可变快照并签名纹理，限定本机路由。首次校验下载 authlib-injector，缓存后离线。
-- 社区必要前置和项目关联保留；修复 pinned 文件被其他已装版本静默替代。精确哈希不一致或确认期间变化停止写入，保留原文件。
-- 1.1.18/根锁/香港分钟日志、原创提供器源码构建脚本与许可说明同步。
+- 皮肤吸色忽略完全透明外层像素，保留画笔；非零透明度按原字节采样。显式 0% 及旧偏好不强制重置，主题化提示提供恢复不透明按钮。Three 几何、UV、纹理和人物比例未改变。
+- MRPACK 清单允许唯一前导 UTF-8 BOM；资源页优先路由 .mrpack/.MRPACK 至统一整包分类。普通 JAR/ZIP 本页流程保持。清单路径按实际 safeJoin 规范目标及 Windows 大小写去重，避免合法哈希文件随后被另一别名覆盖。
+- 版本、根锁与分钟更新日志同步；无新增依赖、优化或用户数据迁移。
 
-## 当前验证
+## Evidence and remaining coverage
 
-最终 EXE a0427950…be887；证据绑定见 docs/validation-1.1.18。真实界面使用专属配置及前台 HWND/PID 检查，不向其他程序输入。最小窗口请求与 Windows 125% 后的实际 DIP、CSS 小数尺寸分别记录，不伪称严格物理 960×620。
+最终 EXE 7b11d497…61a65。新专项四主题及 125% 界面缩放分别记录真实 HWND/PID、原生 DIP、CSS 小数视口与显示缩放；不冒称请求 960×620 是严格物理像素。Classic/Slim 导出由生产 IPC 写入，实际 PNG 逐像素对照编辑 Canvas。黑橙偏好 0 保存到专属配置后关闭重开、提示恢复再绘制导出通过。
 
-官方元数据/认证库/Java 下载带校验；四 JVM 探针实际解码 PNG。原生游戏为最终 EXE 的 26.3/Fabric 演示世界：实际 GPU 哈希、Slim、存档、两次正常退出和关闭 pack 后再启动保留。社区事务及故障注入使用合成夹具，不冒称两服务的完整真实 MOD 游戏验证。
+原 proof 记录 PID/版本，未内嵌 EXE SHA；事后保留副本验证将 proof 的父 PID 与原始 child ledger、独立 EXE 出生时间唯一关联。17 份保留 GUI EXE 及运行目录 ASAR 全部与最终成品匹配。事后关联与当时 process.execPath 观察不同，限制明确保留。原始 JSON、PNG、189 张 compositor 帧及时间戳未改写或插帧；采集帧率不作为完整动效性能通过依据。
 
-原始录屏是未经插帧的 compositor JPEG 帧与时间戳，另存原分辨率 PNG；不把采集帧率当成完整动效性能放行。所属启动器主进程退出由实际 child close 记录核对；通用 ownedInventory 的 Windows 清单不可用，不能当作后台进程全清零。
+MRPACK GUI 验证真实拖入和生产分类，顶部选择器返回合成路径；没有实际操作原生选择文件窗口。损坏清单夹带世界、不降级、路径/哈希、备用 URL、中文/空格/§、client-overrides、服务器专用项、安装落盘以及取消/回滚在合成夹具和本地服务中验证。未完整在线安装第三方真实整合包、下载全部 Minecraft/Forge 资源并进入世界；本批无新游戏启动证据，1.1.18 的游戏证据不代替本轮 MRPACK 验收。
 
-## Remaining
+全身每个面与视角、所有缩放/输入设备、人工听感、完整动效性能和其他平台未覆盖。EXE 未发行者签名。所属 root 子进程实际 exit/close 已等待；通用 Windows ownedInventory 不可用，不宣称所有后台进程全清零。
 
-用户原问题实例、完整旧 Forge、所有加载器/MOD 组合、每个 Java 全新网络重下、两服务完整 MOD 安装进入世界、多人显示、物理 1366×768、完整动效性能和人工听感未覆盖。其他平台不在本批。运输和公开身份由外部交付回执核对。
+## Historical failures
 
-## Known issues and risks
+1.1.18 原始透明吸色实际复现；修复前别名目标安装成功却覆盖了第一个合法哈希文件，修复后下载和写入前拒绝。未纳入发布的第一候选 0f997385…4a3fb5 与其输入/测试记录保留。
 
-离线皮肤只承诺自己本机，首次网络准备第三方 authlib-injector；加载器/服务器插件可能改变行为。不可变历史纹理暂保留以保护已接受/运行快照，本轮不恢复优化或删除这些文件。EXE 未做发行者签名。
+QA 新增严格请求尺寸断言误报 962×623 不等于 960×620；改用已有 <=3 DIP 舍入及 <1 CSS 像素检查，实际数值保留。两轮补充截图操作因前台 HWND 不同停止，透明轮明确为其他 PID 44080，无法事后确定进程名；不猜测归因。未放宽前台检查，专属冷启动完整重跑通过。旧回归日志“PASS 1.1.8”为模块硬编码文字，实际报告版本为 1.1.19。
 
-独立评分全部达到 8.5，最低外观 8.6。蓝白主题窄窗待应用卡的选中 Classic 标签对比偏弱，作为非阻断外观问题保留；未宣称零缺陷。
+## Delivery and next action
 
-保留历史失败：测试报告半截读取、旧 CSS/共享扫描断言、整数视口误判、过期文案断言、前台窗口干扰、初次游戏 ID 误作 PNG 哈希，以及真实 pinned 错误复用。修复后通过另列；d0dad965 旧候选保存在本地历史，不发布。
+源码逐成员核对 Git blob、路径、大小、SHA 和干净解压；交接由未修改的 package-codex-project-handoff 工具制作，记录实际许可验证。源码和交接的提交/哈希由外部 DELIVERY 绑定。保留 main 独立历史差异，通过 cherry-pick 同步；不纳入个人文件或实时运行目录。
 
-通用源归档旧工具仍有 96MiB buffer 与嵌套 out 限制，未作为通过证据。源码使用 Git 原始 blob、逐成员 Git 对象/路径/大小/SHA/隐私检查；交接工具未经修改，明确包含已提交公开夹具，排除实时目录和用户资料。
-
-## Recommended next action
-
-按 START_HERE 干净解压核对 SHA。用自己的账号/目录复验；开发者执行记录的许可命令及相关专项。新增实机覆盖单独补证，不将未测改为通过。
+按 START_HERE 核对下载 SHA 并使用自己的账号/目录。新增实机与真实第三方服务覆盖需单独补证，不能把未测项目改为通过。
