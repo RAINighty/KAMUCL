@@ -9,11 +9,15 @@
 - Operating system: Windows 10/11 x64；本批实际 Windows 11、125% 系统显示缩放
 - Runtime/tool versions: Electron 44.3.0、Node.js 24、锁定 npm 依赖、JDK 17+
 
-## Prerequisites and setup
+## Prerequisites
 
-成品不需要 Node.js。游戏需要自己的账号、适配 Java 及游戏资源。源码解压后在项目根执行 npm ci、node scripts/build-bridge.cjs；交接包在 source 目录执行。Windows 构建需要可用的 .NET Framework C# 编译器及 JDK，本批使用 JDK 25.0.2。
+成品不需要 Node.js。游戏需要自己的账号、适配 Java 及游戏资源。Windows 构建需要可用的 .NET Framework C# 编译器及 JDK，本批使用 JDK 25.0.2。网络下载使用官方和对应资源服务；接收者自行提供账号，不附带作者凭据。
 
-## Use
+## Setup
+
+源码解压后在项目根执行 npm ci、node scripts/build-bridge.cjs；交接包在 source 目录执行。成品直接运行，无需安装源码工具。
+
+## Use the deliverable
 
 直接运行 EXE，或解压紧凑 ZIP 后运行 KAMUCL-1.1.19.exe。展开 ZIP 运行 KAMUCL.exe。核对公开 SHA256SUMS.txt。成品不包含作者玩家账号、登录凭据、用户皮肤、存档或整合包；Windows 发行者签名尚未完成。
 
