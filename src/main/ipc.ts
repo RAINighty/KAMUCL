@@ -98,7 +98,7 @@ import * as appearance from './core/appearanceAssets'
 import { applyNativeAppearance } from './nativeAppearance'
 import { carouselImages, MAX_CAROUSEL_IMAGES } from '../shared/appearancePolicy'
 import { pathIdentity, registeredGameFolder } from './core/folderPaths'
-import { isPathContained, isSafeChildName, redactSensitiveText, resolveContainedPath, resolveSafeDirPath } from './core/security'
+import { isPathContained, isSafeChildName, resolveContainedPath, resolveSafeDirPath } from './core/security'
 import * as direct from './core/directConnect'
 import type { DirectHostRequest } from '../shared/directConnect'
 import { registerVoxlinkIpc } from './core/voxlink'
@@ -107,14 +107,6 @@ import { registerFrpIpc, installFrpEventBridge } from './core/frpIpc'
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
-}
-
-function redactErrorForLog(error: unknown): unknown {
-  if (!(error instanceof Error)) return redactSensitiveText(String(error))
-  const redacted = new Error(redactSensitiveText(error.message))
-  redacted.name = error.name
-  if (error.stack) redacted.stack = redactSensitiveText(error.stack)
-  return redacted
 }
 
 export function registerIpc(getWin: () => BrowserWindow | null): void {
@@ -146,11 +138,8 @@ export function registerIpc(getWin: () => BrowserWindow | null): void {
       try {
         return await listener(event, ...args)
       } catch (error) {
-        if (isCancelError(error)) {
-          launcherLogDebug('ipc', `通道 ${channel} 已取消：${redactSensitiveText(errText(error))}`)
-        } else {
-          launcherLogError('ipc', `IPC 通道 ${channel} 处理失败`, redactErrorForLog(error))
-        }
+        if (isCancelError(error)) launcherLogDebug('ipc', `通道 ${channel} 已取消：${errText(error)}`)
+        else launcherLogError('ipc', `IPC 通道 ${channel} 处理失败`, error)
         throw error
       }
     })

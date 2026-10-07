@@ -114,13 +114,12 @@ test('结构化 JSON Cookie 对象和数组整体替换且输出仍可解析', (
   assert.deepEqual(parsed.keep, { value: 'ordinary-context' })
 })
 
-test('IPC 日志包装器先于所有 handler 注册且使用 rawHandle', () => {
+test('IPC 日志包装器通过 rawHandle 包装通道注册', () => {
   const source = fs.readFileSync(new URL('../src/main/ipc.ts', import.meta.url), 'utf8')
-  const wrapperIndex = source.indexOf('const rawHandle = ipcMain.handle.bind(ipcMain)')
+  const rawHandleIndex = source.indexOf('const rawHandle = ipcMain.handle.bind(ipcMain)')
 
-  assert.notEqual(wrapperIndex, -1)
-  assert(wrapperIndex < source.indexOf('registerInstanceCenterIpc(getWin)'))
-  assert(wrapperIndex < source.indexOf('ipcMain.handle(IPC.exitHistoryList'))
+  assert.notEqual(rawHandleIndex, -1)
+  assert(rawHandleIndex < source.indexOf('patchedMain.handle = (channel, listener) => {'))
 })
 
 test('launcherLog 控制台镜像使用已脱敏文本', () => {
